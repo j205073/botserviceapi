@@ -1,2 +1,37 @@
-flask
-gunicorn
+# Bot Framework dependencies
+botbuilder-core==4.16.2
+botbuilder-schema==4.16.2
+botbuilder-integration-aiohttp==4.16.2
+aiohttp==3.10.5
+
+# Web framework
+flask==3.0.0
+
+# Azure OpenAI
+openai==0.28.1
+
+# HTTP handling
+requests==2.31.0
+urllib3==2.0.7
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Async support
+asyncio==3.4.3
+
+# Date and time handling
+pytz==2024.1
+
+# SSL support
+pyOpenSSL==24.0.0
+
+# Security
+cryptography==42.0.0
+
+# Azure specific
+msrest==0.7.1
+azure-core==1.29.5
+
+# Optional but recommended for production
+gunicorn==21.2.0
