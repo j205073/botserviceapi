@@ -36,4 +36,4 @@ azure-core==1.29.5
 # Optional but recommended for production
 # gunicorn==21.2.0
 gunicorn
-gevent>=22.10.2
+# gevent>=22.10.2

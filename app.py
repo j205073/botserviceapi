@@ -111,8 +111,4 @@ def messages():
 #     app.run(port=80)
 
 if __name__ == "__main__":
-    # 在開發環境使用 Flask 內建服務器
     app.run(host="0.0.0.0", port=8000)
-else:
-    # 在生產環境使用 gunicorn
-    application = app
