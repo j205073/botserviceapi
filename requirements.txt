@@ -2,7 +2,7 @@
 botbuilder-core==4.14.7
 botbuilder-schema==4.14.7
 botbuilder-integration-aiohttp==4.14.7
-aiohttp==3.8.5
+aiohttp==3.7.4
 
 # Web framework
 flask==2.3.3
