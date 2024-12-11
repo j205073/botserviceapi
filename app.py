@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from botbuilder.core import (
     BotFrameworkAdapter,
     BotFrameworkAdapterSettings,
@@ -36,7 +36,7 @@ openai.api_version = "2024-02-15-preview"
 
 @app.route("/ping", methods=["GET"])
 def ping():
-    return {"status": "ok", "message": "Bot is alive"}
+    return jsonify({"status": "ok", "message": "Bot is alive"})  # 使用 jsonify
 
 
 async def call_openai(prompt, conversation_id):
