@@ -111,4 +111,5 @@ def messages():
 #     app.run(port=3978)
 
 if __name__ == "__main__":
-    app.run()
+    port = os.getenv("PORT", "8000")
+    app.run(host="0.0.0.0", port=int(port))
