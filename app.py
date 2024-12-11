@@ -85,25 +85,24 @@ def messages():
     else:
         return {"status": 415}
 
-    print("Received activity")  # 日誌輸出，檢查是否進入這裡
+    print("Received activity")
 
     activity = Activity().deserialize(body)
-    auth_header = (
-        request.headers["Authorization"] if "Authorization" in request.headers else ""
-    )
+    auth_header = request.headers.get("Authorization", "")
 
     async def aux_func(turn_context):
         await message_handler(turn_context)
 
     task = adapter.process_activity(activity, auth_header, aux_func)
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     try:
-        asyncio.run(task)
-    except Exception as e:
-        print(f"Error in processing activity: {e}")
+        loop.run_until_complete(task)
+    finally:
+        loop.close()
 
-    print("Processed activity")  # 日誌輸出，檢查是否進入這裡
-
+    print("Processed activity")
     return {"status": 200}
 
 
