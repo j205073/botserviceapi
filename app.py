@@ -111,4 +111,8 @@ def messages():
 #     app.run(port=80)
 
 if __name__ == "__main__":
-    app.run()  # 移除 port=80，讓它可以使用環境變數中的端口
+    # 在開發環境使用 Flask 內建服務器
+    app.run(host="0.0.0.0", port=8000)
+else:
+    # 在生產環境使用 gunicorn
+    application = app
