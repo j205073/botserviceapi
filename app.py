@@ -107,5 +107,8 @@ def messages():
     return {"status": 200}
 
 
+# if __name__ == "__main__":
+#     app.run(port=80)
+
 if __name__ == "__main__":
-    app.run(port=80)
+    app.run()  # 移除 port=80，讓它可以使用環境變數中的端口
