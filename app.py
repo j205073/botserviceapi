@@ -36,7 +36,10 @@ openai.api_version = "2024-02-15-preview"
 
 @app.route("/ping", methods=["GET"])
 def ping():
-    return jsonify({"status": "ok", "message": "Bot is alive"})  # 使用 jsonify
+    debuggerTest = os.getenv("debugInfo")
+    return jsonify(
+        {"status": "ok", "message": "Bot is alive", "debuggerTest": debuggerTest}
+    )  # 使用 jsonify
 
 
 async def call_openai(prompt, conversation_id):
