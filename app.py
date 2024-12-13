@@ -54,7 +54,7 @@ async def call_openai(prompt, conversation_id):
             engine="gpt-4o-mini-deploy",
             messages=conversation_history[conversation_id],
             max_tokens=500,
-            timeout=15,  # 設置超時（秒）
+            timeout=15,  # 設置超時（秒） 123
         )
     except Exception as e:
         print(f"Error calling OpenAI: {e}")
