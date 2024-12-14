@@ -46,7 +46,13 @@ async def call_openai(prompt, conversation_id):
     global conversation_history
     if conversation_id not in conversation_history:
         conversation_history[conversation_id] = []
-
+        # 初始化對話時加入系統提示
+        conversation_history[conversation_id].append(
+            {
+                "role": "system",
+                "content": "你是一個智能助理。如果用戶使用中文提問，請用繁體中文回答。如果用戶使用其他語言提問，請使用相同的語言回答。",
+            }
+        )
     # conversation_history[conversation_id].append({"role": "user", "content": prompt})
     conversation_history[conversation_id].append(
         {"role": "user", "content": str(prompt)}
@@ -74,9 +80,8 @@ async def message_handler(turn_context: TurnContext):
     user_message = turn_context.activity.text
     print(f"Received message: {user_message}")  # 檢查訊息是否到達此處
     conversation_id = turn_context.activity.conversation.id
-    response_message = await call_openai(
-        user_message, conversation_id
-    )  # 這裡應該觸發 call_openai
+    response_message = await call_openai(user_message, conversation_id)
+
     print(f"Response from OpenAI: {response_message}")  # 檢查回應內容
     await turn_context.send_activity(Activity(type="message", text=response_message))
 
