@@ -41,7 +41,7 @@ openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT")
 openai.api_version = "2024-02-15-preview"
 
 
-async def download_attachment_and_write(attachment: Attachment) -> dict:
+async def download_attachment_and_write(attachment) -> dict:
     """下載並儲存附件"""
     try:
         response = urllib.request.urlopen(attachment.content.downloadUrl)
