@@ -59,9 +59,13 @@ def sanitize_url(url):
 async def download_attachment_and_write(attachment: Attachment) -> dict:
     """下載並儲存附件"""
     try:
-        safeUrl = sanitize_url(attachment.content_url)
-        print(f"attachment.content_url: {safeUrl}")
-        response = urllib.request.urlopen(safeUrl)
+        url = ""
+        if isinstance(attachment.content, dict) and "downloadUrl" in attachment.content:
+            url = attachment.content["downloadUrl"]
+
+        # safeUrl = sanitize_url(attachment.content_url)
+        print(f"attachment.downloadUrl: {url}")
+        response = urllib.request.urlopen(url)
         headers = response.info()
 
         if headers["content-type"] == "application/json":
