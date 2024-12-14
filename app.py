@@ -151,7 +151,7 @@ async def message_handler(turn_context: TurnContext):
         attachments = turn_context.activity.attachments
 
         if attachments and len(attachments) > 0:
-            print("處理檔案附件")
+            print("Current Request Is An File")
             for attachment in turn_context.activity.attachments:
                 # 確認附件是檔案下載資訊
                 if (
@@ -164,13 +164,13 @@ async def message_handler(turn_context: TurnContext):
                     file_type = file_info.get("type")
 
                 print(f"file_name: {file_name}\n")
-                print(f"file_name: {download_url}\n")
-                print(f"file_name: {file_type}\n")
+                print(f"download_url: {download_url}\n")
+                print(f"file_type: {file_type}\n")
 
                 # file_info = await download_attachment_and_write(attachment)
         elif turn_context.activity.text:
             user_message = turn_context.activity.text
-            print(f"處理文字訊息: {user_message}")
+            print(f"Current Request Is An Txt Messages: {user_message}")
 
             response_message = await call_openai(
                 user_message, turn_context.activity.conversation.id
