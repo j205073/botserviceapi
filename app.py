@@ -4,7 +4,14 @@ from botbuilder.core import (
     BotFrameworkAdapterSettings,
     TurnContext,
 )
-from botbuilder.schema import Activity, Attachment, AttachmentData
+from botbuilder.schema import (
+    Activity,
+    Attachment,
+    HeroCard,
+    CardAction,
+    ActionTypes,
+    SuggestedActions,
+)
 import os
 import openai
 import asyncio
@@ -128,6 +135,26 @@ async def process_file(file_info: dict) -> str:
         return f"處理檔案時發生錯誤：{str(e)}"
 
 
+async def show_help_options(turn_context: TurnContext):
+    # 創建建議動作
+    suggested_actions = SuggestedActions(
+        actions=[
+            CardAction(title="今天菜單", type=ActionTypes.im_back, value="今天菜單"),
+            CardAction(title="分機查詢", type=ActionTypes.im_back, value="分機查詢"),
+            # 可以繼續添加更多選項
+        ]
+    )
+
+    # 創建回覆訊息
+    reply = Activity(
+        type=ActivityTypes.message,
+        text="請選擇以下選項:",
+        suggested_actions=suggested_actions,
+    )
+
+    await turn_context.send_activity(reply)
+
+
 async def call_openai(prompt, conversation_id):
     global conversation_history
     if conversation_id not in conversation_history:
@@ -211,6 +238,11 @@ async def message_handler(turn_context: TurnContext):
 
         if turn_context.activity.text:
             user_message = turn_context.activity.text
+            # 檢查是否為 /help 命令
+            if user_message.lower() == "/help":
+                await show_help_options(turn_context)
+                return
+
             print(f"Current Request Is An Txt Messages: {user_message}")
 
             response_message = await call_openai(
