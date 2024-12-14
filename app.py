@@ -126,56 +126,77 @@ async def process_file(file_content, file_type):
         return f"處理檔案時發生錯誤：{str(e)}"
 
 
+# 添加歡迎訊息處理
+async def welcome_user(turn_context: TurnContext):
+    welcome_text = "歡迎使用 TR GPT 助理！\n我可以幫您：\n1. 回答問題\n2. 分析文件\n3. 提供建議\n\n請問有什麼我可以協助您的嗎？"
+    await turn_context.send_activity(Activity(type="message", text=welcome_text))
+
+
 # 修改 message_handler
 async def message_handler(turn_context: TurnContext):
-    if turn_context.activity.attachments:
-        for attachment in turn_context.activity.attachments:
-            if attachment.content_type.startswith("file"):
-                # 取得檔案資訊
-                file_info = attachment.content
-                download_url = file_info.get("downloadUrl", "")
-                file_type = attachment.content_type
+    try:
+        if turn_context.activity.attachments:
+            print("Received attachment")  # 增加日誌
+            for attachment in turn_context.activity.attachments:
+                print(f"Attachment type: {attachment.content_type}")  # 增加日誌
+                if attachment.content_type.startswith("file"):
+                    file_info = attachment.content
+                    download_url = file_info.get("downloadUrl", "")
+                    file_type = attachment.content_type
 
-                try:
-                    # 下載檔案
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(download_url) as response:
-                            file_content = await response.read()
+                    print(f"Processing file: {file_type}")  # 增加日誌
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(download_url) as response:
+                                if response.status == 200:
+                                    file_content = await response.read()
+                                else:
+                                    print(
+                                        f"Failed to download file: {response.status}"
+                                    )  # 增加日誌
+                                    await turn_context.send_activity(
+                                        Activity(
+                                            type="message",
+                                            text="無法下載檔案，請稍後再試。",
+                                        )
+                                    )
+                                    return
 
-                    # 處理檔案
-                    analyzed_content = await process_file(file_content, file_type)
+                        analyzed_content = await process_file(file_content, file_type)
+                        prompt = f"分析以下內容：\n{analyzed_content[:4000]}"
+                        response = await call_openai(
+                            prompt, turn_context.activity.conversation.id
+                        )
 
-                    # 使用 OpenAI 分析內容
-                    prompt = f"""請幫我分析這份檔案的內容：
+                        await turn_context.send_activity(
+                            Activity(
+                                type="message", text=f"檔案分析結果：\n\n{response}"
+                            )
+                        )
 
-{analyzed_content[:4000]}
+                    except Exception as e:
+                        print(f"Error processing file: {str(e)}")  # 增加日誌
+                        await turn_context.send_activity(
+                            Activity(
+                                type="message", text=f"處理檔案時發生錯誤：{str(e)}"
+                            )
+                        )
+        else:
+            user_message = turn_context.activity.text
+            print(f"Received text message: {user_message}")  # 修改日誌
+            if user_message:  # 確保消息不是 None
+                response_message = await call_openai(
+                    user_message, turn_context.activity.conversation.id
+                )
+                print(f"OpenAI response: {response_message}")  # 修改日誌
+                await turn_context.send_activity(
+                    Activity(type="message", text=response_message)
+                )
 
-請提供：
-1. 文件主要內容摘要
-2. 關鍵重點
-3. 相關建議（如果適用）"""
-
-                    response = await call_openai(
-                        prompt, turn_context.activity.conversation.id
-                    )
-                    await turn_context.send_activity(
-                        Activity(type="message", text=f"檔案分析結果：\n\n{response}")
-                    )
-
-                except Exception as e:
-                    await turn_context.send_activity(
-                        Activity(type="message", text=f"處理檔案時發生錯誤：{str(e)}")
-                    )
-    else:
-        # 原有的文字處理邏輯
-        user_message = turn_context.activity.text
-        print(f"Received message: {user_message}")
-        response_message = await call_openai(
-            user_message, turn_context.activity.conversation.id
-        )
-        print(f"Response from OpenAI: {response_message}")
+    except Exception as e:
+        print(f"Error in message_handler: {str(e)}")  # 增加日誌
         await turn_context.send_activity(
-            Activity(type="message", text=response_message)
+            Activity(type="message", text="處理訊息時發生錯誤，請稍後再試。")
         )
 
 
@@ -201,8 +222,15 @@ def messages():
     activity = Activity().deserialize(body)
     auth_header = request.headers.get("Authorization", "")
 
+    # async def aux_func(turn_context):
+    #     await message_handler(turn_context)
     async def aux_func(turn_context):
-        await message_handler(turn_context)
+        if activity.type == "conversationUpdate" and activity.members_added:
+            for member in activity.members_added:
+                if member.id != activity.recipient.id:
+                    await welcome_user(turn_context)
+        elif activity.type == "message":
+            await message_handler(turn_context)
 
     task = adapter.process_activity(activity, auth_header, aux_func)
 
