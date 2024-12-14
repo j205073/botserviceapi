@@ -212,56 +212,37 @@ async def message_handler(turn_context: TurnContext):
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
-    print("=== Starting message processing ===")  # 新增
+    print("=== Starting message processing ===")
     if "application/json" in request.headers["Content-Type"]:
         body = request.json
-        print(f"Request body type: {type(body)}")  # 新增
-        print(f"Request content: {body}")  # 新增
     else:
-        print("Invalid content type")  # 新增
         return {"status": 415}
 
-    print("Deserializing activity")  # 新增
     activity = Activity().deserialize(body)
-    print(f"Activity type: {activity.type}")  # 新增
-
-    if hasattr(activity, "attachments"):
-        print(f"Attachments found: {len(activity.attachments)}")  # 新增
-        if activity.attachments:
-            for att in activity.attachments:
-                print(f"Attachment type: {att.content_type}")  # 新增
-
     auth_header = request.headers.get("Authorization", "")
 
+    # 添加認證例外處理
     async def aux_func(turn_context):
-        print(f"Processing activity of type: {turn_context.activity.type}")  # 新增
-        if turn_context.activity.attachments:
-            print("Processing attachment in aux_func")  # 新增
-            for attachment in turn_context.activity.attachments:
-                try:
-                    print(
-                        f"Processing attachment of type: {attachment.content_type}"
-                    )  # 新增
-                    # ... 其餘的附件處理代碼 ...
-                except Exception as e:
-                    print(f"Error processing attachment: {str(e)}")  # 新增
-                    raise
-        else:
-            await message_handler(turn_context)
+        try:
+            if turn_context.activity.attachments:
+                print("檔案進來了")
+            else:
+                print("訊息進來了")
+                await message_handler(turn_context)
+        except PermissionError as e:
+            print(f"Authentication error: {str(e)}")
+            return
 
-    task = adapter.process_activity(activity, auth_header, aux_func)
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     try:
+        task = adapter.process_activity(activity, auth_header, aux_func)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         loop.run_until_complete(task)
-    except Exception as e:
-        print(f"Error in message processing: {str(e)}")  # 新增
-        raise
-    finally:
         loop.close()
+    except Exception as e:
+        print(f"Error processing message: {str(e)}")
+        return {"status": 401}
 
-    print("=== Message processing completed ===")  # 新增
     return {"status": 200}
 
 
