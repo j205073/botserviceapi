@@ -24,6 +24,7 @@ load_dotenv()
 
 # Flask 應用設定
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 限制最大 16MB
 
 appId = os.getenv("BOT_APP_ID")
 appPwd = os.getenv("BOT_APP_PASSWORD")
@@ -184,6 +185,14 @@ async def message_handler(turn_context: TurnContext):
         await turn_context.send_activity(
             Activity(type="message", text="處理訊息時發生錯誤，請稍後再試。")
         )
+
+
+@app.route("/ping", methods=["GET"])
+def ping():
+    debuggerTest = os.getenv("debugInfo")
+    return jsonify(
+        {"status": "ok", "message": "Bot is alive", "debuggerTest": debuggerTest}
+    )  # 使用 jsonify
 
 
 @app.route("/api/messages", methods=["POST"])
