@@ -147,35 +147,27 @@ async def message_handler(turn_context: TurnContext):
         user_name = turn_context.activity.from_property.name
         print(f"收到來自用戶的訊息: {user_name} (ID: {user_id})")
 
-        if turn_context.activity.attachments:
+        # 獲取附件
+        attachments = turn_context.activity.attachments
+
+        if attachments and len(attachments) > 0:
             print("處理檔案附件")
             for attachment in turn_context.activity.attachments:
-                if attachment.content_type == "text/html":
-                    continue
+                # 確認附件是檔案下載資訊
+                if (
+                    attachment.content_type
+                    == "application/vnd.microsoft.teams.file.download.info"
+                ):
+                    file_info = attachment.content
+                    file_name = file_info.get("name")
+                    download_url = file_info.get("downloadUrl")
+                    file_type = file_info.get("type")
 
-                print(f"處理檔案類型: {attachment.content_type}")
-                file_info = await download_attachment_and_write(attachment)
+                print(f"file_name: {file_name}\n")
+                print(f"file_name: {download_url}\n")
+                print(f"file_name: {file_type}\n")
 
-                if file_info:
-                    analyzed_content = await process_file(file_info)
-                    response = await call_openai(
-                        f"分析以下內容：\n{analyzed_content[:4000]}",
-                        turn_context.activity.conversation.id,
-                    )
-                    await turn_context.send_activity(
-                        Activity(type="message", text=f"檔案分析結果：\n\n{response}")
-                    )
-
-                    # 清理臨時檔案
-                    if "local_path" in file_info and os.path.exists(
-                        file_info["local_path"]
-                    ):
-                        os.remove(file_info["local_path"])
-                else:
-                    await turn_context.send_activity(
-                        Activity(type="message", text="無法處理該檔案，請稍後再試。")
-                    )
-
+                # file_info = await download_attachment_and_write(attachment)
         elif turn_context.activity.text:
             user_message = turn_context.activity.text
             print(f"處理文字訊息: {user_message}")
