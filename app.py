@@ -160,11 +160,11 @@ async def message_handler(turn_context: TurnContext):
                     == "application/vnd.microsoft.teams.file.download.info"
                 ):
                     file_info = attachment.content
-                    file_name = file_info.get("name")
+                    # file_name = file_info.get("name")
                     download_url = file_info.get("downloadUrl")
                     file_type = file_info.get("type")
 
-                print(f"file_name: {file_name}\n")
+                # print(f"file_name: {file_name}\n")
                 print(f"download_url: {download_url}\n")
                 print(f"file_type: {file_type}\n")
 
