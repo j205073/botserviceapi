@@ -18,6 +18,7 @@ from PIL import Image
 import base64
 import urllib.request
 import json
+from urllib.parse import quote, urljoin
 
 # 載入環境變數
 load_dotenv()
@@ -41,11 +42,26 @@ openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT")
 openai.api_version = "2024-02-15-preview"
 
 
+def sanitize_url(url):
+    # 分解URL為基礎部分和路徑部分
+    base = "https://rinnaitw-my.sharepoint.com"
+    path = url.replace(base, "")
+
+    # 對路徑部分進行編碼,但保留斜線
+    encoded_path = "/".join(quote(segment) for segment in path.split("/"))
+
+    # 重新組合URL
+    sanitized_url = urljoin(base, encoded_path)
+
+    return sanitized_url
+
+
 async def download_attachment_and_write(attachment: Attachment) -> dict:
     """下載並儲存附件"""
     try:
-        print(f"attachment.content_url: {attachment.content_url}")
-        response = urllib.request.urlopen(attachment.content_url)
+        safeUrl = sanitize_url(attachment.content_url)
+        print(f"attachment.content_url: {safeUrl}")
+        response = urllib.request.urlopen(safeUrl)
         headers = response.info()
 
         if headers["content-type"] == "application/json":
