@@ -135,7 +135,7 @@ async def call_openai(prompt, conversation_id):
         conversation_history[conversation_id].append(
             {
                 "role": "system",
-                "content": "你是一個智能助理。如果用戶使用中文提問，請用繁體中文回答。如果用戶使用其他語言提問，請使用相同的語言回答。",
+                "content": "你是一個智能助理。如果用戶使用中文提問，請用繁體中文回答。如果用戶使用其他語言提問，請使用跟用戶相同的語言回答。",
             }
         )
 
