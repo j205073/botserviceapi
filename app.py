@@ -169,26 +169,7 @@ async def message_handler(turn_context: TurnContext):
         # 獲取附件
         attachments = turn_context.activity.attachments
 
-        if attachments and len(attachments) > 0:
-            print("Current Request Is An File")
-            for attachment in turn_context.activity.attachments:
-                # 確認附件是檔案下載資訊
-                if (
-                    attachment.content_type
-                    == "application/vnd.microsoft.teams.file.download.info"
-                ):
-                    print(f"file is comming!!!!!")
-                    # file_info = attachment.content
-                    # # file_name = file_info.get("name")
-                    # download_url = file_info.get("downloadUrl")
-                    # file_type = file_info.get("type")
-
-                # print(f"file_name: {file_name}\n")
-                # print(f"download_url: {download_url}\n")
-                # print(f"file_type: {file_type}\n")
-
-                # file_info = await download_attachment_and_write(attachment)
-        elif turn_context.activity.text:
+        if turn_context.activity.text:
             user_message = turn_context.activity.text
             print(f"Current Request Is An Txt Messages: {user_message}")
 
@@ -198,12 +179,39 @@ async def message_handler(turn_context: TurnContext):
             await turn_context.send_activity(
                 Activity(type="message", text=response_message)
             )
+        elif attachments and len(attachments) > 0:
+            print("Current Request Is An File")
+            for attachment in turn_context.activity.attachments:
+                file_info = await download_attachment_and_write(attachment)
+                if file_info:
+                    file_text = await process_file(file_info)
+                    summarized_text = await summarize_text(file_text)  # 文本摘要
+                    await turn_context.send_activity(
+                        Activity(type="message", text=summarized_text)
+                    )
 
     except Exception as e:
         print(f"處理訊息時發生錯誤: {str(e)}")
         await turn_context.send_activity(
             Activity(type="message", text="處理訊息時發生錯誤，請稍後再試。")
         )
+
+
+async def summarize_text(text: str) -> str:
+    """利用 OpenAI 進行文本摘要"""
+    try:
+        response = openai.ChatCompletion.create(
+            engine="gpt-4o-mini-deploy",
+            messages=[
+                {"role": "system", "content": "你是一個智能助理，負責摘要文本內容。"},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=150,  # 限制摘要長度
+        )
+        summary = response["choices"][0]["message"]["content"]
+        return summary
+    except Exception as e:
+        return f"摘要處理時發生錯誤：{str(e)}"
 
 
 @app.route("/ping", methods=["GET"])
