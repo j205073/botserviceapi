@@ -44,7 +44,7 @@ openai.api_version = "2024-02-15-preview"
 async def download_attachment_and_write(attachment: Attachment) -> dict:
     """下載並儲存附件"""
     try:
-        response = urllib.request.urlopen(attachment.content_url)
+        response = urllib.request.urlopen(attachment.content.downloadUrl)
         headers = response.info()
 
         if headers["content-type"] == "application/json":
