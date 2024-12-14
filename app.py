@@ -4,11 +4,8 @@ from botbuilder.core import (
     BotFrameworkAdapterSettings,
     TurnContext,
 )
-from botbuilder.schema import Activity
-
-import sys
+from botbuilder.schema import Activity, Attachment, AttachmentData
 import os
-
 import openai
 import asyncio
 import aiohttp
@@ -18,10 +15,9 @@ import pandas as pd
 from docx import Document
 from PyPDF2 import PdfReader
 from PIL import Image
-from openpyxl import load_workbook
-
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-
+import base64
+import urllib.request
+import json
 
 # 載入環境變數
 load_dotenv()
@@ -44,46 +40,66 @@ openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT")
 openai.api_version = "2024-02-15-preview"
 
 
-@app.route("/ping", methods=["GET"])
-def ping():
-    return jsonify({"status": "ok", "message": "Bot is alive"})
-
-
-async def process_file(file_content, file_type):
-    """處理不同類型的檔案"""
-    content = io.BytesIO(file_content)
+async def download_attachment_and_write(attachment: Attachment) -> dict:
+    """下載並儲存附件"""
     try:
-        if file_type == "application/pdf":
+        response = urllib.request.urlopen(attachment.content_url)
+        headers = response.info()
+
+        if headers["content-type"] == "application/json":
+            data = bytes(json.load(response)["data"])
+        else:
+            data = response.read()
+
+        # 將檔案保存在臨時目錄
+        local_filename = os.path.join(os.getcwd(), "temp", attachment.name)
+        os.makedirs(os.path.dirname(local_filename), exist_ok=True)
+
+        with open(local_filename, "wb") as out_file:
+            out_file.write(data)
+
+        return {
+            "filename": attachment.name,
+            "local_path": local_filename,
+            "content_type": headers["content-type"],
+            "data": data,
+        }
+    except Exception as e:
+        print(f"下載附件時發生錯誤: {str(e)}")
+        return {}
+
+
+async def process_file(file_info: dict) -> str:
+    """處理不同類型的檔案"""
+    try:
+        content = io.BytesIO(file_info["data"])
+        content_type = file_info["content_type"]
+
+        if "pdf" in content_type.lower():
             reader = PdfReader(content)
             text = ""
             for page in reader.pages:
                 text += page.extract_text() + "\n"
             return f"PDF 內容：\n{text}"
 
-        elif (
-            file_type
-            == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ):
+        elif "spreadsheet" in content_type.lower() or "excel" in content_type.lower():
             df = pd.read_excel(content)
             return f"Excel 內容：\n{df.to_string()}"
 
-        elif (
-            file_type
-            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ):
+        elif "word" in content_type.lower() or "document" in content_type.lower():
             doc = Document(content)
             text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
             return f"Word 內容：\n{text}"
 
-        elif file_type == "text/plain":
+        elif "text" in content_type.lower():
             return f"文字檔內容：\n{content.read().decode('utf-8')}"
 
-        elif file_type.startswith("image/"):
+        elif "image" in content_type.lower():
             image = Image.open(content)
-            return f"收到圖片：{image.format} 格式，大小 {image.size}"
+            return f"圖片資訊：{image.format} 格式，大小 {image.size}"
 
         else:
-            return f"收到不支援的檔案類型：{file_type}"
+            return f"不支援的檔案類型：{content_type}"
 
     except Exception as e:
         return f"處理檔案時發生錯誤：{str(e)}"
@@ -115,7 +131,7 @@ async def call_openai(prompt, conversation_id):
         conversation_history[conversation_id].append(message)
         return message["content"]
     except Exception as e:
-        print(f"Error calling OpenAI: {e}")
+        print(f"OpenAI API 錯誤: {str(e)}")
         return "抱歉，目前無法處理您的請求。"
 
 
@@ -129,50 +145,40 @@ async def message_handler(turn_context: TurnContext):
     try:
         user_id = turn_context.activity.from_property.id
         user_name = turn_context.activity.from_property.name
-        print(f"Received message from user: {user_name} (ID: {user_id})")
+        print(f"收到來自用戶的訊息: {user_name} (ID: {user_id})")
 
-        # 處理檔案附件
         if turn_context.activity.attachments:
-            print("Processing attachments")
+            print("處理檔案附件")
             for attachment in turn_context.activity.attachments:
-                # 跳過 Teams 自動添加的 HTML 內容
                 if attachment.content_type == "text/html":
                     continue
 
-                if attachment.content_type.startswith("file"):
-                    print(f"Processing file of type: {attachment.content_type}")
-                    file_info = attachment.content
-                    download_url = file_info.get("downloadUrl", "")
+                print(f"處理檔案類型: {attachment.content_type}")
+                file_info = await download_attachment_and_write(attachment)
 
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(download_url) as response:
-                            if response.status == 200:
-                                file_content = await response.read()
-                                analyzed_content = await process_file(
-                                    file_content, attachment.content_type
-                                )
-                                response = await call_openai(
-                                    f"分析以下內容：\n{analyzed_content[:4000]}",
-                                    turn_context.activity.conversation.id,
-                                )
-                                await turn_context.send_activity(
-                                    Activity(
-                                        type="message",
-                                        text=f"檔案分析結果：\n\n{response}",
-                                    )
-                                )
-                            else:
-                                await turn_context.send_activity(
-                                    Activity(
-                                        type="message",
-                                        text="無法下載檔案，請稍後再試。",
-                                    )
-                                )
+                if file_info:
+                    analyzed_content = await process_file(file_info)
+                    response = await call_openai(
+                        f"分析以下內容：\n{analyzed_content[:4000]}",
+                        turn_context.activity.conversation.id,
+                    )
+                    await turn_context.send_activity(
+                        Activity(type="message", text=f"檔案分析結果：\n\n{response}")
+                    )
 
-        # 處理文字訊息
+                    # 清理臨時檔案
+                    if "local_path" in file_info and os.path.exists(
+                        file_info["local_path"]
+                    ):
+                        os.remove(file_info["local_path"])
+                else:
+                    await turn_context.send_activity(
+                        Activity(type="message", text="無法處理該檔案，請稍後再試。")
+                    )
+
         elif turn_context.activity.text:
             user_message = turn_context.activity.text
-            print(f"Processing text message: {user_message}")
+            print(f"處理文字訊息: {user_message}")
 
             response_message = await call_openai(
                 user_message, turn_context.activity.conversation.id
@@ -182,7 +188,7 @@ async def message_handler(turn_context: TurnContext):
             )
 
     except Exception as e:
-        print(f"Error in message_handler: {str(e)}")
+        print(f"處理訊息時發生錯誤: {str(e)}")
         await turn_context.send_activity(
             Activity(type="message", text="處理訊息時發生錯誤，請稍後再試。")
         )
@@ -190,10 +196,10 @@ async def message_handler(turn_context: TurnContext):
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
-    print("=== Starting message processing ===")
+    print("=== 開始處理訊息 ===")
     if "application/json" in request.headers["Content-Type"]:
         body = request.json
-        print(f"Request body: {body}")
+        print(f"請求內容: {json.dumps(body, ensure_ascii=False, indent=2)}")
     else:
         return {"status": 415}
 
@@ -222,7 +228,7 @@ def messages():
         print(f"Error processing message: {str(e)}")
         return {"status": 401}
 
-    print("=== Message processing completed ===")
+    print("=== 訊息處理完成 ===")
     return {"status": 200}
 
 
