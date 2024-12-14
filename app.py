@@ -5,7 +5,10 @@ from botbuilder.core import (
     TurnContext,
 )
 from botbuilder.schema import Activity
+
+import sys
 import os
+
 import openai
 import asyncio
 import aiohttp
@@ -16,6 +19,9 @@ from docx import Document
 from PyPDF2 import PdfReader
 from PIL import Image
 from openpyxl import load_workbook
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
 
 # 載入環境變數
 load_dotenv()
