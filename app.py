@@ -11,6 +11,7 @@ from botbuilder.schema import (
     CardAction,
     ActionTypes,
     SuggestedActions,
+    ActivityTypes,
 )
 import os
 import openai
