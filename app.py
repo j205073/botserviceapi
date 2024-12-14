@@ -188,23 +188,23 @@ async def message_handler(turn_context: TurnContext):
         user_name = turn_context.activity.from_property.name
         print(f"收到來自用戶的訊息: {user_name} (ID: {user_id})")
 
-        # 確保保存 JSON 的目錄存在
-        log_dir = "./json_logs"
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+        # # 確保保存 JSON 的目錄存在
+        # log_dir = "./json_logs"
+        # if not os.path.exists(log_dir):
+        #     os.makedirs(log_dir)
 
-        # 轉換 turn_context 為字典
-        context_dict = {
-            "activity": turn_context.activity.as_dict(),
-            "user_id": user_id,
-            "user_name": user_name,
-        }
+        # # 轉換 turn_context 為字典
+        # context_dict = {
+        #     "activity": turn_context.activity.as_dict(),
+        #     "user_id": user_id,
+        #     "user_name": user_name,
+        # }
 
-        # 保存到 json_log.json
-        log_file_path = os.path.join(log_dir, "json_log.json")
-        with open(log_file_path, "a") as f:
-            json.dump(context_dict, f, ensure_ascii=False, indent=4)
-            f.write("\n")  # 每次寫入一條日志後換行
+        # # 保存到 json_log.json
+        # log_file_path = os.path.join(log_dir, "json_log.json")
+        # with open(log_file_path, "a") as f:
+        #     json.dump(context_dict, f, ensure_ascii=False, indent=4)
+        #     f.write("\n")  # 每次寫入一條日志後換行
 
         # 獲取附件
         attachments = turn_context.activity.attachments
