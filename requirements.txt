@@ -1,4 +1,4 @@
-# Bot Framework dependencies
+﻿# Bot Framework dependencies
 botbuilder-core==4.16.2
 botbuilder-schema==4.16.2
 botbuilder-integration-aiohttp==4.16.2
@@ -35,3 +35,10 @@ azure-core==1.29.5
 
 # Optional but recommended for production
 gunicorn==21.2.0
+
+# 瑼??賊???憟辣
+python-docx==1.1.0
+openpyxl==3.1.2
+PyPDF2==3.0.1
+Pillow==10.1.0
+pandas==2.1.4

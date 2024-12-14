@@ -10,6 +10,13 @@ import openai
 import asyncio
 from dotenv import load_dotenv
 
+import io
+import pandas as pd
+from docx import Document
+from PyPDF2 import PdfReader
+from PIL import Image
+from openpyxl import load_workbook
+
 # 載入環境變數
 load_dotenv()
 
@@ -76,14 +83,110 @@ async def call_openai(prompt, conversation_id):
 
 
 # Bot 處理消息的邏輯
-async def message_handler(turn_context: TurnContext):
-    user_message = turn_context.activity.text
-    print(f"Received message: {user_message}")  # 檢查訊息是否到達此處
-    conversation_id = turn_context.activity.conversation.id
-    response_message = await call_openai(user_message, conversation_id)
 
-    print(f"Response from OpenAI: {response_message}")  # 檢查回應內容
-    await turn_context.send_activity(Activity(type="message", text=response_message))
+
+async def process_file(file_content, file_type):
+    """處理不同類型的檔案"""
+    content = io.BytesIO(file_content)
+
+    try:
+        if file_type == "application/pdf":
+            reader = PdfReader(content)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            return f"PDF 內容：\n{text}"
+
+        elif (
+            file_type
+            == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ):
+            df = pd.read_excel(content)
+            return f"Excel 內容：\n{df.to_string()}"
+
+        elif (
+            file_type
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ):
+            doc = Document(content)
+            text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+            return f"Word 內容：\n{text}"
+
+        elif file_type == "text/plain":
+            return f"文字檔內容：\n{content.read().decode('utf-8')}"
+
+        elif file_type.startswith("image/"):
+            image = Image.open(content)
+            return f"收到圖片：{image.format} 格式，大小 {image.size}"
+
+        else:
+            return f"收到不支援的檔案類型：{file_type}"
+
+    except Exception as e:
+        return f"處理檔案時發生錯誤：{str(e)}"
+
+
+# 修改 message_handler
+async def message_handler(turn_context: TurnContext):
+    if turn_context.activity.attachments:
+        for attachment in turn_context.activity.attachments:
+            if attachment.content_type.startswith("file"):
+                # 取得檔案資訊
+                file_info = attachment.content
+                download_url = file_info.get("downloadUrl", "")
+                file_type = attachment.content_type
+
+                try:
+                    # 下載檔案
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(download_url) as response:
+                            file_content = await response.read()
+
+                    # 處理檔案
+                    analyzed_content = await process_file(file_content, file_type)
+
+                    # 使用 OpenAI 分析內容
+                    prompt = f"""請幫我分析這份檔案的內容：
+
+{analyzed_content[:4000]}
+
+請提供：
+1. 文件主要內容摘要
+2. 關鍵重點
+3. 相關建議（如果適用）"""
+
+                    response = await call_openai(
+                        prompt, turn_context.activity.conversation.id
+                    )
+                    await turn_context.send_activity(
+                        Activity(type="message", text=f"檔案分析結果：\n\n{response}")
+                    )
+
+                except Exception as e:
+                    await turn_context.send_activity(
+                        Activity(type="message", text=f"處理檔案時發生錯誤：{str(e)}")
+                    )
+    else:
+        # 原有的文字處理邏輯
+        user_message = turn_context.activity.text
+        print(f"Received message: {user_message}")
+        response_message = await call_openai(
+            user_message, turn_context.activity.conversation.id
+        )
+        print(f"Response from OpenAI: {response_message}")
+        await turn_context.send_activity(
+            Activity(type="message", text=response_message)
+        )
+
+
+# async def message_handler(turn_context: TurnContext):
+#     user_message = turn_context.activity.text
+#     print(f"Received message: {user_message}")  # 檢查訊息是否到達此處
+#     conversation_id = turn_context.activity.conversation.id
+#     response_message = await call_openai(user_message, conversation_id)
+
+#     print(f"Response from OpenAI: {response_message}")  # 檢查回應內容
+#     await turn_context.send_activity(Activity(type="message", text=response_message))
 
 
 @app.route("/api/messages", methods=["POST"])
