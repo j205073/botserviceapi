@@ -136,6 +136,24 @@ async def call_openai(prompt, conversation_id):
         return "抱歉，目前無法處理您的請求。"
 
 
+async def summarize_text(text, conversation_id) -> str:
+    """利用 OpenAI 進行文本摘要"""
+    try:
+        response = openai.ChatCompletion.create(
+            engine="gpt-4o-mini-deploy",
+            messages=[
+                {"role": "system", "content": "你是一個智能助理，負責摘要文本內容。"},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=500,
+        )
+        message = response["choices"][0]["message"]
+        conversation_history[conversation_id].append(message)
+        return message["content"]
+    except Exception as e:
+        return f"摘要處理時發生錯誤：{str(e)}"
+
+
 async def welcome_user(turn_context: TurnContext):
     user_name = turn_context.activity.from_property.name
     welcome_text = f"歡迎 {user_name} 使用 TR GPT 助理！\n我可以幫您：\n1. 回答問題\n2. 分析文件\n3. 提供建議\n\n請問有什麼我可以協助您的嗎？"
@@ -185,7 +203,9 @@ async def message_handler(turn_context: TurnContext):
                 file_info = await download_attachment_and_write(attachment)
                 if file_info:
                     file_text = await process_file(file_info)
-                    summarized_text = await summarize_text(file_text)  # 文本摘要
+                    summarized_text = await summarize_text(
+                        file_text, turn_context.activity.conversation.id
+                    )  # 文本摘要
                     await turn_context.send_activity(
                         Activity(type="message", text=summarized_text)
                     )
@@ -195,23 +215,6 @@ async def message_handler(turn_context: TurnContext):
         await turn_context.send_activity(
             Activity(type="message", text="處理訊息時發生錯誤，請稍後再試。")
         )
-
-
-async def summarize_text(text: str) -> str:
-    """利用 OpenAI 進行文本摘要"""
-    try:
-        response = openai.ChatCompletion.create(
-            engine="gpt-4o-mini-deploy",
-            messages=[
-                {"role": "system", "content": "你是一個智能助理，負責摘要文本內容。"},
-                {"role": "user", "content": text},
-            ],
-            max_tokens=150,  # 限制摘要長度
-        )
-        summary = response["choices"][0]["message"]["content"]
-        return summary
-    except Exception as e:
-        return f"摘要處理時發生錯誤：{str(e)}"
 
 
 @app.route("/ping", methods=["GET"])
