@@ -41,10 +41,11 @@ openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT")
 openai.api_version = "2024-02-15-preview"
 
 
-async def download_attachment_and_write(attachment) -> dict:
+async def download_attachment_and_write(attachment: Attachment) -> dict:
     """下載並儲存附件"""
     try:
-        response = urllib.request.urlopen(attachment.content.downloadUrl)
+        print(f"attachment.content_url: {attachment.content_url}")
+        response = urllib.request.urlopen(attachment.content_url)
         headers = response.info()
 
         if headers["content-type"] == "application/json":
@@ -66,7 +67,8 @@ async def download_attachment_and_write(attachment) -> dict:
             "data": data,
         }
     except Exception as e:
-        print(f"下載附件時發生錯誤: {str(e)}")
+        # print(f"下載附件時發生錯誤: {str(e)}")
+        print(f"Downloading File Has Some Error: {str(e)}")
         return {}
 
 
