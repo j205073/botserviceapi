@@ -13,6 +13,7 @@ from botbuilder.schema import (
     SuggestedActions,
     ActivityTypes,
 )
+from typing import Dict, Any
 import os
 import openai
 import asyncio
@@ -27,6 +28,16 @@ import base64
 import urllib.request
 import json
 from urllib.parse import quote, urljoin
+from graph_api import GraphAPI  # 假設你已經有這個模組
+from token_manager import TokenManager  # 假設你已經有這個模組
+
+# 初始化 Token 管理器和 Graph API
+token_manager = TokenManager(
+    tenant_id=os.getenv("TENANT_ID"),
+    client_id=os.getenv("CLIENT_ID"),
+    client_secret=os.getenv("CLIENT_SECRET"),
+)
+graph_api = GraphAPI(token_manager)
 
 # 載入環境變數
 load_dotenv()
@@ -136,24 +147,299 @@ async def process_file(file_info: dict) -> str:
         return f"處理檔案時發生錯誤：{str(e)}"
 
 
-async def show_help_options(turn_context: TurnContext):
+async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
     # 創建建議動作
     suggested_actions = SuggestedActions(
         actions=[
-            CardAction(title="今天菜單", type=ActionTypes.im_back, value="今天菜單"),
-            CardAction(title="分機查詢", type=ActionTypes.im_back, value="分機查詢"),
-            # 可以繼續添加更多選項
+            CardAction(title="今天菜單", type=ActionTypes.im_back, value="menu|today"),
+            CardAction(title="分機查詢", type=ActionTypes.im_back, value="tel|query"),
+            CardAction(title="會議室預約", type=ActionTypes.im_back, value="room|book"),
         ]
+    )
+
+    # 設定顯示文字：如果 welcomeMsg 存在就組合訊息，否則使用預設文字
+    display_text = (
+        f"{welcomeMsg}\n或者請選擇以下選項:" if welcomeMsg else "請選擇以下選項:"
     )
 
     # 創建回覆訊息
     reply = Activity(
         type=ActivityTypes.message,
-        text="請選擇以下選項:",
+        text=display_text,
         suggested_actions=suggested_actions,
     )
 
     await turn_context.send_activity(reply)
+
+
+async def show_meetingroom_options(turn_context: TurnContext):
+    suggested_actions = SuggestedActions(
+        actions=[
+            CardAction(
+                title="第一會議室",
+                type=ActionTypes.im_back,
+                value="room|1",  # 使用分隔符號來傳遞資訊
+            ),
+            CardAction(title="第二會議室", type=ActionTypes.im_back, value="room|2"),
+            CardAction(title="返回主選單", type=ActionTypes.im_back, value="main_menu"),
+        ]
+    )
+    await turn_context.send_activity(
+        Activity(
+            type=ActivityTypes.message,
+            text="請選擇會議室:",
+            suggested_actions=suggested_actions,
+        )
+    )
+
+
+async def show_date_options(turn_context: TurnContext, room_id: str):
+    suggested_actions = SuggestedActions(
+        actions=[
+            CardAction(
+                title="今天", type=ActionTypes.im_back, value=f"date|{room_id}|today"
+            ),
+            CardAction(
+                title="明天", type=ActionTypes.im_back, value=f"date|{room_id}|tomorrow"
+            ),
+            CardAction(
+                title="返回會議室選擇", type=ActionTypes.im_back, value="room|book"
+            ),
+        ]
+    )
+    await turn_context.send_activity(
+        Activity(
+            type=ActivityTypes.message,
+            text="請選擇日期:",
+            suggested_actions=suggested_actions,
+        )
+    )
+
+
+from datetime import datetime, timedelta
+from typing import List, Dict
+
+
+async def get_current_bookings(room_id: str, date: str) -> List[Dict]:
+    """
+    獲取指定會議室在特定日期的預約狀況
+    """
+    try:
+        # 將日期字串轉換成 datetime
+        if date == "today":
+            target_date = datetime.now()
+        elif date == "tomorrow":
+            target_date = datetime.now() + timedelta(days=1)
+        else:
+            target_date = datetime.strptime(date, "%Y-%m-%d")
+
+        # 設定查詢時間範圍
+        start_time = target_date.replace(hour=8, minute=0)  # 上班時間 8:00
+        end_time = target_date.replace(hour=17, minute=0)  # 下班時間 17:00
+
+        # 取得會議室 email
+        room_email = get_room_email(room_id)
+
+        # 使用 await 等待 API 回應
+        schedule_data = await graph_api.get_room_schedule(
+            room_email=room_email, start_time=start_time, end_time=end_time
+        )
+
+        # 整理預約資訊
+        bookings = []
+        if "value" in schedule_data and schedule_data["value"]:
+            schedule_info = schedule_data["value"][0]
+            if "scheduleItems" in schedule_info:
+                for item in schedule_info["scheduleItems"]:
+                    # 處理時間格式
+                    start_str = item["start"]["dateTime"].split(".")[0]
+                    end_str = item["end"]["dateTime"].split(".")[0]
+
+                    start_time = datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
+                    end_time = datetime.strptime(end_str, "%Y-%m-%dT%H:%M:%S")
+
+                    # UTC+8
+                    start_time = start_time + timedelta(hours=8)
+                    end_time = end_time + timedelta(hours=8)
+
+                    booking = {
+                        "start": start_time.strftime("%H:%M"),
+                        "end": end_time.strftime("%H:%M"),
+                        "subject": item["subject"],
+                        "organizer": item.get("organizer", {})
+                        .get("emailAddress", {})
+                        .get("name", "未知"),
+                    }
+                    bookings.append(booking)
+
+        return sorted(bookings, key=lambda x: x["start"])
+
+    except Exception as e:
+        print(f"獲取會議室預約狀況時發生錯誤: {str(e)}")
+        return []
+
+
+def get_room_email(room_id: str) -> str:
+    """
+    根據輸入返回會議室 email
+    如果輸入是 ID，轉換為 email
+    如果輸入是 email，直接返回
+    """
+    room_mapping = {
+        "1": "meetingroom01@rinnai.com.tw",
+        "2": "meetingroom02@rinnai.com.tw",
+    }
+
+    # 如果包含 @ 符號，表示已經是 email
+    if "@" in room_id:
+        return room_id
+
+    # 否則視為 ID，從 mapping 取得對應的 email
+    return room_mapping.get(room_id)
+
+
+def get_localtion_by_email(room_id: str) -> str:
+    """
+    根據會議室 ID 或 email 返回會議室位置名稱
+    """
+    location_mapping = {
+        "meetingroom01@rinnai.com.tw": "第一會議室",
+        "meetingroom02@rinnai.com.tw": "第二會議室",
+    }
+
+    # 如果輸入是 email
+    if "@" in room_id:
+        return location_mapping.get(room_id)
+
+    # 如果輸入是 ID，先轉換成 email
+    email = get_room_email(room_id)
+    return location_mapping.get(email) if email else None
+
+
+async def show_available_slots(turn_context: TurnContext, room_id: str, date: str):
+    # 取得會議室 email
+    room_email = get_room_email(room_id)
+
+    # 設定查詢時間範圍（例如 8:00-17:00）
+    if date == "today":
+        base_date = datetime.now()
+    elif date == "tomorrow":
+        base_date = datetime.now() + timedelta(days=1)
+    else:
+        base_date = datetime.strptime(date, "%Y-%m-%d")
+
+    start_time = base_date.replace(hour=8, minute=0, second=0, microsecond=0)
+    end_time = base_date.replace(hour=17, minute=0, second=0, microsecond=0)
+
+    # 從 Graph API 獲取會議室排程
+    schedule_data = await graph_api.get_room_schedule(room_email, start_time, end_time)
+
+    # 處理回傳的資料，找出可用時段
+    available_slots = process_schedule_data(schedule_data)
+
+    actions = []
+    actions.append(
+        CardAction(
+            title="返回會議室選擇", type=ActionTypes.im_back, value="back_to_rooms"
+        )
+    )
+    # 根據可用時段建立選項
+    for slot in available_slots:
+        actions.append(
+            CardAction(
+                title=f"{slot['start']} - {slot['end']}",
+                type=ActionTypes.im_back,
+                value=f"book|{room_id}|{date}|{slot['start']}|{slot['end']}",
+            ),
+        )
+
+    # # 加入返回選項
+    # actions.append(
+    #     CardAction(
+    #         title="返回日期選擇",
+    #         type=ActionTypes.im_back,
+    #         value=f"back_to_date|{room_id}",
+    #     )
+    # )
+
+    suggested_actions = SuggestedActions(actions=actions)
+
+    # 顯示當前預約狀況
+    schedule_text = "當前預約狀況：\n\n"
+    bookings = await get_current_bookings(room_email, date)
+
+    for booking in bookings:
+        schedule_text += (
+            f"• {booking['start']} - {booking['end']}: {booking['subject']}\n\n"
+        )
+
+    await turn_context.send_activity(
+        Activity(
+            type=ActivityTypes.message,
+            text=f"{schedule_text}\n\n請選擇預約時段:",
+            suggested_actions=suggested_actions,
+        )
+    )
+
+
+def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    """處理排程資料，找出可用時段"""
+    available_slots = []
+
+    # 工作時間從 8:00 到 17:00，每小時一個時段
+    work_hours = [
+        ("08:00", "09:00"),
+        ("09:00", "10:00"),
+        ("10:00", "11:00"),
+        ("11:00", "12:00"),
+        ("13:00", "14:00"),
+        ("14:00", "15:00"),
+        ("15:00", "16:00"),
+        ("16:00", "17:00"),
+    ]
+
+    # 從回應中取得已預約的時段
+    booked_slots = []
+    if "value" in schedule_data and schedule_data["value"]:
+        schedule_info = schedule_data["value"][0]
+        if "scheduleItems" in schedule_info:
+            for item in schedule_info["scheduleItems"]:
+                # 修改時間解析方式
+                start_str = item["start"]["dateTime"].split(".")[0]  # 移除毫秒部分
+                end_str = item["end"]["dateTime"].split(".")[0]  # 移除毫秒部分
+
+                start_time = datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
+                end_time = datetime.strptime(end_str, "%Y-%m-%dT%H:%M:%S")
+
+                # UTC+8
+                start_time = start_time + timedelta(hours=8)
+                end_time = end_time + timedelta(hours=8)
+
+                booked_slots.append(
+                    {
+                        "start": start_time.strftime("%H:%M"),
+                        "end": end_time.strftime("%H:%M"),
+                        "subject": item["subject"],
+                    }
+                )
+
+    # 尋找可用時段（排除已預約的時段）
+    for start, end in work_hours:
+        is_available = True
+        for booked in booked_slots:
+            # 檢查是否與已預約時段重疊
+            if (
+                (start >= booked["start"] and start < booked["end"])
+                or (end > booked["start"] and end <= booked["end"])
+                or (start <= booked["start"] and end >= booked["end"])
+            ):
+                is_available = False
+                break
+
+        if is_available:
+            available_slots.append({"start": start, "end": end})
+
+    return available_slots
 
 
 async def call_openai(prompt, conversation_id):
@@ -206,8 +492,9 @@ async def summarize_text(text, conversation_id) -> str:
 
 async def welcome_user(turn_context: TurnContext):
     user_name = turn_context.activity.from_property.name
-    welcome_text = f"歡迎 {user_name} 使用 TR GPT 助理！\n我可以幫您：\n1. 回答問題\n2. 分析文件\n3. 提供建議\n\n請問有什麼我可以協助您的嗎？"
-    await turn_context.send_activity(Activity(type="message", text=welcome_text))
+    welcome_text = f"歡迎 {user_name} 使用 TR GPT 助理！\n我可以幫您：\n回答問題，分析文件以及提供建議!\n\n請問有什麼我可以協助您的嗎？"
+    await show_help_options(turn_context, welcome_text)
+    # await turn_context.send_activity(Activity(type="message", text=welcome_text))
 
 
 async def message_handler(turn_context: TurnContext):
@@ -216,42 +503,99 @@ async def message_handler(turn_context: TurnContext):
         user_name = turn_context.activity.from_property.name
         print(f"收到來自用戶的訊息: {user_name} (ID: {user_id})")
 
-        # # 確保保存 JSON 的目錄存在
-        # log_dir = "./json_logs"
-        # if not os.path.exists(log_dir):
-        #     os.makedirs(log_dir)
+        # 確保保存 JSON 的目錄存在
+        log_dir = "./json_logs"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
 
-        # # 轉換 turn_context 為字典
-        # context_dict = {
-        #     "activity": turn_context.activity.as_dict(),
-        #     "user_id": user_id,
-        #     "user_name": user_name,
-        # }
+        # 轉換 turn_context 為字典
+        context_dict = {
+            "activity": turn_context.activity.as_dict(),
+            "userinfo": turn_context.activity.from_property,
+            "user_name": user_name,
+        }
 
-        # # 保存到 json_log.json
-        # log_file_path = os.path.join(log_dir, "json_log.json")
-        # with open(log_file_path, "a") as f:
-        #     json.dump(context_dict, f, ensure_ascii=False, indent=4)
-        #     f.write("\n")  # 每次寫入一條日志後換行
+        # 保存到 json_log.json
+        log_file_path = os.path.join(log_dir, "json_log.json")
+        with open(log_file_path, "a") as f:
+            json.dump(context_dict, f, ensure_ascii=False, indent=4)
+            f.write("\n")  # 每次寫入一條日志後換行
 
-        # 獲取附件
         attachments = turn_context.activity.attachments
 
         if turn_context.activity.text:
             user_message = turn_context.activity.text
-            # 檢查是否為 /help 命令
+
+            # 處理指令
             if user_message.lower() == "/help":
                 await show_help_options(turn_context)
                 return
 
-            print(f"Current Request Is An Txt Messages: {user_message}")
+            elif user_message == "room|book":
+                await show_meetingroom_options(turn_context)
+                return
 
+            elif user_message == "main_menu":
+                await show_help_options(turn_context)
+                return
+
+            # 處理會議室相關命令
+            elif user_message.startswith("room|"):
+                # 處理會議室選擇
+                _, room_id = user_message.split("|")
+                await show_date_options(turn_context, room_id)
+                return
+
+            elif user_message.startswith("date|"):
+                # 處理日期選擇
+                _, room_id, date = user_message.split("|")
+                await show_available_slots(turn_context, room_id, date)
+                return
+
+            elif user_message.startswith("book|"):
+                # 處理預約請求
+                _, room_id, date, start_time, end_time = user_message.split("|")
+                # 檢查時段是否已被預約
+                if await is_slot_available(room_id, date, start_time, end_time):
+                    # 建立預約
+                    booking_result = await create_meeting(
+                        room_id=room_id,
+                        date=date,
+                        start_time=start_time,
+                        end_time=end_time,
+                        user_name=user_name,
+                        user_id=user_id,
+                    )
+                    if booking_result:
+                        await turn_context.send_activity(
+                            Activity(type=ActivityTypes.message, text="預約成功！")
+                        )
+                    else:
+                        await turn_context.send_activity(
+                            Activity(
+                                type=ActivityTypes.message,
+                                text="預約失敗，請稍後再試。",
+                            )
+                        )
+                else:
+                    await turn_context.send_activity(
+                        Activity(
+                            type=ActivityTypes.message,
+                            text="此時段已被預約，請選擇其他時段。",
+                        )
+                    )
+                    await show_available_slots(turn_context, room_id, date)
+                return
+
+            # 如果不是特定命令，則使用 OpenAI 處理
+            print(f"Current Request Is An Txt Messages: {user_message}")
             response_message = await call_openai(
                 user_message, turn_context.activity.conversation.id
             )
             await turn_context.send_activity(
-                Activity(type="message", text=response_message)
+                Activity(type=ActivityTypes.message, text=response_message)
             )
+
         elif attachments and len(attachments) > 0:
             print("Current Request Is An File")
             for attachment in turn_context.activity.attachments:
@@ -260,16 +604,134 @@ async def message_handler(turn_context: TurnContext):
                     file_text = await process_file(file_info)
                     summarized_text = await summarize_text(
                         file_text, turn_context.activity.conversation.id
-                    )  # 文本摘要
+                    )
                     await turn_context.send_activity(
-                        Activity(type="message", text=summarized_text)
+                        Activity(type=ActivityTypes.message, text=summarized_text)
                     )
 
     except Exception as e:
         print(f"處理訊息時發生錯誤: {str(e)}")
         await turn_context.send_activity(
-            Activity(type="message", text="處理訊息時發生錯誤，請稍後再試。")
+            Activity(
+                type=ActivityTypes.message, text="處理訊息時發生錯誤，請稍後再試。"
+            )
         )
+
+
+async def is_slot_available(
+    room_id: str, date: str, start_time: str, end_time: str
+) -> bool:
+    """檢查時段是否可用"""
+    try:
+        # 處理日期
+        if date == "today":
+            base_date = datetime.now()
+        elif date == "tomorrow":
+            base_date = datetime.now() + timedelta(days=1)
+        else:
+            base_date = datetime.strptime(date, "%Y-%m-%d")
+
+        # 組合日期和時間
+        start_datetime = datetime.combine(
+            base_date.date(), datetime.strptime(start_time, "%H:%M").time()
+        )
+        end_datetime = datetime.combine(
+            base_date.date(), datetime.strptime(end_time, "%H:%M").time()
+        )
+
+        # 取得會議室排程
+        schedule = await graph_api.get_room_schedule(
+            room_email=get_room_email(room_id),
+            start_time=start_datetime,
+            end_time=end_datetime,
+        )
+
+        # 檢查時段衝突
+        if "value" in schedule and schedule["value"]:
+            schedule_info = schedule["value"][0]
+            if "scheduleItems" in schedule_info:
+                for booking in schedule_info["scheduleItems"]:
+                    booking_start = datetime.fromisoformat(
+                        booking["start"]["dateTime"].replace("Z", "+00:00")
+                    )
+                    booking_end = datetime.fromisoformat(
+                        booking["end"]["dateTime"].replace("Z", "+00:00")
+                    )
+
+                    # UTC+8
+                    booking_start = booking_start + timedelta(hours=8)
+                    booking_end = booking_end + timedelta(hours=8)
+
+                    if (
+                        (
+                            start_datetime >= booking_start
+                            and start_datetime < booking_end
+                        )
+                        or (
+                            end_datetime > booking_start and end_datetime <= booking_end
+                        )
+                        or (
+                            start_datetime <= booking_start
+                            and end_datetime >= booking_end
+                        )
+                    ):
+                        return False
+
+        return True
+
+    except Exception as e:
+        print(f"檢查時段可用性時發生錯誤: {str(e)}")
+        return False
+
+
+async def create_meeting(
+    room_id: str,
+    date: str,
+    start_time: str,
+    end_time: str,
+    user_name: str,
+    user_id: str,
+):
+    """建立會議預約"""
+    try:
+        # 取得user email
+        room_email = get_room_email(room_id)
+        user_emal = "juncheng.liu@rinnai.com.tw"
+        location = get_localtion_by_email(room_id)
+
+        start_datetime = convert_to_datetime(date, start_time)
+        end_datetime = convert_to_datetime(date, end_time)
+
+        # 建立會議
+        result = await graph_api.create_meeting(  # 加上 await
+            location=location,  # 修正拼寫 localtion -> location
+            room_email=room_email,
+            subject=f"{user_name} 的會議",
+            start_time=start_datetime,
+            end_time=end_datetime,
+            attendees=[user_emal],
+        )
+
+        return True if result else False
+
+    except Exception as e:
+        print(f"建立會議時發生錯誤: {str(e)}")
+        return False
+
+
+def convert_to_datetime(date: str, time: str) -> datetime:
+    """轉換日期和時間字串為 datetime 物件"""
+    if date == "today":
+        base_date = datetime.now()
+    elif date == "tomorrow":
+        base_date = datetime.now() + timedelta(days=1)
+    else:
+        base_date = datetime.strptime(date, "%Y-%m-%d")
+
+    time_parts = time.split(":")
+    return base_date.replace(
+        hour=int(time_parts[0]), minute=int(time_parts[1]), second=0, microsecond=0
+    )
 
 
 @app.route("/ping", methods=["GET"])
