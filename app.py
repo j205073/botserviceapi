@@ -160,9 +160,24 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
     suggested_actions = SuggestedActions(
         actions=[
-            CardAction(title="今天菜單", type=ActionTypes.im_back, value="menu|today"),
-            CardAction(title="分機查詢", type=ActionTypes.im_back, value="tel|query"),
-            CardAction(title="會議室預約", type=ActionTypes.im_back, value="room|book"),
+            CardAction(
+                title="今天菜單",
+                type=ActionTypes.im_back,
+                value="menu|today",
+                text="menu|today",
+            ),
+            CardAction(
+                title="分機查詢",
+                type=ActionTypes.im_back,
+                value="tel|query",
+                text="tel|query",
+            ),
+            CardAction(
+                title="會議室預約",
+                type=ActionTypes.im_back,
+                value="room|book",
+                text="room|book",
+            ),
         ]
     )
 
