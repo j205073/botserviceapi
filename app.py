@@ -998,7 +998,7 @@ async def create_meeting(
         result = await graph_api.create_meeting(  # 加上 await
             location=location,  # 修正拼寫 localtion -> location
             room_email=room_email,
-            subject=f"{user_name} 的會議",
+            subject=f"{user_name} 的會議(gpt)",
             start_time=start_datetime,
             end_time=end_datetime,
             attendees=[user_mail],
