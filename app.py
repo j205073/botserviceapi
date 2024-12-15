@@ -153,7 +153,11 @@ async def process_file(file_info: dict) -> str:
 
 
 async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
-    # 創建建議動作
+    """顯示主選單選項
+    展示機器人的主要功能選項
+    包含菜單查詢、分機查詢和會議室預約等功能
+    """
+
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(title="今天菜單", type=ActionTypes.im_back, value="menu|today"),
@@ -178,6 +182,10 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
 
 async def show_meetingroom_options(turn_context: TurnContext):
+    """顯示會議室選擇選項
+    列出所有可供選擇的會議室
+    提供返回主選單的選項
+    """
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(
@@ -199,6 +207,10 @@ async def show_meetingroom_options(turn_context: TurnContext):
 
 
 async def show_date_options(turn_context: TurnContext, room_id: str):
+    """顯示日期選擇選項
+    提供今天、明天等日期選擇
+    包含返回會議室選擇的選項
+    """
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(
@@ -226,8 +238,9 @@ from typing import List, Dict
 
 
 async def get_current_bookings(room_id: str, date: str) -> List[Dict]:
-    """
-    獲取指定會議室在特定日期的預約狀況
+    """獲取會議室當前預約狀態
+    取得指定會議室在特定日期的所有預約資訊
+    包含預約時間、主題和預約人資訊
     """
     try:
         # 將日期字串轉換成 datetime
@@ -285,10 +298,9 @@ async def get_current_bookings(room_id: str, date: str) -> List[Dict]:
 
 
 def get_room_email(room_id: str) -> str:
-    """
-    根據輸入返回會議室 email
-    如果輸入是 ID，轉換為 email
-    如果輸入是 email，直接返回
+    """取得會議室電子郵件
+    根據會議室 ID 或電子郵件地址返回對應的會議室電子郵件
+    支援 ID 到 email 的轉換和直接 email 的驗證
     """
     room_mapping = {
         "1": "meetingroom01@rinnai.com.tw",
@@ -304,8 +316,9 @@ def get_room_email(room_id: str) -> str:
 
 
 def get_localtion_by_email(room_id: str) -> str:
-    """
-    根據會議室 ID 或 email 返回會議室位置名稱
+    """取得會議室位置名稱
+    根據會議室 ID 或電子郵件地址返回對應的會議室名稱
+    例如：'第一會議室'、'第二會議室'
     """
     location_mapping = {
         "meetingroom01@rinnai.com.tw": "第一會議室",
@@ -322,6 +335,11 @@ def get_localtion_by_email(room_id: str) -> str:
 
 
 async def show_available_slots(turn_context: TurnContext, room_id: str, date: str):
+    """顯示可用時段
+    列出指定日期的所有可用時段
+    同時顯示現有的預約狀況
+    """
+
     # 取得會議室 email
     room_email = get_room_email(room_id)
 
@@ -388,7 +406,10 @@ async def show_available_slots(turn_context: TurnContext, room_id: str, date: st
 
 
 def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]:
-    """處理排程資料，找出可用時段"""
+    """處理會議室排程資料
+    分析會議室排程資料，找出可用的時段
+    排除已被預約的時間，返回可預約的時段列表
+    """
     available_slots = []
 
     # 工作時間從 8:00 到 17:00，每小時一個時段
@@ -448,6 +469,10 @@ def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]
 
 
 async def call_openai(prompt, conversation_id):
+    """呼叫 OpenAI API
+    處理用戶的一般對話請求
+    維護對話歷史記錄
+    """
     global conversation_history
     if conversation_id not in conversation_history:
         conversation_history[conversation_id] = []
@@ -478,7 +503,10 @@ async def call_openai(prompt, conversation_id):
 
 
 async def summarize_text(text, conversation_id) -> str:
-    """利用 OpenAI 進行文本摘要"""
+    """文本摘要處理
+    使用 OpenAI 對文本內容進行摘要
+    用於處理文件內容的摘要
+    """
     try:
         response = openai.ChatCompletion.create(
             engine="gpt-4o-mini-deploy",
@@ -496,6 +524,10 @@ async def summarize_text(text, conversation_id) -> str:
 
 
 async def welcome_user(turn_context: TurnContext):
+    """歡迎使用者
+    當新使用者加入對話時顯示歡迎訊息
+    介紹機器人的主要功能
+    """
     user_name = turn_context.activity.from_property.name
     welcome_text = f"歡迎 {user_name} 使用 TR GPT 助理！\n我可以幫您：\n回答問題，分析文件以及提供建議!\n\n請問有什麼我可以協助您的嗎？"
     await show_help_options(turn_context, welcome_text)
@@ -503,6 +535,11 @@ async def welcome_user(turn_context: TurnContext):
 
 
 async def message_handler(turn_context: TurnContext):
+    """訊息處理主函數
+    處理所有來自使用者的訊息
+    根據訊息類型分配給適當的處理函數
+    包含檔案處理、會議預約和一般對話等功能
+    """
     try:
         user_id = turn_context.activity.from_property.id
         user_name = turn_context.activity.from_property.name
@@ -514,11 +551,15 @@ async def message_handler(turn_context: TurnContext):
             os.makedirs(log_dir)
 
         # 轉換 turn_context 為字典
-        context_dict = {
-            "activity": turn_context.activity.as_dict(),
-            "userinfo": turn_context.activity.from_property,
-            "user_name": user_name,
-        }
+context_dict = {
+    "activity": turn_context.activity.as_dict(),
+    "userinfo": {
+        "id": turn_context.activity.from_property.id,
+        "name": turn_context.activity.from_property.name,
+        "aadObjectId": turn_context.activity.from_property.aad_object_id
+    },
+    "user_name": user_name,
+}
 
         # 保存到 json_log.json
         log_file_path = os.path.join(log_dir, "json_log.json")
@@ -626,7 +667,11 @@ async def message_handler(turn_context: TurnContext):
 async def is_slot_available(
     room_id: str, date: str, start_time: str, end_time: str
 ) -> bool:
-    """檢查時段是否可用"""
+    """檢查會議室時段可用性
+    確認指定的時間區間是否可以預約
+    檢查是否與現有預約時段重疊
+    """
+
     try:
         # 處理日期
         if date == "today":
@@ -697,7 +742,10 @@ async def create_meeting(
     user_name: str,
     user_id: str,
 ):
-    """建立會議預約"""
+    """建立會議預約
+    在指定的會議室建立新的會議預約
+    設定會議主題、時間和與會者
+    """
     try:
         # 取得user email
         room_email = get_room_email(room_id)
@@ -749,6 +797,10 @@ def ping():
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
+    """訊息路由處理
+    處理所有進入的 HTTP 請求
+    將請求轉發給適當的處理函數
+    """
     print("=== 開始處理訊息 ===")
     if "application/json" in request.headers["Content-Type"]:
         body = request.json
