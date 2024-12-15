@@ -637,32 +637,32 @@ async def message_handler(turn_context: TurnContext):
         print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
         print(f"Full activity: {turn_context.activity}")
 
-        # try:
-        #     # 確保保存 JSON 的目錄存在
-        #     log_dir = "./json_logs"
-        #     if not os.path.exists(log_dir):
-        #         os.makedirs(log_dir)
+        try:
+            # 確保保存 JSON 的目錄存在
+            log_dir = "./json_logs"
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
 
-        #     # 轉換 turn_context 為字典
-        #     context_dict = {
-        #         "activity": turn_context.activity.as_dict(),
-        #         "userinfo": {
-        #             "id": turn_context.activity.from_property.id,
-        #             "name": turn_context.activity.from_property.name,
-        #             "aadObjectId": getattr(
-        #                 turn_context.activity.from_property, "aad_object_id", None
-        #             ),
-        #         },
-        #         "user_name": user_name,
-        #     }
+            # 轉換 turn_context 為字典
+            context_dict = {
+                "activity": turn_context.activity.as_dict(),
+                "userinfo": {
+                    "id": turn_context.activity.from_property.id,
+                    "name": turn_context.activity.from_property.name,
+                    "aadObjectId": getattr(
+                        turn_context.activity.from_property, "aad_object_id", None
+                    ),
+                },
+                "user_name": user_name,
+            }
 
-        #     # 保存到 json_log.json
-        #     log_file_path = os.path.join(log_dir, "json_log.json")
-        #     with open(log_file_path, "a", encoding="utf-8") as f:
-        #         json.dump(context_dict, f, ensure_ascii=False, indent=4)
-        #         f.write("\n")  # 每次寫入一條日誌後換行
-        # except Exception as e:
-        #     print(f"Write Json Log Has Some Error: {str(e)}")
+            # 保存到 json_log.json
+            log_file_path = os.path.join(log_dir, "json_log.json")
+            with open(log_file_path, "a", encoding="utf-8") as f:
+                json.dump(context_dict, f, ensure_ascii=False, indent=4)
+                f.write("\n")  # 每次寫入一條日誌後換行
+        except Exception as e:
+            print(f"Write Json Log Has Some Error: {str(e)}")
 
         if turn_context.activity.text.startswith("@"):
             # 移除 @ 前綴進行判斷

@@ -1262,3 +1262,155 @@
     },
     "user_name": "User"
 }
+{
+    "activity": {
+        "type": "message",
+        "id": "ef1f9d60-badd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T12:13:03.414Z",
+        "local_timestamp": "2024-12-15T12:13:03.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "bb2ef08a-d031-42d5-8e78-06c8b08b3347",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "5851afc1-bada-11ef-8283-a5c1470ec4bb|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "@會議室預約",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "173426478339523ngo9ni55n"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "bb2ef08a-d031-42d5-8e78-06c8b08b3347",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "f31ce2b0-badd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T12:13:10.107Z",
+        "local_timestamp": "2024-12-15T12:13:10.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "bb2ef08a-d031-42d5-8e78-06c8b08b3347",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "5851afc1-bada-11ef-8283-a5c1470ec4bb|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "@會議室預約",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "17342647900845k361qw8jas"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "bb2ef08a-d031-42d5-8e78-06c8b08b3347",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "f801a1d0-badd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T12:13:18.317Z",
+        "local_timestamp": "2024-12-15T12:13:18.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "bb2ef08a-d031-42d5-8e78-06c8b08b3347",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "5851afc1-bada-11ef-8283-a5c1470ec4bb|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "@第一會議室",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734264798291tbht85dgfl"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "bb2ef08a-d031-42d5-8e78-06c8b08b3347",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "fad07940-badd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T12:13:23.028Z",
+        "local_timestamp": "2024-12-15T12:13:23.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "bb2ef08a-d031-42d5-8e78-06c8b08b3347",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "5851afc1-bada-11ef-8283-a5c1470ec4bb|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "@第一會議室 12/15 今天",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734264802994o4k554d7zte"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "bb2ef08a-d031-42d5-8e78-06c8b08b3347",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
