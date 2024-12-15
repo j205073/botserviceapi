@@ -230,7 +230,7 @@ async def show_date_options(turn_context: TurnContext, room_id: str):
     await turn_context.send_activity(
         Activity(
             type=ActivityTypes.message,
-            text=f"請選擇{room_name}的預約日期:",
+            text=f"請選擇{room_name}的預約時段:(若希望時段未出現，\n\n可輸入ex.@第一會議室 今天 15:30 - 16:00 預約 or @第一會議室 明天 15:30 - 16:00 預約)",
             suggested_actions=suggested_actions,
         )
     )
@@ -615,16 +615,27 @@ async def call_openai(prompt, conversation_id, user_mail=None):
         return "抱歉，目前無法處理您的請求。"
 
 
-async def summarize_text(text, conversation_id) -> str:
+async def summarize_text(text, conversation_id, user_mail=None) -> str:
     """文本摘要處理
     使用 OpenAI 對文本內容進行摘要
     用於處理文件內容的摘要
     """
     try:
+
+        language = determine_language(user_mail)
+
+        # 設定系統提示詞
+        system_prompts = {
+            "zh-TW": "你是一個智能助理，負責摘要文本內容。",
+            "ja": "あなたはインテリジェントアシスタントであり、テキスト内容を要約する役割を担っています。",
+        }
+
+        system_prompt = system_prompts.get(language, system_prompts["zh-TW"])
+
         response = openai.ChatCompletion.create(
             engine="gpt-4o-mini-deploy",
             messages=[
-                {"role": "system", "content": "你是一個智能助理，負責摘要文本內容。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
             ],
             max_tokens=500,
@@ -854,6 +865,9 @@ async def message_handler(turn_context: TurnContext):
                 if turn_context.activity.text.lower() == "/help":
                     await show_help_options(turn_context)
                     return
+                user_mail = (
+                    await get_user_email(turn_context) or f"{user_id}@unknown.com"
+                )
                 response_message = await call_openai(
                     turn_context.activity.text,
                     turn_context.activity.conversation.id,
@@ -864,12 +878,17 @@ async def message_handler(turn_context: TurnContext):
                 )
             elif attachments and len(attachments) > 0:
                 print("Current Request Is An File")
+                user_mail = (
+                    await get_user_email(turn_context) or f"{user_id}@unknown.com"
+                )
                 for attachment in turn_context.activity.attachments:
                     file_info = await download_attachment_and_write(attachment)
                     if file_info:
                         file_text = await process_file(file_info)
                         summarized_text = await summarize_text(
-                            file_text, turn_context.activity.conversation.id
+                            file_text,
+                            turn_context.activity.conversation.id,
+                            user_mail=user_mail,
                         )
                         await turn_context.send_activity(
                             Activity(type=ActivityTypes.message, text=summarized_text)
