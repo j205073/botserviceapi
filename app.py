@@ -410,14 +410,22 @@ def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]
 
     # 工作時間從 8:00 到 17:00，每小時一個時段
     work_hours = [
-        ("08:00", "09:00"),
-        ("09:00", "10:00"),
-        ("10:00", "11:00"),
-        ("11:00", "12:00"),
-        ("13:00", "14:00"),
-        ("14:00", "15:00"),
-        ("15:00", "16:00"),
-        ("16:00", "17:00"),
+        ("08:00", "08:30"),
+        ("08:30", "09:00"),
+        ("09:00", "09:30"),
+        ("09:30", "10:00"),
+        ("10:00", "10:30"),
+        ("10:30", "11:00"),
+        ("11:00", "11:30"),
+        ("11:30", "12:00"),
+        ("13:00", "13:30"),
+        ("13:30", "14:00"),
+        ("14:00", "14:30"),
+        ("14:30", "15:00"),
+        ("15:00", "15:30"),
+        ("15:30", "16:00"),
+        ("16:00", "16:30"),
+        ("16:30", "17:00"),
     ]
 
     # 從回應中取得已預約的時段
@@ -464,18 +472,51 @@ def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]
     return available_slots
 
 
-async def call_openai(prompt, conversation_id):
+# 在代碼頂部定義日籍主管的郵件列表
+JAPANESE_MANAGER_EMAILS = [
+    "tsutsumi@rinnai.com.tw",
+    "ushimaru@rinnai.com.tw",
+    "daiki.matsunami@rinnai.com.tw",
+]
+
+
+# 判斷語言的邏輯
+def determine_language(user_mail: str):
+    if user_mail is None:
+        return "zh-TW"
+    user_mail = user_mail.lower()
+    # 檢查是否在日籍主管郵件列表中
+    if user_mail in JAPANESE_MANAGER_EMAILS:
+        return "ja"
+
+    # 其他預設繁體中文
+    return "zh-TW"
+
+
+async def call_openai(prompt, conversation_id, user_mail=None):
     """呼叫 OpenAI API
     處理用戶的一般對話請求
     維護對話歷史記錄
     """
     global conversation_history
+
     if conversation_id not in conversation_history:
         conversation_history[conversation_id] = []
+
+        language = determine_language(user_mail)
+
+        # 設定系統提示詞
+        system_prompts = {
+            "zh-TW": "你是一個智能助理。如果用戶使用中文提問，請用繁體中文回答。如果用戶使用其他語言提問，請使用跟用戶相同的語言回答。",
+            "ja": "あなたは知的アシスタントです。ユーザーが中国語で質問した場合は、繁体字中国語で回答してください。ユーザーが他の言語で質問した場合は、ユーザーと同じ言語で回答してください。",
+        }
+
+        system_prompt = system_prompts.get(language, system_prompts["zh-TW"])
+
         conversation_history[conversation_id].append(
             {
                 "role": "system",
-                "content": "你是一個智能助理。如果用戶使用中文提問，請用繁體中文回答。如果用戶使用其他語言提問，請使用跟用戶相同的語言回答。",
+                "content": system_prompt,
             }
         )
 
@@ -525,7 +566,43 @@ async def welcome_user(turn_context: TurnContext):
     介紹機器人的主要功能
     """
     user_name = turn_context.activity.from_property.name
-    welcome_text = f"歡迎 {user_name} 使用 TR GPT 助理！\n我可以幫您：\n回答問題，分析文件以及提供建議!\n\n請問有什麼我可以協助您的嗎？"
+
+    try:
+        user_mail = await get_user_email(turn_context)
+    except Exception as e:
+        print(f"取得用戶 email 時發生錯誤: {str(e)}")
+
+    language = determine_language(user_mail)
+
+    # 設定系統提示詞
+    system_prompts = {
+        "zh-TW": f"""
+歡迎 {user_name} 使用 TR GPT！
+
+我可以協助您：
+- 回答各種問題
+- 文件分析與摘要
+- 多語言翻譯
+- 智能建議與諮詢
+有什麼我可以幫您的嗎？
+
+(提示：輸入 /help 可快速查看系統功能)""",
+        "ja": f"""
+{user_name} さん、TR GPT インテリジェントアシスタントへようこそ！
+お手伝いできること：
+- あらゆる質問への対応
+- 文書分析とサマリー
+- 多言語翻訳
+- インテリジェントな提案とアドバイス
+何かお力になれることはありますか？
+
+(ヒント：/help と入力すると、システム機能を quickly 確認できます)
+            """,
+    }
+
+    system_prompt = system_prompts.get(language, system_prompts["zh-TW"])
+
+    welcome_text = system_prompt
     await show_help_options(turn_context, welcome_text)
     # await turn_context.send_activity(Activity(type="message", text=welcome_text))
 
@@ -560,32 +637,32 @@ async def message_handler(turn_context: TurnContext):
         print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
         print(f"Full activity: {turn_context.activity}")
 
-        try:
-            # 確保保存 JSON 的目錄存在
-            log_dir = "./json_logs"
-            if not os.path.exists(log_dir):
-                os.makedirs(log_dir)
+        # try:
+        #     # 確保保存 JSON 的目錄存在
+        #     log_dir = "./json_logs"
+        #     if not os.path.exists(log_dir):
+        #         os.makedirs(log_dir)
 
-            # 轉換 turn_context 為字典
-            context_dict = {
-                "activity": turn_context.activity.as_dict(),
-                "userinfo": {
-                    "id": turn_context.activity.from_property.id,
-                    "name": turn_context.activity.from_property.name,
-                    "aadObjectId": getattr(
-                        turn_context.activity.from_property, "aad_object_id", None
-                    ),
-                },
-                "user_name": user_name,
-            }
+        #     # 轉換 turn_context 為字典
+        #     context_dict = {
+        #         "activity": turn_context.activity.as_dict(),
+        #         "userinfo": {
+        #             "id": turn_context.activity.from_property.id,
+        #             "name": turn_context.activity.from_property.name,
+        #             "aadObjectId": getattr(
+        #                 turn_context.activity.from_property, "aad_object_id", None
+        #             ),
+        #         },
+        #         "user_name": user_name,
+        #     }
 
-            # 保存到 json_log.json
-            log_file_path = os.path.join(log_dir, "json_log.json")
-            with open(log_file_path, "a", encoding="utf-8") as f:
-                json.dump(context_dict, f, ensure_ascii=False, indent=4)
-                f.write("\n")  # 每次寫入一條日誌後換行
-        except Exception as e:
-            print(f"Write Json Log Has Some Error: {str(e)}")
+        #     # 保存到 json_log.json
+        #     log_file_path = os.path.join(log_dir, "json_log.json")
+        #     with open(log_file_path, "a", encoding="utf-8") as f:
+        #         json.dump(context_dict, f, ensure_ascii=False, indent=4)
+        #         f.write("\n")  # 每次寫入一條日誌後換行
+        # except Exception as e:
+        #     print(f"Write Json Log Has Some Error: {str(e)}")
 
         if turn_context.activity.text.startswith("@"):
             # 移除 @ 前綴進行判斷
@@ -702,7 +779,9 @@ async def message_handler(turn_context: TurnContext):
                     await show_help_options(turn_context)
                     return
                 response_message = await call_openai(
-                    turn_context.activity.text, turn_context.activity.conversation.id
+                    turn_context.activity.text,
+                    turn_context.activity.conversation.id,
+                    user_mail=user_mail,
                 )
                 await turn_context.send_activity(
                     Activity(type=ActivityTypes.message, text=response_message)
