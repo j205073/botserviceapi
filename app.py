@@ -30,6 +30,11 @@ import json
 from urllib.parse import quote, urljoin
 from graph_api import GraphAPI  # 假設你已經有這個模組
 from token_manager import TokenManager  # 假設你已經有這個模組
+import sys
+import logging
+
+logging.basicConfig(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
 
 # 初始化 Token 管理器和 Graph API
 token_manager = TokenManager(
