@@ -161,12 +161,12 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(
-                title="會議室預約",
-                type=ActionTypes.post_back,
-                text="room|book",
-                display_text="會議室預約",
-                value={"command": "room|book"},
-            ),
+                title="會議室預約",  # 用戶看到的文字
+                type=ActionTypes.im_back,  # 動作類型
+                value="room|book",  # 動作的實際值
+                text="room|book",  # 傳遞的文字
+                display_text="會議室預約",  # 可選，顯示的文字
+            )
         ]
         # actions=[
         #     CardAction(
@@ -581,7 +581,8 @@ async def message_handler(turn_context: TurnContext):
         user_name = turn_context.activity.from_property.name
         user_mail = get_user_email(turn_context)
         print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
-
+        print(f"Received message: {user_message}")
+        print(f"Full activity: {turn_context.activity}")
         try:
             # 確保保存 JSON 的目錄存在
             log_dir = "./json_logs"
@@ -835,6 +836,32 @@ def ping():
     return jsonify(
         {"status": "ok", "message": "Bot is alive", "debuggerTest": debuggerTest}
     )  # 使用 jsonify
+
+
+@app.route("/user/<user_id>", methods=["GET"])
+def user(user_id):
+    """
+    用戶資訊 API
+
+    參數:
+    - user_id: 用戶 ID (必填)
+    """
+    try:
+        # 執行異步操作
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        user_info = loop.run_until_complete(graph_api.get_user_info(user_id))
+        loop.close()
+
+        return jsonify(
+            {
+                "status": "ok",
+                "user_info": user_info,
+            }
+        )
+    except Exception as e:
+        print(f"獲取用戶資訊時發生錯誤: {str(e)}")
+        return jsonify({"error": "Internal Server Error", "message": str(e)}), 500
 
 
 @app.route("/api/room/schedule/<room_id>", methods=["GET"])
