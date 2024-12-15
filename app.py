@@ -162,7 +162,7 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
         actions=[
             CardAction(
                 title="會議室預約",
-                type=ActionTypes.message_back,
+                type=ActionTypes.post_back,
                 text="room|book",
                 display_text="會議室預約",
                 value={"command": "room|book"},
@@ -559,6 +559,17 @@ async def welcome_user(turn_context: TurnContext):
     # await turn_context.send_activity(Activity(type="message", text=welcome_text))
 
 
+async def get_user_email(turn_context: TurnContext) -> str:
+    """查詢目前user mail"""
+    try:
+        aad_object_id = turn_context.activity.from_property.aad_object_id
+        user_info = await graph_api.get_user_info(aad_object_id)
+        return user_info.get("mail")
+    except Exception as e:
+        print(f"取得用戶 email 時發生錯誤: {str(e)}")
+        return None
+
+
 async def message_handler(turn_context: TurnContext):
     """訊息處理主函數
     處理所有來自使用者的訊息
@@ -568,7 +579,8 @@ async def message_handler(turn_context: TurnContext):
     try:
         user_id = turn_context.activity.from_property.id
         user_name = turn_context.activity.from_property.name
-        print(f"收到來自用戶的訊息: {user_name} (ID: {user_id})")
+        user_mail = get_user_email(turn_context)
+        print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
 
         try:
             # 確保保存 JSON 的目錄存在
@@ -640,7 +652,7 @@ async def message_handler(turn_context: TurnContext):
                         start_time=start_time,
                         end_time=end_time,
                         user_name=user_name,
-                        user_id=user_id,
+                        user_mail=user_mail,
                     )
                     if booking_result:
                         await turn_context.send_activity(
@@ -770,7 +782,7 @@ async def create_meeting(
     start_time: str,
     end_time: str,
     user_name: str,
-    user_id: str,
+    user_mail: str,
 ):
     """建立會議預約
     在指定的會議室建立新的會議預約
@@ -779,7 +791,7 @@ async def create_meeting(
     try:
         # 取得user email
         room_email = get_room_email(room_id)
-        user_emal = "juncheng.liu@rinnai.com.tw"
+        # user_emal = "juncheng.liu@rinnai.com.tw"
         location = get_localtion_by_email(room_id)
 
         start_datetime = convert_to_datetime(date, start_time)
@@ -792,7 +804,7 @@ async def create_meeting(
             subject=f"{user_name} 的會議",
             start_time=start_datetime,
             end_time=end_datetime,
-            attendees=[user_emal],
+            attendees=[user_mail],
         )
 
         return True if result else False

@@ -18,6 +18,18 @@ class GraphAPI:
             "Content-Type": "application/json",
         }
 
+    async def get_user_info(self, aad_object_id: str) -> Dict[str, Any]:
+        """取得用戶資訊"""
+        endpoint = f"{self.base_url}/users/{aad_object_id}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(endpoint, headers=self._get_headers()) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    text = await response.text()
+                    raise Exception(f"Failed to get user info: {text}")
+
     async def get_room_schedule(
         self, room_email: str, start_time: datetime, end_time: datetime
     ) -> Dict[str, Any]:
