@@ -740,7 +740,7 @@ async def message_handler(turn_context: TurnContext):
         except Exception as e:
             print(f"Write Json Log Has Some Error: {str(e)}")
 
-        if turn_context.activity.text.startswith("@"):
+        if turn_context.activity.text and turn_context.activity.text.startswith("@"):
             # 移除 @ 前綴進行判斷
             user_message = turn_context.activity.text.lstrip("@")
 
