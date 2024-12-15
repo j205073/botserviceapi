@@ -336,7 +336,7 @@ def get_localtion_by_email(room_id: str) -> str:
 async def show_available_slots(turn_context: TurnContext, room_id: str, date: str):
     """顯示可用時段
     列出指定日期的所有可用時段
-    同時顯示現有的預約狀況
+    合併顯示現有的預約狀況和可預約時段
     """
     # 取得會議室名稱和 email
     room_email = get_room_email(room_id)
@@ -362,43 +362,119 @@ async def show_available_slots(turn_context: TurnContext, room_id: str, date: st
     # 處理回傳的資料，找出可用時段
     available_slots = process_schedule_data(schedule_data)
 
-    actions = [
-        CardAction(
-            title="@返回會議室選擇", type=ActionTypes.im_back, text="@返回主選單"
-        )
-    ]
-
-    # 根據可用時段建立選項
-    for slot in available_slots:
-        actions.append(
-            CardAction(
-                title=f"@{room_name} {date_display} {slot['start']} - {slot['end']} 預約",
-                type=ActionTypes.im_back,
-                text=f"@{room_name} {date_display} {slot['start']} - {slot['end']} 預約",
-            ),
-        )
-
-    suggested_actions = SuggestedActions(actions=actions)
-
     # 顯示當前預約狀況
-    schedule_text = f"{room_name} {date_display} 預約狀況：\n\n"
     bookings = await get_current_bookings(room_email, date)
 
+    # 格式化預約狀況文字
+    schedule_text = f"{room_name} {date_display} 預約狀況：\n\n"
     if bookings:
         for booking in bookings:
             schedule_text += (
                 f"• {booking['start']} - {booking['end']}: {booking['subject']}\n\n"
             )
     else:
-        schedule_text += "目前尚無預約\n\n"
+        schedule_text += "目前尚無預約\n"
+
+    # 匯總所有可用時段
+    # slots_text = "\n可預約時段：\n" + "\n".join(
+    #     [f"• {slot['start']} - {slot['end']} 可預約" for slot in available_slots]
+    # )
+
+    # 組合完整消息
+    full_message = f"{schedule_text}"
+
+    # 創建包含所有選項的 SuggestedActions
+    suggested_actions = SuggestedActions(
+        actions=[
+            CardAction(
+                title="@返回會議室選擇", type=ActionTypes.im_back, text="@返回主選單"
+            )
+        ]
+        + [
+            CardAction(
+                title=f"@{room_name} {date_display} {slot['start']} - {slot['end']} 預約",
+                type=ActionTypes.im_back,
+                text=f"@{room_name} {date_display} {slot['start']} - {slot['end']} 預約",
+            )
+            for slot in available_slots
+        ]
+    )
 
     await turn_context.send_activity(
         Activity(
             type=ActivityTypes.message,
-            text=f"{schedule_text}請選擇預約時段:",
+            text=full_message,
             suggested_actions=suggested_actions,
         )
     )
+
+
+# async def show_available_slots(turn_context: TurnContext, room_id: str, date: str):
+#     """顯示可用時段
+#     列出指定日期的所有可用時段
+#     同時顯示現有的預約狀況
+#     """
+#     # 取得會議室名稱和 email
+#     room_email = get_room_email(room_id)
+#     room_name = get_localtion_by_email(room_id)
+
+#     # 設定查詢時間範圍（例如 8:00-17:00）
+#     if date == "today":
+#         base_date = datetime.now()
+#         date_display = "今天"
+#     elif date == "tomorrow":
+#         base_date = datetime.now() + timedelta(days=1)
+#         date_display = "明天"
+#     else:
+#         base_date = datetime.strptime(date, "%Y-%m-%d")
+#         date_display = base_date.strftime("%m/%d")
+
+#     start_time = base_date.replace(hour=8, minute=0, second=0, microsecond=0)
+#     end_time = base_date.replace(hour=17, minute=0, second=0, microsecond=0)
+
+#     # 從 Graph API 獲取會議室排程
+#     schedule_data = await graph_api.get_room_schedule(room_email, start_time, end_time)
+
+#     # 處理回傳的資料，找出可用時段
+#     available_slots = process_schedule_data(schedule_data)
+
+#     actions = [
+#         CardAction(
+#             title="@返回會議室選擇", type=ActionTypes.im_back, text="@返回主選單"
+#         )
+#     ]
+
+#     # 根據可用時段建立選項
+#     for slot in available_slots:
+#         actions.append(
+#             CardAction(
+#                 title=f"@{room_name} {date_display} {slot['start']} - {slot['end']} 預約",
+#                 type=ActionTypes.im_back,
+#                 text=f"@{room_name} {date_display} {slot['start']} - {slot['end']} 預約",
+#             ),
+#         )
+
+#     suggested_actions = SuggestedActions(actions=actions)
+
+#     # 顯示當前預約狀況
+#     schedule_text = f"{room_name} {date_display} 預約狀況：\n\n"
+#     bookings = await get_current_bookings(room_email, date)
+
+#     if bookings:
+#         for booking in bookings:
+#             schedule_text += (
+#                 f"• {booking['start']} - {booking['end']}: {booking['subject']}\n\n"
+#             )
+#     else:
+#         schedule_text += "目前尚無預約\n\n"
+
+#     await turn_context.send_activity(
+#         Activity(
+#             type=ActivityTypes.message,
+#             text=f"{schedule_text}請選擇預約時段:",
+#             suggested_actions=suggested_actions,
+#         )
+#     )
 
 
 def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -802,7 +878,8 @@ async def message_handler(turn_context: TurnContext):
         print(f"處理訊息時發生錯誤: {str(e)}")
         await turn_context.send_activity(
             Activity(
-                type=ActivityTypes.message, text="處理訊息時發生錯誤，請稍後再試。"
+                type=ActivityTypes.message,
+                text=f"處理訊息時發生錯誤，請稍後再試。 {str(e)}",
             )
         )
 
