@@ -1,0 +1,119 @@
+{
+    "activity": {
+        "type": "message",
+        "id": "fd6956f0-bab9-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T07:55:45.503Z",
+        "local_timestamp": "2024-12-15T07:55:45.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "room|book",
+        "attachments": [],
+        "entities": [
+            {
+                "type": "ClientCapabilities"
+            }
+        ],
+        "channel_data": {
+            "clientActivityID": "1734249345492o2ziqzspi5"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "04f47df0-baba-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T07:55:58.159Z",
+        "local_timestamp": "2024-12-15T07:55:58.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "room|2",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734249358145hwxjv62t2n"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "068fde70-baba-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T07:56:00.855Z",
+        "local_timestamp": "2024-12-15T07:56:00.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "date|2|today",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "17342493608389k8pueut6jq"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}

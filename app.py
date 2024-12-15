@@ -800,6 +800,100 @@ def ping():
     )  # 使用 jsonify
 
 
+@app.route("/api/room/schedule/<room_id>", methods=["GET"])
+def get_room_schedule_api(room_id):
+    """
+    查詢會議室排程 API
+
+    參數:
+    - room_id: 會議室 ID (必填)
+    - date: 日期 (選填，格式：YYYY-MM-DD，預設今天)
+    """
+    try:
+        # 取得日期參數，如果沒有就用今天
+        date_str = request.args.get("date")
+        if date_str:
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid date format",
+                            "message": "日期格式應為 YYYY-MM-DD",
+                        }
+                    ),
+                    400,
+                )
+        else:
+            target_date = datetime.now()
+
+        # 設定時間範圍 (8:00-17:00)
+        start_datetime = target_date.replace(hour=8, minute=0, second=0, microsecond=0)
+        end_datetime = target_date.replace(hour=17, minute=0, second=0, microsecond=0)
+
+        # 取得會議室 email
+        room_email = get_room_email(room_id)
+        if not room_email:
+            return (
+                jsonify(
+                    {"error": "Invalid room ID", "message": f"找不到會議室: {room_id}"}
+                ),
+                400,
+            )
+
+        # 執行異步查詢
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        schedule_data = loop.run_until_complete(
+            graph_api.get_room_schedule(
+                room_email=room_email, start_time=start_datetime, end_time=end_datetime
+            )
+        )
+        loop.close()
+
+        # 處理排程資料
+        bookings = []
+        if "value" in schedule_data and schedule_data["value"]:
+            schedule_info = schedule_data["value"][0]
+            if "scheduleItems" in schedule_info:
+                for item in schedule_info["scheduleItems"]:
+                    start_str = item["start"]["dateTime"].split(".")[0]
+                    end_str = item["end"]["dateTime"].split(".")[0]
+
+                    start_time = datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
+                    end_time = datetime.strptime(end_str, "%Y-%m-%dT%H:%M:%S")
+
+                    # UTC+8
+                    start_time = start_time + timedelta(hours=8)
+                    end_time = end_time + timedelta(hours=8)
+
+                    bookings.append(
+                        {
+                            "start": start_time.strftime("%H:%M"),
+                            "end": end_time.strftime("%H:%M"),
+                            "subject": item["subject"],
+                            "organizer": item.get("organizer", {})
+                            .get("emailAddress", {})
+                            .get("name", "未知"),
+                        }
+                    )
+
+        return jsonify(
+            {
+                "room_id": room_id,
+                "room_email": room_email,
+                "date": target_date.strftime("%Y-%m-%d"),
+                "bookings": sorted(bookings, key=lambda x: x["start"]),
+                "working_hours": {"start": "08:00", "end": "17:00"},
+            }
+        )
+
+    except Exception as e:
+        print(f"獲取會議室排程時發生錯誤: {str(e)}")
+        return jsonify({"error": "Internal Server Error", "message": str(e)}), 500
+
+
 @app.route("/api/messages", methods=["POST"])
 def messages():
     """訊息路由處理
