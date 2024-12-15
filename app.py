@@ -230,7 +230,7 @@ async def show_date_options(turn_context: TurnContext, room_id: str):
     await turn_context.send_activity(
         Activity(
             type=ActivityTypes.message,
-            text=f"請選擇{room_name}的預約時段:(若希望時段未出現，\n\n可輸入ex.@第一會議室 今天 15:30 - 16:00 預約 or @第一會議室 明天 15:30 - 16:00 預約)",
+            text=f"請選擇{room_name}的預約時段:",
             suggested_actions=suggested_actions,
         )
     )
@@ -375,6 +375,9 @@ async def show_available_slots(turn_context: TurnContext, room_id: str, date: st
     else:
         schedule_text += "目前尚無預約\n"
 
+    schedule_text += (
+        "\n\n(若希望時段未出現，\n\n可輸入ex.@第一會議室 今天 15:30 - 16:00 預約)"
+    )
     # 匯總所有可用時段
     # slots_text = "\n可預約時段：\n" + "\n".join(
     #     [f"• {slot['start']} - {slot['end']} 可預約" for slot in available_slots]
