@@ -307,3 +307,193 @@
     },
     "user_name": "User"
 }
+{
+    "activity": {
+        "type": "message",
+        "id": "a2cab3b0-bacd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T10:16:23.403Z",
+        "local_timestamp": "2024-12-15T10:16:23.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "/help",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "17342577833332o75zjxt0u6"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "ab4c6fb0-bacd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T10:16:37.675Z",
+        "local_timestamp": "2024-12-15T10:16:37.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "/help",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734257797643n1hqvx9tfa8"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "dab546f0-bacd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T10:17:57.215Z",
+        "local_timestamp": "2024-12-15T10:17:57.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "/help",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734257877152vx24br3lcup"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "ddb392d0-bacd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T10:18:02.237Z",
+        "local_timestamp": "2024-12-15T10:18:02.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "room|book",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734257882186wtk9edzvrqm"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "e2421ba0-bacd-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T10:18:09.882Z",
+        "local_timestamp": "2024-12-15T10:18:09.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "room|2",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734257889822vqi802ov16p"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}

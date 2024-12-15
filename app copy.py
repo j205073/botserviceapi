@@ -1,6 +1,3 @@
-from datetime import datetime, timedelta
-from typing import List, Dict
-
 from flask import Flask, request, jsonify
 from botbuilder.core import (
     BotFrameworkAdapter,
@@ -156,18 +153,50 @@ async def process_file(file_info: dict) -> str:
 
 
 async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
+    """顯示主選單選項
+    展示機器人的主要功能選項
+    包含菜單查詢、分機查詢和會議室預約等功能
+    """
+
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(
-                title="@會議室預約", type=ActionTypes.im_back, text="@會議室預約"
+                title="會議室預約",
+                type=ActionTypes.im_back,
+                value="room|book",
+                text="room|book",
             )
         ]
     )
+    # actions=[
+    #     CardAction(
+    #         title="今天菜單",
+    #         type=ActionTypes.im_back,
+    #         value="menu|today",
+    #         text="menu|today",
+    #     ),
+    #     CardAction(
+    #         title="分機查詢",
+    #         type=ActionTypes.im_back,
+    #         value="tel|query",
+    #         text="tel|query",
+    #     ),
+    #     CardAction(
+    #         title="會議室預約",
+    #         type=ActionTypes.im_back,
+    #         text="room|book",
+    #         display_text="會議室預約",
+    #         value={"command": "room|book"},
+    #     ),
+    # ]
+    # )
 
+    # 設定顯示文字：如果 welcomeMsg 存在就組合訊息，否則使用預設文字
     display_text = (
         f"{welcomeMsg}\n或者請選擇以下選項:" if welcomeMsg else "請選擇以下選項:"
     )
 
+    # 創建回覆訊息
     reply = Activity(
         type=ActivityTypes.message,
         text=display_text,
@@ -178,17 +207,19 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
 
 async def show_meetingroom_options(turn_context: TurnContext):
+    """顯示會議室選擇選項
+    列出所有可供選擇的會議室
+    提供返回主選單的選項
+    """
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(
-                title="@第一會議室", type=ActionTypes.im_back, text="@第一會議室"
+                title="第一會議室",
+                type=ActionTypes.im_back,
+                value="room|1",  # 使用分隔符號來傳遞資訊
             ),
-            CardAction(
-                title="@第二會議室", type=ActionTypes.im_back, text="@第二會議室"
-            ),
-            CardAction(
-                title="@返回主選單", type=ActionTypes.im_back, text="@返回主選單"
-            ),
+            CardAction(title="第二會議室", type=ActionTypes.im_back, value="room|2"),
+            CardAction(title="返回主選單", type=ActionTypes.im_back, value="main_menu"),
         ]
     )
     await turn_context.send_activity(
@@ -201,39 +232,34 @@ async def show_meetingroom_options(turn_context: TurnContext):
 
 
 async def show_date_options(turn_context: TurnContext, room_id: str):
-    from datetime import datetime, timedelta
-
-    # 取得今天和明天的日期
-    today = datetime.now()
-    tomorrow = today + timedelta(days=1)
-
-    # 取得會議室名稱
-    room_name = get_localtion_by_email(room_id)
-
+    """顯示日期選擇選項
+    提供今天、明天等日期選擇
+    包含返回會議室選擇的選項
+    """
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(
-                title=f"@{room_name} {today.strftime('%m/%d')} 今天",
-                type=ActionTypes.im_back,
-                text=f"@{room_name} {today.strftime('%m/%d')} 今天",
+                title="今天", type=ActionTypes.im_back, value=f"date|{room_id}|today"
             ),
             CardAction(
-                title=f"@{room_name} {tomorrow.strftime('%m/%d')} 明天",
-                type=ActionTypes.im_back,
-                text=f"@{room_name} {tomorrow.strftime('%m/%d')} 明天",
+                title="明天", type=ActionTypes.im_back, value=f"date|{room_id}|tomorrow"
             ),
             CardAction(
-                title="@返回會議室選擇", type=ActionTypes.im_back, text="@返回主選單"
+                title="返回會議室選擇", type=ActionTypes.im_back, value="room|book"
             ),
         ]
     )
     await turn_context.send_activity(
         Activity(
             type=ActivityTypes.message,
-            text=f"請選擇{room_name}的預約日期:",
+            text="請選擇日期:",
             suggested_actions=suggested_actions,
         )
     )
+
+
+from datetime import datetime, timedelta
+from typing import List, Dict
 
 
 async def get_current_bookings(room_id: str, date: str) -> List[Dict]:
@@ -338,20 +364,17 @@ async def show_available_slots(turn_context: TurnContext, room_id: str, date: st
     列出指定日期的所有可用時段
     同時顯示現有的預約狀況
     """
-    # 取得會議室名稱和 email
+
+    # 取得會議室 email
     room_email = get_room_email(room_id)
-    room_name = get_localtion_by_email(room_id)
 
     # 設定查詢時間範圍（例如 8:00-17:00）
     if date == "today":
         base_date = datetime.now()
-        date_display = "今天"
     elif date == "tomorrow":
         base_date = datetime.now() + timedelta(days=1)
-        date_display = "明天"
     else:
         base_date = datetime.strptime(date, "%Y-%m-%d")
-        date_display = base_date.strftime("%m/%d")
 
     start_time = base_date.replace(hour=8, minute=0, second=0, microsecond=0)
     end_time = base_date.replace(hour=17, minute=0, second=0, microsecond=0)
@@ -362,40 +385,46 @@ async def show_available_slots(turn_context: TurnContext, room_id: str, date: st
     # 處理回傳的資料，找出可用時段
     available_slots = process_schedule_data(schedule_data)
 
-    actions = [
+    actions = []
+    actions.append(
         CardAction(
-            title="@返回會議室選擇", type=ActionTypes.im_back, text="@返回主選單"
+            title="返回會議室選擇", type=ActionTypes.im_back, value="back_to_rooms"
         )
-    ]
-
+    )
     # 根據可用時段建立選項
     for slot in available_slots:
         actions.append(
             CardAction(
-                title=f"@{room_name} {date_display} {slot['start']} - {slot['end']} 預約",
+                title=f"{slot['start']} - {slot['end']}",
                 type=ActionTypes.im_back,
-                text=f"@{room_name} {date_display} {slot['start']} - {slot['end']} 預約",
+                value=f"book|{room_id}|{date}|{slot['start']}|{slot['end']}",
             ),
         )
+
+    # # 加入返回選項
+    # actions.append(
+    #     CardAction(
+    #         title="返回日期選擇",
+    #         type=ActionTypes.im_back,
+    #         value=f"back_to_date|{room_id}",
+    #     )
+    # )
 
     suggested_actions = SuggestedActions(actions=actions)
 
     # 顯示當前預約狀況
-    schedule_text = f"{room_name} {date_display} 預約狀況：\n\n"
+    schedule_text = "當前預約狀況：\n\n"
     bookings = await get_current_bookings(room_email, date)
 
-    if bookings:
-        for booking in bookings:
-            schedule_text += (
-                f"• {booking['start']} - {booking['end']}: {booking['subject']}\n\n"
-            )
-    else:
-        schedule_text += "目前尚無預約\n\n"
+    for booking in bookings:
+        schedule_text += (
+            f"• {booking['start']} - {booking['end']}: {booking['subject']}\n\n"
+        )
 
     await turn_context.send_activity(
         Activity(
             type=ActivityTypes.message,
-            text=f"{schedule_text}請選擇預約時段:",
+            text=f"{schedule_text}\n\n請選擇預約時段:",
             suggested_actions=suggested_actions,
         )
     )
@@ -552,6 +581,11 @@ async def get_user_email(turn_context: TurnContext) -> str:
 
 
 async def message_handler(turn_context: TurnContext):
+    """訊息處理主函數
+    處理所有來自使用者的訊息
+    根據訊息類型分配給適當的處理函數
+    包含檔案處理、會議預約和一般對話等功能
+    """
     try:
         user_id = turn_context.activity.from_property.id
         user_name = turn_context.activity.from_property.name
@@ -559,111 +593,125 @@ async def message_handler(turn_context: TurnContext):
 
         print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
         print(f"Full activity: {turn_context.activity}")
+        try:
+            # 確保保存 JSON 的目錄存在
+            log_dir = "./json_logs"
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
 
-        # 移除 @ 前綴進行判斷
-        user_message = turn_context.activity.text.lstrip("@")
-        if user_message.lower() == "/help":
-            await show_help_options(turn_context)
-            return
-        # 會議室預約流程
-        elif user_message == "會議室預約":
-            await show_meetingroom_options(turn_context)
-            return
+            # 轉換 turn_context 為字典
+            context_dict = {
+                "activity": turn_context.activity.as_dict(),
+                "userinfo": {
+                    "id": turn_context.activity.from_property.id,
+                    "name": turn_context.activity.from_property.name,
+                    "aadObjectId": getattr(
+                        turn_context.activity.from_property, "aad_object_id", None
+                    ),
+                },
+                "user_name": user_name,
+            }
 
-        # 會議室選擇
-        elif user_message == "第一會議室":
-            await show_date_options(turn_context, "1")
-            return
+            # 保存到 json_log.json
+            log_file_path = os.path.join(log_dir, "json_log.json")
+            with open(log_file_path, "a", encoding="utf-8") as f:
+                json.dump(context_dict, f, ensure_ascii=False, indent=4)
+                f.write("\n")  # 每次寫入一條日誌後換行
+        except Exception as e:
+            print(f"Write Json Log Has Some Error: {str(e)}")
 
-        elif user_message == "第二會議室":
-            await show_date_options(turn_context, "2")
-            return
+        attachments = turn_context.activity.attachments
 
-        # 時段預約邏輯
-        elif " 預約" in user_message:
-            # 解析預約信息
-            parts = user_message.lstrip("@").split()
-            room_name = parts[0]
-            date_str = parts[1]
-            time_slot = f"{parts[2]} - {parts[4]}"
+        if turn_context.activity.text:
+            user_message = turn_context.activity.text
 
-            # 確定房間 ID
-            room_id = "1" if room_name == "第一會議室" else "2"
-
-            # 確定日期
-            if date_str == "今天":
-                date = "today"
-            elif date_str == "明天":
-                date = "tomorrow"
-            else:
-                # 如果是具體日期，可能需要額外處理
-                date = datetime.strptime(date_str, "%m/%d").strftime("%Y-%m-%d")
-
-            # 假設需要彈出確認視窗或直接處理預約
-            if await is_slot_available(
-                room_id, date, time_slot.split(" - ")[0], time_slot.split(" - ")[1]
+            # 處理指令
+            if user_message.lower() == "/help":
+                await show_help_options(turn_context)
+                return
+            elif turn_context.activity.text == "room|book" or (
+                turn_context.activity.value
+                and turn_context.activity.value.get("command") == "room|book"
             ):
-                # 嘗試預約
-                user_mail = (
-                    await get_user_email(turn_context) or f"{user_id}@unknown.com"
-                )
-                booking_result = await create_meeting(
-                    room_id=room_id,
-                    date=date,
-                    start_time=time_slot.split(" - ")[0],
-                    end_time=time_slot.split(" - ")[1],
-                    user_name=user_name,
-                    user_mail=user_mail,
-                )
+                await show_meetingroom_options(turn_context)
+                return
+            # elif user_message == "room|book":
+            #     await show_meetingroom_options(turn_context)
+            #     return
 
-                if booking_result:
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text=f"預約成功！已為您預約{room_name}{date_str}{time_slot}",
-                        )
+            elif user_message == "main_menu":
+                await show_help_options(turn_context)
+                return
+
+            # 處理會議室相關命令
+            elif user_message.startswith("room|"):
+                # 處理會議室選擇
+                _, room_id = user_message.split("|")
+                await show_date_options(turn_context, room_id)
+                return
+
+            elif user_message.startswith("date|"):
+                # 處理日期選擇
+                _, room_id, date = user_message.split("|")
+                await show_available_slots(turn_context, room_id, date)
+                return
+
+            elif user_message.startswith("book|"):
+                # 處理預約請求
+                _, room_id, date, start_time, end_time = user_message.split("|")
+                # 檢查時段是否已被預約
+                if await is_slot_available(room_id, date, start_time, end_time):
+                    # 建立預約
+                    booking_result = await create_meeting(
+                        room_id=room_id,
+                        date=date,
+                        start_time=start_time,
+                        end_time=end_time,
+                        user_name=user_name,
+                        user_mail=user_mail,
                     )
+                    if booking_result:
+                        await turn_context.send_activity(
+                            Activity(type=ActivityTypes.message, text="預約成功！")
+                        )
+                    else:
+                        await turn_context.send_activity(
+                            Activity(
+                                type=ActivityTypes.message,
+                                text="預約失敗，請稍後再試。",
+                            )
+                        )
                 else:
                     await turn_context.send_activity(
                         Activity(
-                            type=ActivityTypes.message, text="預約失敗，請稍後再試。"
+                            type=ActivityTypes.message,
+                            text="此時段已被預約，請選擇其他時段。",
                         )
                     )
-            else:
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text="此時段已被預約，請選擇其他時段。",
+                    await show_available_slots(turn_context, room_id, date)
+                return
+
+            # 如果不是特定命令，則使用 OpenAI 處理
+            print(f"Current Request Is An Txt Messages: {user_message}")
+            response_message = await call_openai(
+                user_message, turn_context.activity.conversation.id
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=response_message)
+            )
+
+        elif attachments and len(attachments) > 0:
+            print("Current Request Is An File")
+            for attachment in turn_context.activity.attachments:
+                file_info = await download_attachment_and_write(attachment)
+                if file_info:
+                    file_text = await process_file(file_info)
+                    summarized_text = await summarize_text(
+                        file_text, turn_context.activity.conversation.id
                     )
-                )
-            return
-
-        # 日期選擇
-        elif " 今天" in user_message or " 明天" in user_message:
-            # 解析房間和日期
-            parts = user_message.split()
-            room_name = parts[0]
-            date_type = parts[2]
-
-            # 根據會議室名稱找對應的 room_id
-            room_id = "1" if room_name == "第一會議室" else "2"
-
-            date = "today" if date_type == "今天" else "tomorrow"
-            await show_available_slots(turn_context, room_id, date)
-            return
-
-        # 主選單
-        elif user_message == "返回主選單":
-            await show_help_options(turn_context)
-            return
-
-        # OpenAI 處理
-        response_message = await call_openai(
-            user_message, turn_context.activity.conversation.id
-        )
-        await turn_context.send_activity(
-            Activity(type=ActivityTypes.message, text=response_message)
-        )
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=summarized_text)
+                    )
 
     except Exception as e:
         print(f"處理訊息時發生錯誤: {str(e)}")
