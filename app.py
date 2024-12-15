@@ -161,35 +161,35 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(
-                title="會議室預約", 
-                type=ActionTypes.im_back, 
+                title="會議室預約",
+                type=ActionTypes.im_back,
                 value={"command": "room|book"},
-                text="room|book"
+                text="room|book",
             )
         ]
     )
-        # actions=[
-        #     CardAction(
-        #         title="今天菜單",
-        #         type=ActionTypes.im_back,
-        #         value="menu|today",
-        #         text="menu|today",
-        #     ),
-        #     CardAction(
-        #         title="分機查詢",
-        #         type=ActionTypes.im_back,
-        #         value="tel|query",
-        #         text="tel|query",
-        #     ),
-        #     CardAction(
-        #         title="會議室預約",
-        #         type=ActionTypes.im_back,
-        #         text="room|book",
-        #         display_text="會議室預約",
-        #         value={"command": "room|book"},
-        #     ),
-        # ]
-    )
+    # actions=[
+    #     CardAction(
+    #         title="今天菜單",
+    #         type=ActionTypes.im_back,
+    #         value="menu|today",
+    #         text="menu|today",
+    #     ),
+    #     CardAction(
+    #         title="分機查詢",
+    #         type=ActionTypes.im_back,
+    #         value="tel|query",
+    #         text="tel|query",
+    #     ),
+    #     CardAction(
+    #         title="會議室預約",
+    #         type=ActionTypes.im_back,
+    #         text="room|book",
+    #         display_text="會議室預約",
+    #         value={"command": "room|book"},
+    #     ),
+    # ]
+    # )
 
     # 設定顯示文字：如果 welcomeMsg 存在就組合訊息，否則使用預設文字
     display_text = (
@@ -562,9 +562,19 @@ async def welcome_user(turn_context: TurnContext):
 async def get_user_email(turn_context: TurnContext) -> str:
     """查詢目前user mail"""
     try:
+        # 檢查是否有 aad_object_id
         aad_object_id = turn_context.activity.from_property.aad_object_id
+
+        if not aad_object_id:
+            print("No AAD Object ID found")
+            return None
+
+        # 使用 Graph API 獲取用戶信息
         user_info = await graph_api.get_user_info(aad_object_id)
+
+        # 返回郵件地址
         return user_info.get("mail")
+
     except Exception as e:
         print(f"取得用戶 email 時發生錯誤: {str(e)}")
         return None
@@ -579,7 +589,8 @@ async def message_handler(turn_context: TurnContext):
     try:
         user_id = turn_context.activity.from_property.id
         user_name = turn_context.activity.from_property.name
-        user_mail = get_user_email(turn_context)
+        user_mail = await get_user_email(turn_context) or f"{user_id}@unknown.com"
+
         print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
         print(f"Received message: {user_message}")
         print(f"Full activity: {turn_context.activity}")
@@ -619,9 +630,10 @@ async def message_handler(turn_context: TurnContext):
             if user_message.lower() == "/help":
                 await show_help_options(turn_context)
                 return
-            elif (turn_context.activity.text == "room|book" or 
-            (turn_context.activity.value and 
-            turn_context.activity.value.get("command") == "room|book")):
+            elif turn_context.activity.text == "room|book" or (
+                turn_context.activity.value
+                and turn_context.activity.value.get("command") == "room|book"
+            ):
                 await show_meetingroom_options(turn_context)
                 return
             # elif user_message == "room|book":
