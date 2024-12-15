@@ -38,7 +38,8 @@ import logging
 
 logging.basicConfig(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")
-
+# gpt token數
+max_tokens = 2000
 # 初始化 Token 管理器和 Graph API
 token_manager = TokenManager(
     tenant_id=os.getenv("TENANT_ID"),
@@ -607,7 +608,7 @@ async def call_openai(prompt, conversation_id, user_mail=None):
         response = openai.ChatCompletion.create(
             engine="gpt-4o-mini-deploy",
             messages=conversation_history[conversation_id],
-            max_tokens=500,
+            max_tokens=max_tokens,
             timeout=15,
         )
         message = response["choices"][0]["message"]
@@ -641,7 +642,7 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
             ],
-            max_tokens=500,
+            max_tokens=max_tokens,
         )
         message = response["choices"][0]["message"]
         conversation_history[conversation_id].append(message)
