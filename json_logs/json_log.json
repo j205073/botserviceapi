@@ -269,3 +269,41 @@
     },
     "user_name": "User"
 }
+{
+    "activity": {
+        "type": "message",
+        "id": "56af0c00-bac9-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-15T09:45:37.728Z",
+        "local_timestamp": "2024-12-15T09:45:37.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "f53f09c0-bab9-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "f53fa600-bab9-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "hellk",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "173425593767596l2kyjhc16"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "3aac84b2-4225-4f52-949b-2622b7056d23",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}

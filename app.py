@@ -592,7 +592,6 @@ async def message_handler(turn_context: TurnContext):
         user_mail = await get_user_email(turn_context) or f"{user_id}@unknown.com"
 
         print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
-        print(f"Received message: {user_message}")
         print(f"Full activity: {turn_context.activity}")
         try:
             # 確保保存 JSON 的目錄存在
