@@ -161,13 +161,13 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
     suggested_actions = SuggestedActions(
         actions=[
             CardAction(
-                title="會議室預約",  # 用戶看到的文字
-                type=ActionTypes.im_back,  # 動作類型
-                value="room|book",  # 動作的實際值
-                text="room|book",  # 傳遞的文字
-                display_text="會議室預約",  # 可選，顯示的文字
+                title="會議室預約", 
+                type=ActionTypes.im_back, 
+                value={"command": "room|book"},
+                text="room|book"
             )
         ]
+    )
         # actions=[
         #     CardAction(
         #         title="今天菜單",
@@ -608,7 +608,7 @@ async def message_handler(turn_context: TurnContext):
                 json.dump(context_dict, f, ensure_ascii=False, indent=4)
                 f.write("\n")  # 每次寫入一條日誌後換行
         except Exception as e:
-            print(f"Write Josn Log Has Some Error: {str(e)}")
+            print(f"Write Json Log Has Some Error: {str(e)}")
 
         attachments = turn_context.activity.attachments
 
@@ -619,10 +619,14 @@ async def message_handler(turn_context: TurnContext):
             if user_message.lower() == "/help":
                 await show_help_options(turn_context)
                 return
-
-            elif user_message == "room|book":
+            elif (turn_context.activity.text == "room|book" or 
+            (turn_context.activity.value and 
+            turn_context.activity.value.get("command") == "room|book")):
                 await show_meetingroom_options(turn_context)
                 return
+            # elif user_message == "room|book":
+            #     await show_meetingroom_options(turn_context)
+            #     return
 
             elif user_message == "main_menu":
                 await show_help_options(turn_context)
