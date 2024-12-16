@@ -1373,5 +1373,12 @@ async def messages():
     return {"status": 200}
 
 
+# if __name__ == "__main__":
+#     app.run(host="0.0.0.0", port=8000)
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+    import hypercorn.asyncio
+    import hypercorn.config
+
+    config = hypercorn.config.Config()
+    config.bind = ["0.0.0.0:8000"]
+    asyncio.run(hypercorn.asyncio.serve(app, config))
