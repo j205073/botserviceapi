@@ -159,6 +159,13 @@ async def process_file(file_info: dict) -> str:
         return f"處理檔案時發生錯誤：{str(e)}"
 
 
+async def show_self_info(turn_context: TurnContext, user_mail: str):
+    """取得user資訊"""
+    user_info = await graph_api.get_user_info(user_mail)
+    info = jsonify(user_info)
+    await turn_context.send_activity(Activity(type=ActivityTypes.message, text=info))
+
+
 async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
     suggested_actions = SuggestedActions(
         actions=[
@@ -1048,6 +1055,17 @@ async def message_handler(turn_context: TurnContext):
             # 附件
             attachments = turn_context.activity.attachments
             if turn_context.activity.text:
+                if turn_context.activity.text.lower() == "/who":
+                    user_mail = (
+                        await get_user_email(turn_context) or f"{user_id}@unknown.com"
+                    )
+
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=user_mail)
+                    )
+                    await show_self_info(turn_context, user_mail)
+                    return
+
                 if turn_context.activity.text.lower() == "/help":
                     await show_help_options(turn_context)
                     return
@@ -1067,7 +1085,7 @@ async def message_handler(turn_context: TurnContext):
                 await turn_context.send_activity(
                     Activity(
                         type=ActivityTypes.message,
-                        text=f"檔案分析功能開發中",
+                        text=f"檔案分析功能目前暫不開放，請見諒!",
                     )
                 )
                 # user_mail = (
