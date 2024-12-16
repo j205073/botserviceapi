@@ -231,7 +231,7 @@ async def show_date_options(turn_context: TurnContext, room_id: str):
     await turn_context.send_activity(
         Activity(
             type=ActivityTypes.message,
-            text=f"請選擇{room_name}的預約時段:",
+            text=f"請選擇{room_name}的預約日期:",
             suggested_actions=suggested_actions,
         )
     )
@@ -481,14 +481,91 @@ async def show_available_slots(turn_context: TurnContext, room_id: str, date: st
 #     )
 
 
+# def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]:
+#     """處理會議室排程資料
+#     分析會議室排程資料，找出可用的時段
+#     排除已被預約的時間，返回可預約的時段列表
+#     """
+#     available_slots = []
+
+#     # 工作時間從 8:00 到 17:00，每小時一個時段
+#     work_hours = [
+#         ("08:00", "08:30"),
+#         ("08:30", "09:00"),
+#         ("09:00", "09:30"),
+#         ("09:30", "10:00"),
+#         ("10:00", "10:30"),
+#         ("10:30", "11:00"),
+#         ("11:00", "11:30"),
+#         ("11:30", "12:00"),
+#         ("13:00", "13:30"),
+#         ("13:30", "14:00"),
+#         ("14:00", "14:30"),
+#         ("14:30", "15:00"),
+#         ("15:00", "15:30"),
+#         ("15:30", "16:00"),
+#         ("16:00", "16:30"),
+#         ("16:30", "17:00"),
+#     ]
+
+#     # 從回應中取得已預約的時段
+#     booked_slots = []
+#     if "value" in schedule_data and schedule_data["value"]:
+#         schedule_info = schedule_data["value"][0]
+#         if "scheduleItems" in schedule_info:
+#             for item in schedule_info["scheduleItems"]:
+#                 # 修改時間解析方式
+#                 start_str = item["start"]["dateTime"].split(".")[0]  # 移除毫秒部分
+#                 end_str = item["end"]["dateTime"].split(".")[0]  # 移除毫秒部分
+
+#                 start_time = datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
+#                 end_time = datetime.strptime(end_str, "%Y-%m-%dT%H:%M:%S")
+
+#                 # UTC+8
+#                 start_time = start_time + timedelta(hours=8)
+#                 end_time = end_time + timedelta(hours=8)
+
+#                 booked_slots.append(
+#                     {
+#                         "start": start_time.strftime("%H:%M"),
+#                         "end": end_time.strftime("%H:%M"),
+#                         "subject": item["subject"],
+#                     }
+#                 )
+
+#     # 尋找可用時段（排除已預約的時段）
+#     for start, end in work_hours:
+#         is_available = True
+#         for booked in booked_slots:
+#             # 檢查是否與已預約時段重疊
+#             if (
+#                 (start >= booked["start"] and start < booked["end"])
+#                 or (end > booked["start"] and end <= booked["end"])
+#                 or (start <= booked["start"] and end >= booked["end"])
+#             ):
+#                 is_available = False
+#                 break
+
+#         if is_available:
+#             available_slots.append({"start": start, "end": end})
+
+#     return available_slots
+
+
 def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]:
     """處理會議室排程資料
     分析會議室排程資料，找出可用的時段
-    排除已被預約的時間，返回可預約的時段列表
+    排除已被預約的時間和已經過去的時段
+    返回可預約的時段列表
     """
     available_slots = []
 
-    # 工作時間從 8:00 到 17:00，每小時一個時段
+    # 獲取當前台灣時間
+    current_time = datetime.now()
+    current_hour = current_time.hour
+    current_minute = current_time.minute
+
+    # 生成當天的時段列表
     work_hours = [
         ("08:00", "08:30"),
         ("08:30", "09:00"),
@@ -514,9 +591,8 @@ def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]
         schedule_info = schedule_data["value"][0]
         if "scheduleItems" in schedule_info:
             for item in schedule_info["scheduleItems"]:
-                # 修改時間解析方式
-                start_str = item["start"]["dateTime"].split(".")[0]  # 移除毫秒部分
-                end_str = item["end"]["dateTime"].split(".")[0]  # 移除毫秒部分
+                start_str = item["start"]["dateTime"].split(".")[0]
+                end_str = item["end"]["dateTime"].split(".")[0]
 
                 start_time = datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
                 end_time = datetime.strptime(end_str, "%Y-%m-%dT%H:%M:%S")
@@ -533,8 +609,17 @@ def process_schedule_data(schedule_data: Dict[str, Any]) -> List[Dict[str, str]]
                     }
                 )
 
-    # 尋找可用時段（排除已預約的時段）
+    # 尋找可用時段（排除已預約的時段和已經過去的時段）
     for start, end in work_hours:
+        # 將時段轉換為小時和分鐘以便比較
+        start_hour, start_minute = map(int, start.split(":"))
+
+        # 檢查時段是否已經過去
+        if current_hour > start_hour or (
+            current_hour == start_hour and current_minute >= start_minute
+        ):
+            continue
+
         is_available = True
         for booked in booked_slots:
             # 檢查是否與已預約時段重疊
@@ -882,21 +967,27 @@ async def message_handler(turn_context: TurnContext):
                 )
             elif attachments and len(attachments) > 0:
                 print("Current Request Is An File")
-                user_mail = (
-                    await get_user_email(turn_context) or f"{user_id}@unknown.com"
+                await turn_context.send_activity(
+                    Activity(
+                        type=ActivityTypes.message,
+                        text=f"檔案分析功能開發中",
+                    )
                 )
-                for attachment in turn_context.activity.attachments:
-                    file_info = await download_attachment_and_write(attachment)
-                    if file_info:
-                        file_text = await process_file(file_info)
-                        summarized_text = await summarize_text(
-                            file_text,
-                            turn_context.activity.conversation.id,
-                            user_mail=user_mail,
-                        )
-                        await turn_context.send_activity(
-                            Activity(type=ActivityTypes.message, text=summarized_text)
-                        )
+                # user_mail = (
+                #     await get_user_email(turn_context) or f"{user_id}@unknown.com"
+                # )
+                # for attachment in turn_context.activity.attachments:
+                #     file_info = await download_attachment_and_write(attachment)
+                #     if file_info:
+                #         file_text = await process_file(file_info)
+                #         summarized_text = await summarize_text(
+                #             file_text,
+                #             turn_context.activity.conversation.id,
+                #             user_mail=user_mail,
+                #         )
+                #         await turn_context.send_activity(
+                #             Activity(type=ActivityTypes.message, text=summarized_text)
+                #         )
     except Exception as e:
         print(f"處理訊息時發生錯誤: {str(e)}")
         await turn_context.send_activity(
