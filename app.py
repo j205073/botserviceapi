@@ -35,11 +35,14 @@ from graph_api import GraphAPI  # 假設你已經有這個模組
 from token_manager import TokenManager  # 假設你已經有這個模組
 import sys
 import logging
+from quart import Quart, request, jsonify
+from quart.helpers import make_response
+
 
 logging.basicConfig(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")
 # gpt token數
-max_tokens = 2000
+max_tokens = 600
 # 初始化 Token 管理器和 Graph API
 token_manager = TokenManager(
     tenant_id=os.getenv("TENANT_ID"),
@@ -51,9 +54,9 @@ graph_api = GraphAPI(token_manager)
 # 載入環境變數
 load_dotenv()
 
-# Flask 應用設定
-app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 限制最大 16MB
+# Quart 應用設定
+app = Quart(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 appId = os.getenv("BOT_APP_ID")
 appPwd = os.getenv("BOT_APP_PASSWORD")
@@ -665,6 +668,30 @@ async def call_openai(prompt, conversation_id, user_mail=None):
     """
     global conversation_history
 
+    # 檢查是否是預約相關問題
+    booking_keywords = ["預約", "會議", "成功", "查詢"]
+    is_booking_query = any(keyword in prompt for keyword in booking_keywords)
+
+    if is_booking_query and user_mail:
+        try:
+            # 查詢用戶的預約
+            meetings = await get_user_meetings(user_mail)
+
+            # 將預約資訊加入到提示中
+            booking_info = (
+                "您今天沒有會議室預約。" if not meetings else "您今天的預約如下:\n"
+            )
+            for meeting in meetings:
+                booking_info += f"- {meeting['location']}: {meeting['start']}-{meeting['end']} {meeting['subject']}\n"
+
+            # 將實際預約資訊加入到 GPT 提示中
+            prompt = f"{prompt}\n\n實際預約資訊:\n{booking_info}"
+
+        except Exception as e:
+            print(f"查詢預約時發生錯誤: {str(e)}")
+            # 發生錯誤時也通知 GPT
+            prompt = f"{prompt}\n\n無法查詢到預約資訊,原因: {str(e)}"
+
     if conversation_id not in conversation_history:
         conversation_history[conversation_id] = []
 
@@ -702,6 +729,78 @@ async def call_openai(prompt, conversation_id, user_mail=None):
     except Exception as e:
         print(f"OpenAI API 錯誤: {str(e)}")
         return "抱歉，目前無法處理您的請求。"
+
+
+async def get_user_meetings(user_mail: str) -> List[Dict]:
+    """
+    查詢使用者的會議預約
+
+    Args:
+        user_mail: 使用者的電子郵件地址
+
+    Returns:
+        List[Dict]: 會議預約列表，每個預約包含時間、地點等資訊
+    """
+    try:
+        # 設定查詢時間範圍（今天）
+        today = datetime.now()
+        start_time = today.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = today.replace(hour=23, minute=59, second=59, microsecond=999999)
+        # user_mail = "juncheng.liu@rinnai.com.tw"
+        # 查詢行事曆資料
+        calendar_data = await graph_api.get_user_calendar(
+            user_mail=user_mail, start_time=start_time, end_time=end_time
+        )
+
+        if not calendar_data or "value" not in calendar_data:
+            print("No calendar data found")
+            return []
+
+        # 過濾並整理會議室預約資訊
+        meetings = []
+        for event in calendar_data["value"]:
+            # 檢查是否有地點資訊且是會議室
+            if not event.get("location"):
+                continue
+
+            location_name = event["location"].get("displayName", "")
+            if not any(
+                room_name in location_name for room_name in ["第一會議室", "第二會議室"]
+            ):
+                continue
+
+            # 處理時間 (從 UTC 轉為本地時間)
+            start_time = datetime.fromisoformat(
+                event["start"]["dateTime"].replace("Z", "+00:00")
+            ) + timedelta(hours=8)
+
+            end_time = datetime.fromisoformat(
+                event["end"]["dateTime"].replace("Z", "+00:00")
+            ) + timedelta(hours=8)
+
+            meetings.append(
+                {
+                    "id": event.get("id", ""),
+                    "subject": event.get("subject", "未命名會議"),
+                    "location": location_name,
+                    "start": start_time.strftime("%H:%M"),
+                    "end": end_time.strftime("%H:%M"),
+                    "organizer": event.get("organizer", {})
+                    .get("emailAddress", {})
+                    .get("name", "未知"),
+                    "is_organizer": event.get("organizer", {})
+                    .get("emailAddress", {})
+                    .get("address", "")
+                    == user_mail,
+                }
+            )
+
+        # 依開始時間排序
+        return sorted(meetings, key=lambda x: x["start"])
+
+    except Exception as e:
+        print(f"查詢使用者會議時發生錯誤: {str(e)}")
+        return []
 
 
 async def summarize_text(text, conversation_id, user_mail=None) -> str:
@@ -757,7 +856,6 @@ async def welcome_user(turn_context: TurnContext):
 
 我可以協助您：
 - 回答各種問題
-- 文件分析與摘要
 - 多語言翻譯
 - 智能建議與諮詢
 有什麼我可以幫您的嗎？
@@ -767,7 +865,6 @@ async def welcome_user(turn_context: TurnContext):
 {user_name} さん、TR GPT インテリジェントアシスタントへようこそ！
 お手伝いできること：
 - あらゆる質問への対応
-- 文書分析とサマリー
 - 多言語翻訳
 - インテリジェントな提案とアドバイス
 何かお力になれることはありますか？
@@ -1122,15 +1219,17 @@ def convert_to_datetime(date: str, time: str) -> datetime:
 
 
 @app.route("/ping", methods=["GET"])
-def ping():
+async def ping():
     debuggerTest = os.getenv("debugInfo")
-    return jsonify(
-        {"status": "ok", "message": "Bot is alive", "debuggerTest": debuggerTest}
-    )  # 使用 jsonify
+    return await make_response(
+        jsonify(
+            {"status": "ok", "message": "Bot is alive", "debuggerTest": debuggerTest}
+        )
+    )
 
 
 @app.route("/user/<user_id>", methods=["GET"])
-def user(user_id):
+async def user(user_id):
     """
     用戶資訊 API
 
@@ -1138,32 +1237,26 @@ def user(user_id):
     - user_id: 用戶 ID (必填)
     """
     try:
-        # 執行異步操作
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        user_info = loop.run_until_complete(graph_api.get_user_info(user_id))
-        loop.close()
+        # 直接使用 await 呼叫 graph_api
+        user_info = await graph_api.get_user_info(user_id)
 
-        return jsonify(
-            {
-                "status": "ok",
-                "user_info": user_info,
-            }
+        return await make_response(
+            jsonify(
+                {
+                    "status": "ok",
+                    "user_info": user_info,
+                }
+            )
         )
     except Exception as e:
         print(f"獲取用戶資訊時發生錯誤: {str(e)}")
-        return jsonify({"error": "Internal Server Error", "message": str(e)}), 500
+        return await make_response(
+            jsonify({"error": "Internal Server Error", "message": str(e)}), 500
+        )
 
 
 @app.route("/api/room/schedule/<room_id>", methods=["GET"])
-def get_room_schedule_api(room_id):
-    """
-    查詢會議室排程 API
-
-    參數:
-    - room_id: 會議室 ID (必填)
-    - date: 日期 (選填，格式：YYYY-MM-DD，預設今天)
-    """
+async def get_room_schedule_api(room_id):
     try:
         # 取得日期參數，如果沒有就用今天
         date_str = request.args.get("date")
@@ -1171,7 +1264,7 @@ def get_room_schedule_api(room_id):
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d")
             except ValueError:
-                return (
+                return await make_response(
                     jsonify(
                         {
                             "error": "Invalid date format",
@@ -1183,31 +1276,23 @@ def get_room_schedule_api(room_id):
         else:
             target_date = datetime.now()
 
-        # 設定時間範圍 (8:00-17:00)
         start_datetime = target_date.replace(hour=8, minute=0, second=0, microsecond=0)
         end_datetime = target_date.replace(hour=17, minute=0, second=0, microsecond=0)
 
-        # 取得會議室 email
         room_email = get_room_email(room_id)
         if not room_email:
-            return (
+            return await make_response(
                 jsonify(
                     {"error": "Invalid room ID", "message": f"找不到會議室: {room_id}"}
                 ),
                 400,
             )
 
-        # 執行異步查詢
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        schedule_data = loop.run_until_complete(
-            graph_api.get_room_schedule(
-                room_email=room_email, start_time=start_datetime, end_time=end_datetime
-            )
+        # 直接使用 await
+        schedule_data = await graph_api.get_room_schedule(
+            room_email=room_email, start_time=start_datetime, end_time=end_datetime
         )
-        loop.close()
 
-        # 處理排程資料
         bookings = []
         if "value" in schedule_data and schedule_data["value"]:
             schedule_info = schedule_data["value"][0]
@@ -1234,30 +1319,31 @@ def get_room_schedule_api(room_id):
                         }
                     )
 
-        return jsonify(
-            {
-                "room_id": room_id,
-                "room_email": room_email,
-                "date": target_date.strftime("%Y-%m-%d"),
-                "bookings": sorted(bookings, key=lambda x: x["start"]),
-                "working_hours": {"start": "08:00", "end": "17:00"},
-            }
+        return await make_response(
+            jsonify(
+                {
+                    "room_id": room_id,
+                    "room_email": room_email,
+                    "date": target_date.strftime("%Y-%m-%d"),
+                    "bookings": sorted(bookings, key=lambda x: x["start"]),
+                    "working_hours": {"start": "08:00", "end": "17:00"},
+                }
+            )
         )
 
     except Exception as e:
         print(f"獲取會議室排程時發生錯誤: {str(e)}")
-        return jsonify({"error": "Internal Server Error", "message": str(e)}), 500
+        return await make_response(
+            jsonify({"error": "Internal Server Error", "message": str(e)}), 500
+        )
 
 
 @app.route("/api/messages", methods=["POST"])
-def messages():
-    """訊息路由處理
-    處理所有進入的 HTTP 請求
-    將請求轉發給適當的處理函數
-    """
+async def messages():
     print("=== 開始處理訊息 ===")
     if "application/json" in request.headers["Content-Type"]:
-        body = request.json
+        # 改用 await 取得 json 資料
+        body = await request.get_json()
         print(f"請求內容: {json.dumps(body, ensure_ascii=False, indent=2)}")
     else:
         return {"status": 415}
@@ -1278,11 +1364,7 @@ def messages():
             return
 
     try:
-        task = adapter.process_activity(activity, auth_header, aux_func)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(task)
-        loop.close()
+        await adapter.process_activity(activity, auth_header, aux_func)
     except Exception as e:
         print(f"Error processing message: {str(e)}")
         return {"status": 401}

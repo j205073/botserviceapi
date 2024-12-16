@@ -45,3 +45,13 @@ pandas==2.1.4
 
 # Async support azure不用安裝
 # asyncio==3.4.3
+
+# 新增的非同步相關依賴
+Quart==0.19.4
+hypercorn==0.15.0
+httpx==0.25.2  # 用於非同步 HTTP 請求
+anyio==4.2.0   # 非同步 I/O 支援
+
+# 新增的 ASGI 相關
+h11==0.14.0    # HTTP/1.1 協議實作
+wsproto==1.2.0 # WebSocket 協議支援

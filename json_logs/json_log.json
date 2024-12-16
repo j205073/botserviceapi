@@ -2407,3 +2407,122 @@
     },
     "user_name": "User"
 }
+{
+    "activity": {
+        "type": "message",
+        "id": "f49f02e0-bbae-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-16T13:09:17.453Z",
+        "local_timestamp": "2024-12-16T13:09:17.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "5e0cef0b-bb11-4d8f-a581-63e6c07bb2d1",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "295efe00-bb4a-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "295e88d0-bb4a-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "請問有預約成功嗎?",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734354557401wmlbrm6gmc"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "5e0cef0b-bb11-4d8f-a581-63e6c07bb2d1",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "184216b0-bbaf-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-16T13:10:17.243Z",
+        "local_timestamp": "2024-12-16T13:10:17.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "5e0cef0b-bb11-4d8f-a581-63e6c07bb2d1",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "295efe00-bb4a-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "295e88d0-bb4a-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "請問有預約成功嗎?",
+        "attachments": [],
+        "channel_data": {
+            "clientActivityID": "1734354617182ddj17cxcr0s"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "5e0cef0b-bb11-4d8f-a581-63e6c07bb2d1",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
+{
+    "activity": {
+        "type": "message",
+        "id": "38aae2e0-bbb6-11ef-9989-bdfd5cdaea4a",
+        "timestamp": "2024-12-16T14:01:18.094Z",
+        "local_timestamp": "2024-12-16T14:01:18.000Z",
+        "local_timezone": "Asia/Taipei",
+        "service_url": "http://localhost:60211",
+        "channel_id": "emulator",
+        "from_property": {
+            "id": "264115f0-5646-4a4f-83f5-62ffcaeec4b2",
+            "name": "User",
+            "role": "user"
+        },
+        "conversation": {
+            "id": "2b4ec800-bbb6-11ef-9989-bdfd5cdaea4a|livechat"
+        },
+        "recipient": {
+            "id": "2b4db690-bbb6-11ef-8283-a5c1470ec4bb",
+            "name": "Bot",
+            "role": "bot"
+        },
+        "text_format": "plain",
+        "locale": "en-US",
+        "text": "幫我查詢會議有無預約成功?",
+        "attachments": [],
+        "entities": [
+            {
+                "type": "ClientCapabilities"
+            }
+        ],
+        "channel_data": {
+            "clientActivityID": "173435767804961ho61aa41t"
+        },
+        "caller_id": "urn:botframework:azure"
+    },
+    "userinfo": {
+        "id": "264115f0-5646-4a4f-83f5-62ffcaeec4b2",
+        "name": "User",
+        "aadObjectId": null
+    },
+    "user_name": "User"
+}
