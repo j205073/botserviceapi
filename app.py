@@ -321,6 +321,8 @@ def get_room_email(room_id: str) -> str:
     room_mapping = {
         "1": "meetingroom01@rinnai.com.tw",
         "2": "meetingroom02@rinnai.com.tw",
+        "3": "meetingroom04@rinnai.com.tw",
+        "4": "meetingroom05@rinnai.com.tw",
     }
 
     # 如果包含 @ 符號，表示已經是 email
