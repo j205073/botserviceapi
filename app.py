@@ -198,6 +198,12 @@ async def show_meetingroom_options(turn_context: TurnContext):
                 title="@第二會議室", type=ActionTypes.im_back, text="@第二會議室"
             ),
             CardAction(
+                title="@工廠大會議室", type=ActionTypes.im_back, text="@工廠大會議室"
+            ),
+            CardAction(
+                title="@工廠小會議室", type=ActionTypes.im_back, text="@工廠小會議室"
+            ),
+            CardAction(
                 title="@返回主選單", type=ActionTypes.im_back, text="@返回主選單"
             ),
         ]
@@ -328,11 +334,13 @@ def get_room_email(room_id: str) -> str:
 def get_localtion_by_email(room_id: str) -> str:
     """取得會議室位置名稱
     根據會議室 ID 或電子郵件地址返回對應的會議室名稱
-    例如：'第一會議室'、'第二會議室'
+    例如：'第一會議室'、'第二會議室'、'工廠大會議室'
     """
     location_mapping = {
         "meetingroom01@rinnai.com.tw": "第一會議室",
         "meetingroom02@rinnai.com.tw": "第二會議室",
+        "meetingroom04@rinnai.com.tw": "工廠大會議室",
+        "meetingroom05@rinnai.com.tw": "工廠小會議室",
     }
 
     # 如果輸入是 email
@@ -772,7 +780,13 @@ async def get_user_meetings(user_mail: str) -> List[Dict]:
 
             location_name = event["location"].get("displayName", "")
             if not any(
-                room_name in location_name for room_name in ["第一會議室", "第二會議室"]
+                room_name in location_name
+                for room_name in [
+                    "第一會議室",
+                    "第二會議室",
+                    "工廠大會議室",
+                    "工廠小會議室",
+                ]
             ):
                 continue
 
@@ -971,7 +985,12 @@ async def message_handler(turn_context: TurnContext):
             elif user_message == "第二會議室":
                 await show_date_options(turn_context, "2")
                 return
-
+            elif user_message == "工廠大會議室":
+                await show_date_options(turn_context, "3")
+                return
+            elif user_message == "工廠小會議室":
+                await show_date_options(turn_context, "4")
+                return
             # 時段預約邏輯
             elif " 預約" in user_message:
                 # 解析預約信息
@@ -981,8 +1000,19 @@ async def message_handler(turn_context: TurnContext):
                 time_slot = f"{parts[2]} - {parts[4]}"
 
                 # 確定房間 ID
-                room_id = "1" if room_name == "第一會議室" else "2"
-
+                room_id = (
+                    "1"
+                    if room_name == "第一會議室"
+                    else (
+                        "2"
+                        if room_name == "第二會議室"
+                        else (
+                            "3"
+                            if room_name == "工廠大會議室"
+                            else "4" if room_name == "工廠小會議室" else None
+                        )
+                    )
+                )
                 # 確定日期
                 if date_str == "今天":
                     date = "today"
@@ -1040,7 +1070,19 @@ async def message_handler(turn_context: TurnContext):
                 date_type = parts[2]
 
                 # 根據會議室名稱找對應的 room_id
-                room_id = "1" if room_name == "第一會議室" else "2"
+                room_id = (
+                    "1"
+                    if room_name == "第一會議室"
+                    else (
+                        "2"
+                        if room_name == "第二會議室"
+                        else (
+                            "3"
+                            if room_name == "工廠大會議室"
+                            else "4" if room_name == "工廠小會議室" else None
+                        )
+                    )
+                )
 
                 date = "today" if date_type == "今天" else "tomorrow"
                 await show_available_slots(turn_context, room_id, date)
