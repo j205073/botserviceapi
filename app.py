@@ -203,6 +203,8 @@ async def show_meetingroom_options(turn_context: TurnContext):
             CardAction(
                 title="@工廠小會議室", type=ActionTypes.im_back, text="@工廠小會議室"
             ),
+            CardAction(title="@研修教室", type=ActionTypes.im_back, text="@研修教室"),
+            CardAction(title="@公務車", type=ActionTypes.im_back, text="@公務車"),
             CardAction(
                 title="@返回主選單", type=ActionTypes.im_back, text="@返回主選單"
             ),
@@ -323,6 +325,8 @@ def get_room_email(room_id: str) -> str:
         "2": "meetingroom02@rinnai.com.tw",
         "3": "meetingroom04@rinnai.com.tw",
         "4": "meetingroom05@rinnai.com.tw",
+        "5": "meetingroom03@rinnai.com.tw",
+        "6": "rinnaicars@rinnai.com.tw",
     }
 
     # 如果包含 @ 符號，表示已經是 email
@@ -343,6 +347,8 @@ def get_localtion_by_email(room_id: str) -> str:
         "meetingroom02@rinnai.com.tw": "第二會議室",
         "meetingroom04@rinnai.com.tw": "工廠大會議室",
         "meetingroom05@rinnai.com.tw": "工廠小會議室",
+        "meetingroom03@rinnai.com.tw": "研修教室",
+        "rinnaicars@rinnai.com.tw": "公務車",
     }
 
     # 如果輸入是 email
@@ -788,6 +794,8 @@ async def get_user_meetings(user_mail: str) -> List[Dict]:
                     "第二會議室",
                     "工廠大會議室",
                     "工廠小會議室",
+                    "研修教室",
+                    "公務車",
                 ]
             ):
                 continue
@@ -993,6 +1001,12 @@ async def message_handler(turn_context: TurnContext):
             elif user_message == "工廠小會議室":
                 await show_date_options(turn_context, "4")
                 return
+            elif user_message == "研修教室":
+                await show_date_options(turn_context, "5")
+                return
+            elif user_message == "公務車":
+                await show_date_options(turn_context, "6")
+                return
             # 時段預約邏輯
             elif " 預約" in user_message:
                 # 解析預約信息
@@ -1011,7 +1025,15 @@ async def message_handler(turn_context: TurnContext):
                         else (
                             "3"
                             if room_name == "工廠大會議室"
-                            else "4" if room_name == "工廠小會議室" else None
+                            else (
+                                "4"
+                                if room_name == "工廠小會議室"
+                                else (
+                                    "5"
+                                    if room_name == "研修教室"
+                                    else "6" if room_name == "公務車" else None
+                                )
+                            )
                         )
                     )
                 )
@@ -1081,7 +1103,15 @@ async def message_handler(turn_context: TurnContext):
                         else (
                             "3"
                             if room_name == "工廠大會議室"
-                            else "4" if room_name == "工廠小會議室" else None
+                            else (
+                                "4"
+                                if room_name == "工廠小會議室"
+                                else (
+                                    "5"
+                                    if room_name == "研修教室"
+                                    else "6" if room_name == "公務車" else None
+                                )
+                            )
                         )
                     )
                 )
