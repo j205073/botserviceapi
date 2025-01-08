@@ -396,9 +396,11 @@ async def show_available_slots(turn_context: TurnContext, room_id: str, date: st
     schedule_text = f"{room_name} {date_display} 預約狀況：\n\n"
     if bookings:
         for booking in bookings:
-            schedule_text += (
-                f"• {booking['start']} - {booking['end']}: {booking['subject']}\n\n"
-            )
+            schedule_text += f"• {booking['start']} - {booking['end']}: 已被預約\n\n"
+        # for booking in bookings:
+        #     schedule_text += (
+        #         f"• {booking['start']} - {booking['end']}: {booking['subject']}\n\n"
+        #     )
     else:
         schedule_text += "目前尚無預約\n"
 
