@@ -392,7 +392,7 @@ async def show_available_slots(turn_context: TurnContext, room_id: str, date: st
     # 顯示當前預約狀況
     bookings = await get_current_bookings(room_email, date)
 
-    # 格式化預約狀況文字
+    # 格式化預約狀況文字 1213
     schedule_text = f"{room_name} {date_display} 預約狀況：\n\n"
     if bookings:
         for booking in bookings:
