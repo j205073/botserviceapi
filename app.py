@@ -42,7 +42,7 @@ from quart.helpers import make_response
 logging.basicConfig(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")
 # gpt token數
-max_tokens = 600
+max_tokens = 1500
 # 初始化 Token 管理器和 Graph API
 token_manager = TokenManager(
     tenant_id=os.getenv("TENANT_ID"),
@@ -743,9 +743,16 @@ async def call_openai(prompt, conversation_id, user_mail=None):
 
     try:
         response = openai.ChatCompletion.create(
+            # engine="gpt-4o-mini-deploy",
+            # messages=conversation_history[conversation_id],
+            # max_tokens=max_tokens,
+            # timeout=15,
             engine="gpt-4o-mini-deploy",
             messages=conversation_history[conversation_id],
             max_tokens=max_tokens,
+            temperature=0.7,  # 控制回應的創造性，範圍 0-1
+            presence_penalty=0.6,  # 增加模型談論新主題的傾向
+            frequency_penalty=0.6,  # 減少重複內容
             timeout=15,
         )
         message = response["choices"][0]["message"]
