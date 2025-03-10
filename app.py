@@ -977,6 +977,23 @@ async def message_handler(turn_context: TurnContext):
         # except Exception as e:
         #     print(f"Write Json Log Has Some Error: {str(e)}")
 
+        try:
+            # 定義log檔案路徑
+            log_dir = "./json_logs"
+            log_file_path = os.path.join(log_dir, "json_log.json")
+
+            # 如果檔案存在，則刪除它
+            if os.path.exists(log_file_path):
+                os.remove(log_file_path)
+                print("Log file has been deleted.")
+
+            # 可選：如果目錄為空，也刪除目錄
+            if os.path.exists(log_dir) and not os.listdir(log_dir):
+                os.rmdir(log_dir)
+                print("Empty log directory has been removed.")
+        except Exception as e:
+            print(f"Delete Log File Error: {str(e)}")
+
         # test deploy
         if turn_context.activity.text and turn_context.activity.text.startswith("@"):
             # 移除 @ 前綴進行判斷
