@@ -861,7 +861,7 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
         system_prompt = system_prompts.get(language, system_prompts["zh-TW"])
 
         response = openai.ChatCompletion.create(
-            engine="gpt-4o-mini-deploy",
+            engine="gpt-4o-mini-deploy", 
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
