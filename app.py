@@ -43,13 +43,13 @@ logging.basicConfig(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")
 # gpt token數
 max_tokens = 4000
-# 初始化 Token 管理器和 Graph API
-token_manager = TokenManager(
-    tenant_id=os.getenv("TENANT_ID"),
-    client_id=os.getenv("CLIENT_ID"),
-    client_secret=os.getenv("CLIENT_SECRET"),
-)
-graph_api = GraphAPI(token_manager)
+# 初始化 Token 管理器和 Graph API（暫時註釋用於測試）
+# token_manager = TokenManager(
+#     tenant_id=os.getenv("TENANT_ID"),
+#     client_id=os.getenv("CLIENT_ID"),
+#     client_secret=os.getenv("CLIENT_SECRET"),
+# )
+# graph_api = GraphAPI(token_manager)
 
 # 載入環境變數
 load_dotenv()
@@ -161,9 +161,10 @@ async def process_file(file_info: dict) -> str:
 
 async def show_self_info(turn_context: TurnContext, user_mail: str):
     """取得user資訊"""
-    user_info = await graph_api.get_user_info(user_mail)
-    info = jsonify(user_info)
-    await turn_context.send_activity(Activity(type=ActivityTypes.message, text=info))
+    # 暫時註釋 Graph API 調用
+    # user_info = await graph_api.get_user_info(user_mail)
+    # info = jsonify(user_info)
+    await turn_context.send_activity(Activity(type=ActivityTypes.message, text=f"測試用戶: {user_mail}"))
 
 
 async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
@@ -719,41 +720,35 @@ async def call_openai(prompt, conversation_id, user_mail=None):
 
     if conversation_id not in conversation_history:
         conversation_history[conversation_id] = []
-
+        
+        # o1-mini 不支援 system role，所以不添加系統提示詞
+        # 語言判斷邏輯保留但不使用
         language = determine_language(user_mail)
-
-        # 設定系統提示詞
-        system_prompts = {
-            "zh-TW": "你是一個智能助理。如果用戶使用中文提問，請用繁體中文回答。如果用戶使用其他語言提問，請使用跟用戶相同的語言回答。",
-            "ja": "あなたは知的アシスタントです。ユーザーが中国語で質問した場合は、繁体字中国語で回答してください。ユーザーが他の言語で質問した場合は、ユーザーと同じ言語で回答してください。",
-        }
-
-        system_prompt = system_prompts.get(language, system_prompts["zh-TW"])
-
-        conversation_history[conversation_id].append(
-            {
-                "role": "system",
-                "content": system_prompt,
-            }
-        )
 
     conversation_history[conversation_id].append(
         {"role": "user", "content": str(prompt)}
     )
 
     try:
+        print(f"準備發送給 OpenAI 的訊息: {conversation_history[conversation_id]}")
+        print(f"使用的引擎: o1-mini")
+        print(f"max_completion_tokens: {max_tokens}")
+        
         response = openai.ChatCompletion.create(
             engine="o1-mini",
             messages=conversation_history[conversation_id],
-            max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,
             timeout=15,
         )
         message = response["choices"][0]["message"]
         conversation_history[conversation_id].append(message)
         return message["content"]
     except Exception as e:
-        print(f"OpenAI API 錯誤: {str(e)}")
-        return "抱歉，目前無法處理您的請求。"
+        print(f"OpenAI API 完整錯誤: {str(e)}")
+        print(f"錯誤類型: {type(e)}")
+        import traceback
+        print(f"錯誤堆疊: {traceback.format_exc()}")
+        return f"OpenAI 錯誤: {str(e)}"
 
 
 async def get_user_meetings(user_mail: str) -> List[Dict]:
@@ -923,11 +918,10 @@ async def get_user_email(turn_context: TurnContext) -> str:
             print("No AAD Object ID found")
             return None
 
-        # 使用 Graph API 獲取用戶信息
-        user_info = await graph_api.get_user_info(aad_object_id)
-
-        # 返回郵件地址
-        return user_info.get("mail")
+        # 暫時註釋 Graph API 調用
+        # user_info = await graph_api.get_user_info(aad_object_id)
+        # return user_info.get("mail")
+        return "test@example.com"  # 返回測試用戶
 
     except Exception as e:
         print(f"取得用戶 email 時發生錯誤: {str(e)}")
@@ -1462,6 +1456,8 @@ async def messages():
 
     activity = Activity().deserialize(body)
     auth_header = request.headers.get("Authorization", "")
+    print(f"Authorization header: {auth_header[:50] if auth_header else '(空白)'}")
+    print(f"Current Bot App ID: {os.getenv('BOT_APP_ID') or '(空白)'}")
 
     async def aux_func(turn_context):
         try:
