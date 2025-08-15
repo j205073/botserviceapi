@@ -70,7 +70,7 @@ conversation_history = {}
 openai.api_type = "azure"
 openai.api_key = os.getenv("AZURE_OPENAI_KEY")
 openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT")
-openai.api_version = "2025-01-01-preview"
+openai.api_version = "2024-02-15-preview"
 
 
 def sanitize_url(url):
@@ -747,11 +747,10 @@ async def call_openai(prompt, conversation_id, user_mail=None):
             # messages=conversation_history[conversation_id],
             # max_tokens=max_tokens,
             # timeout=15,
-            # engine="gpt-4o-mini-deploy",
-            engine="o1-mini",
+            engine="gpt-4o-mini-deploy",
             messages=conversation_history[conversation_id],
             max_tokens=max_tokens,
-            temperature=1,  # 控制回應的創造性，範圍 0-1  o1-mini只有支援1
+            temperature=0.7,  # 控制回應的創造性，範圍 0-1
             presence_penalty=0.6,  # 增加模型談論新主題的傾向
             frequency_penalty=0.6,  # 減少重複內容
             timeout=15,
