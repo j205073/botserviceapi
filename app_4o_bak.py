@@ -743,9 +743,17 @@ async def call_openai(prompt, conversation_id, user_mail=None):
 
     try:
         response = openai.ChatCompletion.create(
+            # engine="gpt-4o-mini-deploy",
+            # messages=conversation_history[conversation_id],
+            # max_tokens=max_tokens,
+            # timeout=15,
+            # engine="gpt-4o-mini-deploy",
             engine="o1-mini",
             messages=conversation_history[conversation_id],
             max_tokens=max_tokens,
+            temperature=1,  # 控制回應的創造性，範圍 0-1  o1-mini只有支援1
+            presence_penalty=0.6,  # 增加模型談論新主題的傾向
+            frequency_penalty=0.6,  # 減少重複內容
             timeout=15,
         )
         message = response["choices"][0]["message"]
