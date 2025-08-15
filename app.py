@@ -42,7 +42,7 @@ from quart.helpers import make_response
 logging.basicConfig(encoding="utf-8")
 sys.stdout.reconfigure(encoding="utf-8")
 # gpt token數
-max_tokens = 1500
+max_tokens = 4000
 # 初始化 Token 管理器和 Graph API
 token_manager = TokenManager(
     tenant_id=os.getenv("TENANT_ID"),
