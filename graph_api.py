@@ -104,25 +104,36 @@ class GraphAPI:
 
     async def create_meeting(
         self,
+        organizer_email: str,
         location: str,
         room_email: str,
         subject: str,
         start_time: datetime,
         end_time: datetime,
-        attendees: list,
+        attendees: list = None,
     ) -> Dict[str, Any]:
         """建立會議"""
-        endpoint = f"{self.base_url}/users/{room_email}/calendar/events"
+        endpoint = f"{self.base_url}/users/{organizer_email}/calendar/events"
+
+        attendee_list = []
+        if attendees:
+            attendee_list.extend([
+                {"emailAddress": {"address": attendee}, "type": "required"}
+                for attendee in attendees
+            ])
+        
+        # 添加會議室作為資源
+        attendee_list.append({
+            "emailAddress": {"address": room_email},
+            "type": "resource"
+        })
 
         data = {
             "subject": subject,
             "start": {"dateTime": start_time.isoformat(), "timeZone": "Asia/Taipei"},
             "end": {"dateTime": end_time.isoformat(), "timeZone": "Asia/Taipei"},
             "location": {"displayName": location},
-            "attendees": [
-                {"emailAddress": {"address": attendee}, "type": "required"}
-                for attendee in attendees
-            ],
+            "attendees": attendee_list,
         }
 
         async with aiohttp.ClientSession() as session:
@@ -134,3 +145,26 @@ class GraphAPI:
                 else:
                     text = await response.text()
                     raise Exception(f"Failed to create meeting: {text}")
+
+    async def get_available_rooms(self) -> Dict[str, Any]:
+        """取得可用會議室清單"""
+        # 這裡需要根據實際的 AAD 設定來取得會議室清單
+        # 可能需要查詢特定的 OU 或使用 findMeetingTimes API
+        endpoint = f"{self.base_url}/places/microsoft.graph.room"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(endpoint, headers=self._get_headers()) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    # 如果沒有權限查詢會議室，返回 Rinnai 會議室清單
+                    return {
+                        "value": [
+                            {"displayName": "第一會議室", "emailAddress": "meetingroom01@rinnai.com.tw"},
+                            {"displayName": "第二會議室", "emailAddress": "meetingroom02@rinnai.com.tw"},
+                            {"displayName": "工廠大會議室", "emailAddress": "meetingroom04@rinnai.com.tw"},
+                            {"displayName": "工廠小會議室", "emailAddress": "meetingroom05@rinnai.com.tw"},
+                            {"displayName": "研修教室", "emailAddress": "meetingroom03@rinnai.com.tw"},
+                            {"displayName": "公務車", "emailAddress": "rinnaicars@rinnai.com.tw"},
+                        ]
+                    }
