@@ -66,10 +66,14 @@ class GraphAPI:
 
     async def get_user_info(self, aad_object_id: str) -> Dict[str, Any]:
         """取得用戶資訊"""
+        # 使用 $select 參數指定需要的欄位，確保取得完整資訊
         endpoint = f"{self.base_url}/users/{aad_object_id}"
+        params = {
+            "$select": "userPrincipalName,displayName,givenName,surname,department,jobTitle,companyName,businessPhones,mobilePhone,officeLocation,mail,employeeId"
+        }
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(endpoint, headers=self._get_headers()) as response:
+            async with session.get(endpoint, headers=self._get_headers(), params=params) as response:
                 if response.status == 200:
                     return await response.json()
                 else:
@@ -168,3 +172,41 @@ class GraphAPI:
                             {"displayName": "公務車", "emailAddress": "rinnaicars@rinnai.com.tw"},
                         ]
                     }
+
+    async def get_user_calendar_events(
+        self, user_email: str, start_time: datetime, end_time: datetime
+    ) -> Dict[str, Any]:
+        """取得用戶的行事曆事件（包含會議室預約）"""
+        endpoint = f"{self.base_url}/users/{user_email}/calendar/events"
+
+        # 設定查詢參數
+        start_str = start_time.isoformat()
+        end_str = end_time.isoformat()
+
+        params = {
+            "$filter": f"start/dateTime ge '{start_str}' and end/dateTime le '{end_str}'",
+            "$select": "id,subject,organizer,start,end,location,attendees",
+            "$orderby": "start/dateTime",
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                endpoint, headers=self._get_headers(), params=params
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    text = await response.text()
+                    raise Exception(f"Failed to get calendar events: {text}")
+
+    async def delete_meeting(self, user_email: str, event_id: str) -> bool:
+        """刪除會議"""
+        endpoint = f"{self.base_url}/users/{user_email}/calendar/events/{event_id}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(endpoint, headers=self._get_headers()) as response:
+                if response.status == 204:  # 成功刪除
+                    return True
+                else:
+                    text = await response.text()
+                    raise Exception(f"Failed to delete meeting: {text}")

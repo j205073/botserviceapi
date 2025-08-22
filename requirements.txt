@@ -4,8 +4,8 @@ botbuilder-schema==4.16.2
 botbuilder-integration-aiohttp==4.16.2
 aiohttp==3.10.5
 
-# Web framework
-flask==3.0.0
+# Web framework (移除 Flask，只使用 Quart)
+# flask==3.0.0
 
 # Azure OpenAI
 # openai==0.28.1

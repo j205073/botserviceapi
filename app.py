@@ -684,6 +684,26 @@ async def compress_conversation_history(conversation_id, user_mail):
 
 
 # === API 路由 ===
+
+# 測試 API 是否正常運作
+@app.route("/api/test", methods=["GET", "POST"])
+async def test_api():
+    """測試 API 端點"""
+    return await make_response(jsonify({"status": "API is working", "method": request.method}), 200)
+
+# 顯示所有路由
+@app.route("/api/routes", methods=["GET"])
+async def list_routes():
+    """列出所有註冊的路由"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "rule": str(rule.rule)
+        })
+    return await make_response(jsonify({"routes": routes}), 200)
+
 @app.route("/api/audit/upload-all", methods=["POST"])
 async def upload_all_users():
     """上傳所有用戶的稽核日誌"""
@@ -694,17 +714,15 @@ async def upload_all_users():
                 result = await upload_user_audit_logs(user_mail)
                 results.append({"user": user_mail, "result": result})
 
-        return await make_response(
-            jsonify(
-                {
-                    "success": True,
-                    "message": f"已處理 {len(results)} 個用戶",
-                    "details": results,
-                }
-            )
-        )
+        response_data = {
+            "success": True,
+            "message": f"已處理 {len(results)} 個用戶",
+            "details": results,
+        }
+        return await make_response(jsonify(response_data), 200)
     except Exception as e:
-        return await make_response(jsonify({"success": False, "message": str(e)}), 500)
+        error_data = {"success": False, "message": str(e)}
+        return await make_response(jsonify(error_data), 500)
 
 
 @app.route("/api/audit/upload/<user_mail>", methods=["POST"])
@@ -1429,6 +1447,11 @@ async def message_handler(turn_context: TurnContext):
                 await handle_room_booking(turn_context, user_mail)
                 return
             
+            # 處理會議室預約取消
+            elif card_action == "cancelBooking":
+                await handle_cancel_booking(turn_context, user_mail)
+                return
+            
             # 處理模型選擇
             elif card_action == "selectModel":
                 if USE_AZURE_OPENAI:
@@ -1807,9 +1830,15 @@ async def message_handler(turn_context: TurnContext):
                     )
                 return
 
-            # 處理會議室預約指令
+            # 處理會議室相關指令
             if user_message == "會議室預約":
                 await show_room_booking_options(turn_context, user_mail)
+                return
+            elif user_message == "查詢預約":
+                await show_my_bookings(turn_context, user_mail)
+                return
+            elif user_message == "取消預約":
+                await show_cancel_booking_options(turn_context, user_mail)
                 return
 
         else:
@@ -1952,15 +1981,25 @@ async def show_user_info(turn_context: TurnContext):
         user_info = await graph_api.get_user_info(aad_object_id)
         
         if user_info:
+            # 取得電話資訊（優先使用 businessPhones，其次 mobilePhone）
+            phone = "未設定"
+            if user_info.get('businessPhones') and len(user_info['businessPhones']) > 0:
+                phone = user_info['businessPhones'][0]
+            elif user_info.get('mobilePhone'):
+                phone = user_info['mobilePhone']
+            
+            # 取得部門資訊
+            department = user_info.get('department', '未設定')
+            if not department or department == 'None':
+                department = '未設定'
+            
             info_text = f"""👤 **個人資訊**
 
 📧 **郵箱**：{user_info.get('userPrincipalName', '未知')}
 👨‍💼 **姓名**：{user_info.get('displayName', '未知')}
-🏢 **部門**：{user_info.get('department', '未設定')}
+🏢 **部門**：{department}
 📱 **職稱**：{user_info.get('jobTitle', '未設定')}
-🏢 **公司**：{user_info.get('companyName', '未設定')}
-📞 **電話**：{user_info.get('businessPhones', ['未設定'])[0] if user_info.get('businessPhones') else '未設定'}
-📍 **辦公室**：{user_info.get('officeLocation', '未設定')}"""
+📞 **電話**：{phone}"""
         else:
             info_text = "❌ 無法取得用戶資訊"
             
@@ -2020,13 +2059,14 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
 💬 **基本功能**：
 - 智能問答與多語言翻譯
-- 文件分析（PDF、Word、Excel）
 - 即時語言偵測與回應
 
 {model_switch_info_zh}
 
 🏢 **會議室功能**：
 - @會議室預約 - 預約會議室
+- @查詢預約 - 查看我的會議室預約
+- @取消預約 - 取消已預約的會議室
 
 📊 **系統指令**：
 - /help - 查看功能說明
@@ -2036,13 +2076,14 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
 💬 **基本機能**：
 - インテリジェント質問回答と多言語翻訳
-- ドキュメント分析（PDF、Word、Excel）
 - リアルタイム言語検出と応答
 
 {model_switch_info_ja}
 
 🏢 **会議室機能**：
 - @會議室預約 - 会議室予約
+- @查詢預約 - 私の会議室予約を確認
+- @取消預約 - 予約した会議室をキャンセル
 
 📊 **システムコマンド**：
 - /help - 機能説明表示
@@ -2062,6 +2103,14 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
         {
             "title": "🏢 會議室預約" if language == "zh-TW" else "🏢 会議室予約",
             "value": "@會議室預約"
+        },
+        {
+            "title": "📅 查詢預約" if language == "zh-TW" else "📅 予約確認",
+            "value": "@查詢預約"
+        },
+        {
+            "title": "❌ 取消預約" if language == "zh-TW" else "❌ 予約キャンセル",
+            "value": "@取消預約"
         },
         {
             "title": "👤 個人資訊" if language == "zh-TW" else "👤 個人情報",
@@ -2144,17 +2193,22 @@ async def show_room_booking_options(turn_context: TurnContext, user_mail: str):
             {"displayName": "公務車", "emailAddress": "rinnaicars@rinnai.com.tw"},
         ]
     
-    # 產生日期選項（今天到未來7天）
+    # 產生日期選項（從今天開始到未來7天，但如果今天已經過了18:00，則從明天開始）
     from datetime import datetime, timedelta
-    today = datetime.now(taiwan_tz)
+    current_time = datetime.now(taiwan_tz)
+    
+    # 如果現在已經過了18:00，從明天開始
+    start_offset = 1 if current_time.hour >= 18 else 0
+    
     date_choices = []
-    for i in range(8):
-        date = today + timedelta(days=i)
+    for i in range(start_offset, start_offset + 8):
+        date = current_time + timedelta(days=i)
         date_str = date.strftime("%Y-%m-%d")
-        display_date = date.strftime("%m/%d (%a)" if language == "zh-TW" else "%m/%d (%a)")
+        display_date = date.strftime("%m/%d (%a)")
+        
         if i == 0:
             display_date = f"今天 {display_date}" if language == "zh-TW" else f"今日 {display_date}"
-        elif i == 1:
+        elif i == 1 or (i == 0 and start_offset == 1):
             display_date = f"明天 {display_date}" if language == "zh-TW" else f"明日 {display_date}"
         
         date_choices.append({
@@ -2163,6 +2217,7 @@ async def show_room_booking_options(turn_context: TurnContext, user_mail: str):
         })
     
     # 產生時間選項（8:00-18:00，每30分鐘）
+    # 注意：這裡先生成所有選項，實際的過濾會在提交時進行
     time_choices = []
     for hour in range(8, 19):
         for minute in [0, 30]:
@@ -2171,6 +2226,11 @@ async def show_room_booking_options(turn_context: TurnContext, user_mail: str):
                 "title": time_str,
                 "value": time_str
             })
+    
+    # 添加提示：如果是今天，系統會自動過濾過去的時間
+    time_note = ""
+    if start_offset == 0:  # 今天可以預約
+        time_note = f"\n💡 提示：系統會自動過濾已過去的時間" if language == "zh-TW" else f"\n💡 ヒント：過去の時間は自動的にフィルタされます"
     
     # 產生會議室選項
     room_choices = []
@@ -2271,6 +2331,287 @@ async def show_room_booking_options(turn_context: TurnContext, user_mail: str):
             attachments=[card_attachment]
         )
     )
+
+
+async def show_my_bookings(turn_context: TurnContext, user_mail: str):
+    """顯示用戶的會議室預約"""
+    language = determine_language(user_mail)
+    
+    try:
+        # 取得真實的用戶郵箱
+        try:
+            aad_object_id = turn_context.activity.from_property.aad_object_id
+            user_info = await graph_api.get_user_info(aad_object_id)
+            real_user_email = user_info.get('userPrincipalName', user_mail)
+        except:
+            real_user_email = user_mail
+            
+        if "@unknown.com" in real_user_email:
+            error_msg = "❌ 無法取得有效的用戶郵箱" if language == "zh-TW" else "❌ 有効なユーザーメールアドレスを取得できません"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+            return
+
+        # 查詢未來7天的預約（只查自己的）
+        from datetime import datetime, timedelta
+        start_time = datetime.now(taiwan_tz)
+        end_time = start_time + timedelta(days=7)
+        
+        # 發送查詢中的訊息
+        loading_msg = "📅 正在查詢您的會議室預約..." if language == "zh-TW" else "📅 会議室予約を確認中..."
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=loading_msg)
+        )
+        
+        events_data = await graph_api.get_user_calendar_events(real_user_email, start_time, end_time)
+        events = events_data.get("value", [])
+        
+        # 過濾出會議室相關的預約（包含 Rinnai 會議室）
+        room_emails = [
+            "meetingroom01@rinnai.com.tw", "meetingroom02@rinnai.com.tw", 
+            "meetingroom03@rinnai.com.tw", "meetingroom04@rinnai.com.tw", 
+            "meetingroom05@rinnai.com.tw", "rinnaicars@rinnai.com.tw"
+        ]
+        
+        room_bookings = []
+        for event in events:
+            # 檢查會議的與會者中是否包含會議室
+            attendees = event.get("attendees", [])
+            for attendee in attendees:
+                email = attendee.get("emailAddress", {}).get("address", "")
+                if email in room_emails:
+                    room_bookings.append({
+                        "id": event["id"],
+                        "subject": event.get("subject", "無主題"),
+                        "start": event["start"]["dateTime"],
+                        "end": event["end"]["dateTime"],
+                        "room_email": email,
+                        "location": event.get("location", {}).get("displayName", email)
+                    })
+                    break
+        
+        if not room_bookings:
+            no_bookings_msg = "📅 您目前沒有會議室預約" if language == "zh-TW" else "📅 現在会議室の予約はありません"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=no_bookings_msg)
+            )
+            return
+        
+        # 顯示預約列表
+        bookings_text = f"📅 **您的會議室預約** ({len(room_bookings)} 個)：\n\n" if language == "zh-TW" else f"📅 **あなたの会議室予約** ({len(room_bookings)} 件)：\n\n"
+        
+        for i, booking in enumerate(room_bookings, 1):
+            start_dt = datetime.fromisoformat(booking["start"].replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(booking["end"].replace("Z", "+00:00"))
+            
+            # 轉換為台灣時間
+            start_tw = start_dt.astimezone(taiwan_tz)
+            end_tw = end_dt.astimezone(taiwan_tz)
+            
+            bookings_text += f"""**{i}. {booking['subject']}**
+🏢 會議室：{booking['location']}
+📅 日期：{start_tw.strftime('%Y/%m/%d (%a)')}
+⏰ 時間：{start_tw.strftime('%H:%M')} - {end_tw.strftime('%H:%M')}
+
+"""
+        
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=bookings_text)
+        )
+        
+    except Exception as e:
+        error_msg = f"❌ 查詢預約失敗：{str(e)}" if language == "zh-TW" else f"❌ 予約確認に失敗しました：{str(e)}"
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=error_msg)
+        )
+
+
+async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str):
+    """顯示取消預約選項"""
+    language = determine_language(user_mail)
+    
+    try:
+        # 取得真實的用戶郵箱
+        try:
+            aad_object_id = turn_context.activity.from_property.aad_object_id
+            user_info = await graph_api.get_user_info(aad_object_id)
+            real_user_email = user_info.get('userPrincipalName', user_mail)
+        except:
+            real_user_email = user_mail
+            
+        if "@unknown.com" in real_user_email:
+            error_msg = "❌ 無法取得有效的用戶郵箱" if language == "zh-TW" else "❌ 有効なユーザーメールアドレスを取得できません"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+            return
+
+        # 查詢未來的預約
+        from datetime import datetime, timedelta
+        start_time = datetime.now(taiwan_tz)
+        end_time = start_time + timedelta(days=30)  # 查詢未來30天
+        
+        events_data = await graph_api.get_user_calendar_events(real_user_email, start_time, end_time)
+        events = events_data.get("value", [])
+        
+        # 過濾出會議室相關的預約
+        room_emails = [
+            "meetingroom01@rinnai.com.tw", "meetingroom02@rinnai.com.tw", 
+            "meetingroom03@rinnai.com.tw", "meetingroom04@rinnai.com.tw", 
+            "meetingroom05@rinnai.com.tw", "rinnaicars@rinnai.com.tw"
+        ]
+        
+        room_bookings = []
+        for event in events:
+            # 只顯示未來的預約（可以取消的）
+            event_start = datetime.fromisoformat(event["start"]["dateTime"].replace("Z", "+00:00"))
+            if event_start <= datetime.now().astimezone():
+                continue
+                
+            attendees = event.get("attendees", [])
+            for attendee in attendees:
+                email = attendee.get("emailAddress", {}).get("address", "")
+                if email in room_emails:
+                    room_bookings.append({
+                        "id": event["id"],
+                        "subject": event.get("subject", "無主題"),
+                        "start": event["start"]["dateTime"],
+                        "end": event["end"]["dateTime"],
+                        "room_email": email,
+                        "location": event.get("location", {}).get("displayName", email)
+                    })
+                    break
+        
+        if not room_bookings:
+            no_bookings_msg = "📅 您目前沒有可取消的會議室預約" if language == "zh-TW" else "📅 キャンセル可能な会議室予約はありません"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=no_bookings_msg)
+            )
+            return
+        
+        # 創建取消預約的 Adaptive Card
+        choices = []
+        for booking in room_bookings:
+            start_dt = datetime.fromisoformat(booking["start"].replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(booking["end"].replace("Z", "+00:00"))
+            start_tw = start_dt.astimezone(taiwan_tz)
+            end_tw = end_dt.astimezone(taiwan_tz)
+            
+            display_text = f"{booking['subject']} - {booking['location']} ({start_tw.strftime('%m/%d %H:%M')}-{end_tw.strftime('%H:%M')})"
+            choices.append({
+                "title": display_text,
+                "value": booking["id"]
+            })
+        
+        cancel_card = {
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [
+                {
+                    "type": "TextBlock",
+                    "text": "❌ 取消會議室預約" if language == "zh-TW" else "❌ 会議室予約キャンセル",
+                    "weight": "Bolder",
+                    "size": "Medium"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": f"您有 {len(room_bookings)} 個可取消的預約：" if language == "zh-TW" else f"{len(room_bookings)} 件のキャンセル可能な予約があります：",
+                    "spacing": "Medium"
+                },
+                {
+                    "type": "Input.ChoiceSet",
+                    "id": "selectedBooking",
+                    "style": "compact",
+                    "placeholder": "選擇要取消的預約..." if language == "zh-TW" else "キャンセルする予約を選択...",
+                    "choices": choices
+                }
+            ],
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": "❌ 確認取消" if language == "zh-TW" else "❌ キャンセル確認",
+                    "data": {"action": "cancelBooking"}
+                }
+            ]
+        }
+
+        from botbuilder.schema import Attachment
+        card_attachment = Attachment(
+            content_type="application/vnd.microsoft.card.adaptive",
+            content=cancel_card
+        )
+
+        await turn_context.send_activity(
+            Activity(
+                type=ActivityTypes.message,
+                text="請選擇要取消的預約：" if language == "zh-TW" else "キャンセルする予約を選択してください：",
+                attachments=[card_attachment]
+            )
+        )
+        
+    except Exception as e:
+        error_msg = f"❌ 取得預約列表失敗：{str(e)}" if language == "zh-TW" else f"❌ 予約リスト取得に失敗しました：{str(e)}"
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=error_msg)
+        )
+
+
+async def handle_cancel_booking(turn_context: TurnContext, user_mail: str):
+    """處理取消預約"""
+    language = determine_language(user_mail)
+    
+    try:
+        card_data = turn_context.activity.value
+        event_id = card_data.get("selectedBooking")
+        
+        if not event_id:
+            error_msg = "❌ 請選擇要取消的預約" if language == "zh-TW" else "❌ キャンセルする予約を選択してください"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+            return
+        
+        # 取得真實的用戶郵箱
+        try:
+            aad_object_id = turn_context.activity.from_property.aad_object_id
+            user_info = await graph_api.get_user_info(aad_object_id)
+            real_user_email = user_info.get('userPrincipalName', user_mail)
+        except:
+            real_user_email = user_mail
+            
+        if "@unknown.com" in real_user_email:
+            error_msg = "❌ 無法取得有效的用戶郵箱" if language == "zh-TW" else "❌ 有効なユーザーメールアドレスを取得できません"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+            return
+        
+        # 發送取消中的訊息
+        loading_msg = "❌ 正在取消預約..." if language == "zh-TW" else "❌ 予約をキャンセル中..."
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=loading_msg)
+        )
+        
+        # 執行取消
+        success = await graph_api.delete_meeting(real_user_email, event_id)
+        
+        if success:
+            success_msg = "✅ 會議室預約已成功取消" if language == "zh-TW" else "✅ 会議室予約が正常にキャンセルされました"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=success_msg)
+            )
+        else:
+            error_msg = "❌ 取消預約失敗" if language == "zh-TW" else "❌ 予約のキャンセルに失敗しました"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+            
+    except Exception as e:
+        error_msg = f"❌ 取消預約時發生錯誤：{str(e)}" if language == "zh-TW" else f"❌ 予約キャンセル中にエラーが発生しました：{str(e)}"
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=error_msg)
+        )
 
 
 async def handle_room_booking(turn_context: TurnContext, user_mail: str):
