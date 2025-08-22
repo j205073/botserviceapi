@@ -1447,8 +1447,6 @@ async def message_handler(turn_context: TurnContext):
                     todo_id = add_todo_item(user_mail, todo_content)
                     if todo_id:
                         # 產生建議回覆
-                        from botbuilder.schema import SuggestedActions
-
                         suggested_replies = get_suggested_replies(
                             f"@add {todo_content}", user_mail
                         )
