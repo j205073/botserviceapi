@@ -2,7 +2,7 @@
 botbuilder-core==4.16.2
 botbuilder-schema==4.16.2
 botbuilder-integration-aiohttp==4.16.2
-aiohttp==3.10.5
+aiohttp==3.8.6
 
 # Web framework (移除 Flask，只使用 Quart)
 # flask==3.0.0
@@ -34,8 +34,8 @@ cryptography==42.0.0
 msrest==0.7.1
 azure-core==1.29.5
 
-# Optional but recommended for production
-gunicorn==21.2.0
+# Optional but recommended for production (移除 gunicorn，使用 hypercorn)
+# gunicorn==21.2.0
 
 # 檔案處理
 python-docx==1.1.0

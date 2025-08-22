@@ -3,7 +3,7 @@ from typing import List, Dict
 
 from openai import OpenAI, AzureOpenAI
 
-from flask import Flask, request, jsonify
+# from flask import Flask, request, jsonify  # 已改用 Quart
 from botbuilder.core import (
     BotFrameworkAdapter,
     BotFrameworkAdapterSettings,
