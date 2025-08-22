@@ -107,4 +107,4 @@ coverage.xml
 config.ini
 secrets.json
 credentials.json
-./local_audit_logs
+/local_audit_logs
