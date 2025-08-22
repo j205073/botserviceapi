@@ -1,0 +1,249 @@
+{
+  "info": {
+    "name": "TR GPT APIs",
+    "description": "TR GPT 聊天機器人所有 API 端點",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Ping",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ping",
+              "host": ["{{base_url}}"],
+              "path": ["ping"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit Logs",
+      "item": [
+        {
+          "name": "Upload All Users",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/upload-all",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "upload-all"]
+            }
+          }
+        },
+        {
+          "name": "Upload User Logs",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/upload/test@example.com",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "upload", "test@example.com"]
+            }
+          }
+        },
+        {
+          "name": "Get User Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/status/test@example.com",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "status", "test@example.com"]
+            }
+          }
+        },
+        {
+          "name": "Get Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/summary",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "summary"]
+            }
+          }
+        },
+        {
+          "name": "Test Upload",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/test-upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "test-upload"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "S3 Files",
+      "item": [
+        {
+          "name": "List All Files",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/files",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "files"]
+            }
+          }
+        },
+        {
+          "name": "List User Files",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/files?user_mail=test@example.com",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "files"],
+              "query": [
+                {
+                  "key": "user_mail",
+                  "value": "test@example.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Files by Date",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/files?date=2025-08-21",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "files"],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2025-08-21"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Files with Download URLs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/files?include_download_url=true&expiration=3600",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "files"],
+              "query": [
+                {
+                  "key": "include_download_url",
+                  "value": "true"
+                },
+                {
+                  "key": "expiration",
+                  "value": "3600"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Download URL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/download/trgpt/test@example.com/2025-08-21/test@example.com_2025-08-21.json.gz",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "download", "trgpt", "test@example.com", "2025-08-21", "test@example.com_2025-08-21.json.gz"]
+            }
+          }
+        },
+        {
+          "name": "Get S3 Bucket Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/bucket-info",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "bucket-info"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Local Files",
+      "item": [
+        {
+          "name": "Get Local Files Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/local-files",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "local-files"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Memory Management",
+      "item": [
+        {
+          "name": "Clear User Memory",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/memory/clear?user_mail=test@example.com",
+              "host": ["{{base_url}}"],
+              "path": ["api", "memory", "clear"],
+              "query": [
+                {
+                  "key": "user_mail",
+                  "value": "test@example.com"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Clear All Memory",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/memory/clear",
+              "host": ["{{base_url}}"],
+              "path": ["api", "memory", "clear"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

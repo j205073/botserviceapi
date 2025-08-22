@@ -1,0 +1,417 @@
+[33mcommit 664334cb4357d7b4b40a27ae3563bdd347a3b9e5[m
+Author: juncheng <juncheng.liu@rinnai.com.tw>
+Date:   Fri Aug 22 19:23:18 2025 +0800
+
+    調整增加azure與openai模型切換
+
+[1mdiff --git a/.claude/settings.local.json b/.claude/settings.local.json[m
+[1mindex aba839c..a45cfbd 100644[m
+[1m--- a/.claude/settings.local.json[m
+[1m+++ b/.claude/settings.local.json[m
+[36m@@ -1,5 +1,16 @@[m
+ {[m
+   "permissions": {[m
+[31m-    "defaultMode": "acceptEdits"[m
+[32m+[m[32m    "allow": [[m
+[32m+[m[32m      "Bash(python:*)",[m
+[32m+[m[32m      "WebFetch(domain:platform.openai.com)",[m
+[32m+[m[32m      "WebSearch",[m
+[32m+[m[32m      "Bash(if [ -d \"audit_logs\" ])",[m
+[32m+[m[32m      "Bash(then echo \"舊目錄存在，建議手動刪除\")",[m
+[32m+[m[32m      "Bash(fi)"[m
+[32m+[m[32m    ],[m
+[32m+[m[32m    "defaultMode": "acceptEdits",[m
+[32m+[m[32m    "additionalDirectories": [[m
+[32m+[m[32m      "D:\\d\\git"[m
+[32m+[m[32m    ][m
+   }[m
+ }[m
+\ No newline at end of file[m
+[1mdiff --git a/TR_GPT_APIs.postman_collection.json b/TR_GPT_APIs.postman_collection.json[m
+[1mnew file mode 100644[m
+[1mindex 0000000..b544b11[m
+[1m--- /dev/null[m
+[1m+++ b/TR_GPT_APIs.postman_collection.json[m
+[36m@@ -0,0 +1,249 @@[m
+[32m+[m[32m{[m[41m[m
+[32m+[m[32m  "info": {[m[41m[m
+[32m+[m[32m    "name": "TR GPT APIs",[m[41m[m
+[32m+[m[32m    "description": "TR GPT 聊天機器人所有 API 端點",[m[41m[m
+[32m+[m[32m    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"[m[41m[m
+[32m+[m[32m  },[m[41m[m
+[32m+[m[32m  "variable": [[m[41m[m
+[32m+[m[32m    {[m[41m[m
+[32m+[m[32m      "key": "base_url",[m[41m[m
+[32m+[m[32m      "value": "http://localhost:8000",[m[41m[m
+[32m+[m[32m      "type": "string"[m[41m[m
+[32m+[m[32m    }[m[41m[m
+[32m+[m[32m  ],[m[41m[m
+[32m+[m[32m  "item": [[m[41m[m
+[32m+[m[32m    {[m[41m[m
+[32m+[m[32m      "name": "System",[m[41m[m
+[32m+[m[32m      "item": [[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Ping",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/ping",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["ping"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        }[m[41m[m
+[32m+[m[32m      ][m[41m[m
+[32m+[m[32m    },[m[41m[m
+[32m+[m[32m    {[m[41m[m
+[32m+[m[32m      "name": "Audit Logs",[m[41m[m
+[32m+[m[32m      "item": [[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Upload All Users",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "POST",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/upload-all",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "upload-all"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Upload User Logs",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "POST",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/upload/test@example.com",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "upload", "test@example.com"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Get User Status",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/status/test@example.com",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "status", "test@example.com"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Get Summary",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/summary",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "summary"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Test Upload",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "POST",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/test-upload",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "test-upload"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        }[m[41m[m
+[32m+[m[32m      ][m[41m[m
+[32m+[m[32m    },[m[41m[m
+[32m+[m[32m    {[m[41m[m
+[32m+[m[32m      "name": "S3 Files",[m[41m[m
+[32m+[m[32m      "item": [[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "List All Files",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/files",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "files"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "List User Files",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/files?user_mail=test@example.com",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "files"],[m[41m[m
+[32m+[m[32m              "query": [[m[41m[m
+[32m+[m[32m                {[m[41m[m
+[32m+[m[32m                  "key": "user_mail",[m[41m[m
+[32m+[m[32m                  "value": "test@example.com"[m[41m[m
+[32m+[m[32m                }[m[41m[m
+[32m+[m[32m              ][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "List Files by Date",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/files?date=2025-08-21",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "files"],[m[41m[m
+[32m+[m[32m              "query": [[m[41m[m
+[32m+[m[32m                {[m[41m[m
+[32m+[m[32m                  "key": "date",[m[41m[m
+[32m+[m[32m                  "value": "2025-08-21"[m[41m[m
+[32m+[m[32m                }[m[41m[m
+[32m+[m[32m              ][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "List Files with Download URLs",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/files?include_download_url=true&expiration=3600",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "files"],[m[41m[m
+[32m+[m[32m              "query": [[m[41m[m
+[32m+[m[32m                {[m[41m[m
+[32m+[m[32m                  "key": "include_download_url",[m[41m[m
+[32m+[m[32m                  "value": "true"[m[41m[m
+[32m+[m[32m                },[m[41m[m
+[32m+[m[32m                {[m[41m[m
+[32m+[m[32m                  "key": "expiration",[m[41m[m
+[32m+[m[32m                  "value": "3600"[m[41m[m
+[32m+[m[32m                }[m[41m[m
+[32m+[m[32m              ][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Get Download URL",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/download/trgpt/test@example.com/2025-08-21/test@example.com_2025-08-21.json.gz",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "download", "trgpt", "test@example.com", "2025-08-21", "test@example.com_2025-08-21.json.gz"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Get S3 Bucket Info",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/bucket-info",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "bucket-info"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        }[m[41m[m
+[32m+[m[32m      ][m[41m[m
+[32m+[m[32m    },[m[41m[m
+[32m+[m[32m    {[m[41m[m
+[32m+[m[32m      "name": "Local Files",[m[41m[m
+[32m+[m[32m      "item": [[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Get Local Files Status",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "GET",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/audit/local-files",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "audit", "local-files"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        }[m[41m[m
+[32m+[m[32m      ][m[41m[m
+[32m+[m[32m    },[m[41m[m
+[32m+[m[32m    {[m[41m[m
+[32m+[m[32m      "name": "Memory Management",[m[41m[m
+[32m+[m[32m      "item": [[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Clear User Memory",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "POST",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/memory/clear?user_mail=test@example.com",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "memory", "clear"],[m[41m[m
+[32m+[m[32m              "query": [[m[41m[m
+[32m+[m[32m                {[m[41m[m
+[32m+[m[32m                  "key": "user_mail",[m[41m[m
+[32m+[m[32m                  "value": "test@example.com"[m[41m[m
+[32m+[m[32m                }[m[41m[m
+[32m+[m[32m              ][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        },[m[41m[m
+[32m+[m[32m        {[m[41m[m
+[32m+[m[32m          "name": "Clear All Memory",[m[41m[m
+[32m+[m[32m          "request": {[m[41m[m
+[32m+[m[32m            "method": "POST",[m[41m[m
+[32m+[m[32m            "header": [],[m[41m[m
+[32m+[m[32m            "url": {[m[41m[m
+[32m+[m[32m              "raw": "{{base_url}}/api/memory/clear",[m[41m[m
+[32m+[m[32m              "host": ["{{base_url}}"],[m[41m[m
+[32m+[m[32m              "path": ["api", "memory", "clear"][m[41m[m
+[32m+[m[32m            }[m[41m[m
+[32m+[m[32m          }[m[41m[m
+[32m+[m[32m        }[m[41m[m
+[32m+[m[32m      ][m[41m[m
+[32m+[m[32m    }[m[41m[m
+[32m+[m[32m  ][m[41m[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/api_commands.md b/api_commands.md[m
+[1mnew file mode 100644[m
+[1mindex 0000000..7818352[m
+[1m--- /dev/null[m
+[1m+++ b/api_commands.md[m
+[36m@@ -0,0 +1,213 @@[m
+[32m+[m[32m# TR GPT API Commands Collection[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## 基本設定[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mBASE_URL=http://localhost:8000[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## 1. 系統健康檢查[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Ping 檢查[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/ping"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## 2. 稽核日誌管理 API[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 2.1 上傳所有用戶稽核日誌到 S3[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X POST "${BASE_URL}/api/audit/upload-all"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 2.2 上傳指定用戶稽核日誌到 S3[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X POST "${BASE_URL}/api/audit/upload/test@example.com"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 2.3 查詢用戶稽核日誌狀態[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/status/test@example.com"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 2.4 取得所有用戶稽核日誌摘要[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/summary"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 2.5 測試上傳所有待上傳的稽核日誌[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X POST "${BASE_URL}/api/audit/test-upload"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## 3. S3 檔案管理 API[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 3.1 列出所有 S3 稽核日誌檔案[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/files"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 3.2 列出特定用戶的 S3 檔案[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/files?user_mail=test@example.com"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 3.3 列出特定日期的 S3 檔案[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/files?date=2025-08-21"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 3.4 列出檔案並包含下載 URL（1小時有效）[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/files?include_download_url=true"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 3.5 列出檔案並包含自定義有效期的下載 URL（2小時）[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/files?include_download_url=true&expiration=7200"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 3.6 取得特定檔案的下載 URL（預設1小時有效）[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/download/trgpt/test@example.com/2025-08-21/test@example.com_2025-08-21.json.gz"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 3.7 取得檔案下載 URL（自定義30分鐘有效期）[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/download/trgpt/test@example.com/2025-08-21/test@example.com_2025-08-21.json.gz?expiration=1800"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 3.8 取得 S3 Bucket 資訊[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/bucket-info"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## 4. 本地檔案管理 API[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 4.1 查看本地稽核日誌檔案狀態[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/local-files"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## 5. 記憶體管理 API[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 5.1 清除特定用戶記憶體[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X POST "${BASE_URL}/api/memory/clear?user_mail=test@example.com"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 5.2 清除所有用戶記憶體[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32mcurl -X POST "${BASE_URL}/api/memory/clear"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## 6. 常用組合操作[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 6.1 完整檢查系統狀態[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32m# 檢查系統健康[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/ping"[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# 檢查稽核日誌摘要[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/summary"[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# 檢查本地檔案[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/local-files"[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# 檢查 S3 狀態[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/audit/bucket-info"[m[41m[m
+[32m+[m[32m```[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### 6.2 手動觸發上傳流程[m[41m[m
+[32m+[m[32m```bash[m[41m[m
+[32m+[m[32m# 測試上傳所有日誌[m[41m[m
+[32m+[m[32mcurl -X POST "${BASE_URL}/api/audit/test-upload"[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# 檢查上傳後的 S3 檔案列表[m[41m[m
+[32m+[m[32mcurl -X GET "${BASE_URL}/api/aud

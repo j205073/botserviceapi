@@ -1,5 +1,16 @@
 {
   "permissions": {
-    "defaultMode": "acceptEdits"
+    "allow": [
+      "Bash(python:*)",
+      "WebFetch(domain:platform.openai.com)",
+      "WebSearch",
+      "Bash(if [ -d \"audit_logs\" ])",
+      "Bash(then echo \"舊目錄存在，建議手動刪除\")",
+      "Bash(fi)"
+    ],
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": [
+      "D:\\d\\git"
+    ]
   }
 }

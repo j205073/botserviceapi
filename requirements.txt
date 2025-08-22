@@ -8,7 +8,9 @@ aiohttp==3.10.5
 flask==3.0.0
 
 # Azure OpenAI
-openai==0.28.1
+# openai==0.28.1
+openai>=1.35.0
+
 
 # HTTP handling
 requests==2.31.0
@@ -55,3 +57,7 @@ anyio==4.2.0   # 非同步 I/O 支援
 # 新增的 ASGI 相關
 h11==0.14.0    # HTTP/1.1 協議實作
 wsproto==1.2.0 # WebSocket 協議支援
+
+# 使用 AWS S3 功能
+boto3>=1.26.0
+botocore>=1.29.0
