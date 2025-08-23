@@ -1,0 +1,16 @@
+[
+  {
+    "timestamp": "2025-08-23T06:05:33.382820+08:00",
+    "conversation_id": "1bdfeef0-7fa4-11f0-8054-cdfd3eff01df|livechat",
+    "role": "user",
+    "content": "hello",
+    "user_mail": "3805fde8-b3b7-4b99-adf8-01814761e558@unknown.com"
+  },
+  {
+    "timestamp": "2025-08-23T06:05:37.881703+08:00",
+    "conversation_id": "1bdfeef0-7fa4-11f0-8054-cdfd3eff01df|livechat",
+    "role": "assistant",
+    "content": "Hello! How can I assist you today?",
+    "user_mail": "3805fde8-b3b7-4b99-adf8-01814761e558@unknown.com"
+  }
+]

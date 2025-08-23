@@ -1,0 +1,16 @@
+[
+  {
+    "timestamp": "2025-08-22T22:43:57.970339+08:00",
+    "conversation_id": "4b18beb0-7f66-11f0-8054-cdfd3eff01df|livechat",
+    "role": "user",
+    "content": "/info",
+    "user_mail": "b0e48d8c-3a6a-4012-a3ae-48ca851d1a8c@unknown.com"
+  },
+  {
+    "timestamp": "2025-08-22T22:44:02.885433+08:00",
+    "conversation_id": "4b18beb0-7f66-11f0-8054-cdfd3eff01df|livechat",
+    "role": "assistant",
+    "content": "Hello! It looks like you entered the command `/info`. How can I assist you today? If you have any specific questions or need information on a particular topic, feel free to let me know!",
+    "user_mail": "b0e48d8c-3a6a-4012-a3ae-48ca851d1a8c@unknown.com"
+  }
+]

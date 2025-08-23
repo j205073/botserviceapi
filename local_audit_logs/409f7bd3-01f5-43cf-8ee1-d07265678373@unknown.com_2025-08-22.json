@@ -1,0 +1,23 @@
+[
+  {
+    "timestamp": "2025-08-22T22:12:58.852254+08:00",
+    "conversation_id": "151d7520-7f62-11f0-8054-cdfd3eff01df|livechat",
+    "role": "system",
+    "content": "你是一個智能助理，負責協助用戶處理各種問題和任務。",
+    "user_mail": "409f7bd3-01f5-43cf-8ee1-d07265678373@unknown.com"
+  },
+  {
+    "timestamp": "2025-08-22T22:12:58.856762+08:00",
+    "conversation_id": "151d7520-7f62-11f0-8054-cdfd3eff01df|livechat",
+    "role": "user",
+    "content": "你好",
+    "user_mail": "409f7bd3-01f5-43cf-8ee1-d07265678373@unknown.com"
+  },
+  {
+    "timestamp": "2025-08-22T22:13:03.909867+08:00",
+    "conversation_id": "151d7520-7f62-11f0-8054-cdfd3eff01df|livechat",
+    "role": "assistant",
+    "content": "你好！我是你的智能助理。請問需要我幫你做什麼？",
+    "user_mail": "409f7bd3-01f5-43cf-8ee1-d07265678373@unknown.com"
+  }
+]
