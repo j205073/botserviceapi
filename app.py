@@ -612,8 +612,8 @@ async def confirm_new_conversation(turn_context: TurnContext):
     clear_user_conversation(conversation_id, user_mail)
 
     confirm_messages = {
-        "zh-TW": f"新對話已開始！\n\n工作記憶已清除，您現在可以開始全新的對話。\n\n系統設定提醒：\n• 工作記憶保存 {CONVERSATION_RETENTION_DAYS} 天\n• 每個對話最多保留 {MAX_CONTEXT_MESSAGES} 筆上下文記錄\n• 稽核日誌保存 {CONVERSATION_RETENTION_DAYS} 天（完整記錄）\n\n有什麼我可以幫您的嗎？",
-        "ja": f"新しい会話が開始されました！\n\n作業メモリがクリアされ、新しい会話を開始できます。\n\nシステム設定：\n• 作業メモリは {CONVERSATION_RETENTION_DAYS} 日間保存\n• 各会話で最大 {MAX_CONTEXT_MESSAGES} 件のコンテキストを保持\n• 監査ログは {CONVERSATION_RETENTION_DAYS} 日間保存（完全記録）\n\n何かお手伝いできることはありますか？",
+        "zh-TW": f"新對話已開始！\n\n工作記憶已清除，您現在可以開始全新的對話。\n\n系統設定提醒：\n• 對話記錄：最多保留 {MAX_CONTEXT_MESSAGES} 筆訊息\n• 待辦事項：保存 {CONVERSATION_RETENTION_DAYS} 天\n• 完整記錄：每日備份至雲端\n\n有什麼我可以幫您的嗎？",
+        "ja": f"新しい会話が開始されました！\n\n作業メモリがクリアされ、新しい会話を開始できます。\n\nシステム設定：\n• 会話記録：最大 {MAX_CONTEXT_MESSAGES} 件のメッセージを保持\n• タスク：{CONVERSATION_RETENTION_DAYS} 日間保存\n• 完全記録：毎日クラウドにバックアップ\n\n何かお手伝いできることはありますか？",
     }
 
     message_text = confirm_messages.get(language, confirm_messages["zh-TW"])
@@ -1396,7 +1396,8 @@ async def welcome_user(turn_context: TurnContext):
 - 個人待辦事項管理
 {model_switch_info_zh}
 對話設定：
-- 工作記憶保存期限：{CONVERSATION_RETENTION_DAYS} 天
+- 對話記錄：最多 {MAX_CONTEXT_MESSAGES} 筆訊息
+- 待辦事項：保存 {CONVERSATION_RETENTION_DAYS} 天
 
 有什麼我可以幫您的嗎？
 
@@ -1410,7 +1411,8 @@ async def welcome_user(turn_context: TurnContext):
 - 個人タスク管理
 {model_switch_info_ja}
 会話設定：
-- 作業メモリ保存期間：{CONVERSATION_RETENTION_DAYS} 日
+- 会話記録：最大 {MAX_CONTEXT_MESSAGES} 件のメッセージ
+- タスク：{CONVERSATION_RETENTION_DAYS} 日間保存
 
 何かお力になれることはありますか？
 
@@ -1448,6 +1450,10 @@ async def message_handler(turn_context: TurnContext):
             if card_action == "selectFunction":
                 selected_function = turn_context.activity.value.get("selectedFunction")
                 if selected_function:
+                    # 特殊處理新增待辦事項
+                    if selected_function == "addTodo":
+                        await show_add_todo_card(turn_context, user_mail)
+                        return
                     # 模擬用戶輸入選擇的功能
                     turn_context.activity.text = selected_function
                     # 繼續處理，不要 return
@@ -1460,6 +1466,35 @@ async def message_handler(turn_context: TurnContext):
             # 處理會議室預約取消
             elif card_action == "cancelBooking":
                 await handle_cancel_booking(turn_context, user_mail)
+                return
+
+            # 處理新增待辦事項
+            elif card_action == "addTodoItem":
+                todo_content = turn_context.activity.value.get("todoContent", "").strip()
+                if todo_content:
+                    todo_id = add_todo_item(user_mail, todo_content)
+                    if todo_id:
+                        # 產生建議回覆
+                        suggested_replies = get_suggested_replies(f"完成新增", user_mail)
+                        
+                        await turn_context.send_activity(
+                            Activity(
+                                type=ActivityTypes.message,
+                                text=f"✅ 已新增待辦事項 #{todo_id}：{todo_content}",
+                                suggested_actions=SuggestedActions(actions=suggested_replies) if suggested_replies else None,
+                            )
+                        )
+                    else:
+                        await turn_context.send_activity(
+                            Activity(type=ActivityTypes.message, text="❌ 新增待辦事項失敗")
+                        )
+                else:
+                    await turn_context.send_activity(
+                        Activity(
+                            type=ActivityTypes.message,
+                            text="❌ 請輸入待辦事項內容",
+                        )
+                    )
                 return
 
             # 處理模型選擇
@@ -2032,6 +2067,52 @@ async def show_self_info(turn_context: TurnContext, user_mail: str):
     )
 
 
+async def show_add_todo_card(turn_context: TurnContext, user_mail: str):
+    """顯示新增待辦事項輸入卡片"""
+    language = determine_language(user_mail)
+    
+    todo_card = {
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+            {
+                "type": "TextBlock",
+                "text": "📝 新增待辦事項" if language == "zh-TW" else "📝 タスクを追加",
+                "weight": "Bolder",
+                "size": "Medium",
+            },
+            {
+                "type": "Input.Text",
+                "id": "todoContent",
+                "placeholder": "請輸入待辦事項內容..." if language == "zh-TW" else "タスクの内容を入力してください...",
+                "maxLength": 200,
+                "isMultiline": True,
+            },
+        ],
+        "actions": [
+            {
+                "type": "Action.Submit",
+                "title": "✅ 新增" if language == "zh-TW" else "✅ 追加",
+                "data": {"action": "addTodoItem"},
+            }
+        ],
+    }
+
+    from botbuilder.schema import Attachment
+
+    card_attachment = Attachment(
+        content_type="application/vnd.microsoft.card.adaptive", content=todo_card
+    )
+
+    await turn_context.send_activity(
+        Activity(
+            type=ActivityTypes.message,
+            text="請填寫待辦事項內容：" if language == "zh-TW" else "タスクの内容を記入してください：",
+            attachments=[card_attachment],
+        )
+    )
+
+
 async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
     # 取得用戶語言設定
     user_id = turn_context.activity.from_property.id
@@ -2108,7 +2189,7 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
     choices = [
         {
             "title": "📝 新增待辦事項" if language == "zh-TW" else "📝 タスク追加",
-            "value": "@add ",
+            "value": "addTodo",
         },
         {
             "title": "📋 查看待辦清單" if language == "zh-TW" else "📋 タスクリスト",
@@ -2444,6 +2525,11 @@ async def show_my_bookings(turn_context: TurnContext, user_mail: str):
         for event in events:
             # 檢查會議的與會者中是否包含會議室
             attendees = event.get("attendees", [])
+            
+            # 判斷用戶是主辦者還是參與者
+            organizer_email = event.get("organizer", {}).get("emailAddress", {}).get("address", "")
+            is_organizer = organizer_email.lower() == real_user_email.lower()
+            
             for attendee in attendees:
                 email = attendee.get("emailAddress", {}).get("address", "")
                 if email in room_emails:
@@ -2457,6 +2543,7 @@ async def show_my_bookings(turn_context: TurnContext, user_mail: str):
                             "location": event.get("location", {}).get(
                                 "displayName", email
                             ),
+                            "is_organizer": is_organizer,
                         }
                     )
                     break
@@ -2487,7 +2574,10 @@ async def show_my_bookings(turn_context: TurnContext, user_mail: str):
             start_tw = start_dt.astimezone(taiwan_tz)
             end_tw = end_dt.astimezone(taiwan_tz)
 
-            bookings_text += f"""**{i}. {booking['subject']}**
+            # 判斷身份標示
+            role_indicator = "" if booking["is_organizer"] else " (參與)" if language == "zh-TW" else " (参加)"
+            
+            bookings_text += f"""**{i}. {booking['subject']}{role_indicator}**
 🏢 會議室：{booking['location']}
 📅 日期：{start_tw.strftime('%Y/%m/%d (%a)')}
 ⏰ 時間：{start_tw.strftime('%H:%M')} - {end_tw.strftime('%H:%M')}
@@ -2560,7 +2650,9 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
             event_start = datetime.fromisoformat(
                 event["start"]["dateTime"].replace("Z", "+00:00")
             )
-            if event_start <= datetime.now().astimezone():
+            # 確保兩個時間都有時區信息
+            current_time = datetime.now(taiwan_tz)
+            if event_start <= current_time:
                 continue
 
             attendees = event.get("attendees", [])
