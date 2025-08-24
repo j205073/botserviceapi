@@ -61,6 +61,13 @@ graph_api = GraphAPI(token_manager)
 # 載入環境變數
 load_dotenv()
 
+# === Debug 參數 ===
+DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
+DEBUG_ACCOUNT = os.getenv("DEBUG_ACCOUNT", "")  # 如果為空則使用實際用戶
+print(f"Debug 模式: {DEBUG_MODE}")
+if DEBUG_MODE and DEBUG_ACCOUNT:
+    print(f"Debug 指定帳號: {DEBUG_ACCOUNT}")
+
 #   清理邏輯
 #   - 記憶體清理：達到 MAX_CONTEXT_MESSAGES 時自動清除該用戶記憶體
 #   - S3上傳：每天早上7點台灣時間自動上傳所有待上傳的日誌
@@ -69,7 +76,7 @@ load_dotenv()
 CONVERSATION_RETENTION_DAYS = int(os.getenv("CONVERSATION_RETENTION_DAYS", "30"))
 MAX_CONTEXT_MESSAGES = int(os.getenv("MAX_CONTEXT_MESSAGES", "30"))
 # === 稽核日誌參數 ===
-S3_UPLOAD_INTERVAL_HOURS = int(os.getenv("S3_UPLOAD_INTERVAL_HOURS", "24"))
+# S3_UPLOAD_INTERVAL_HOURS = int(os.getenv("S3_UPLOAD_INTERVAL_HOURS", "24"))
 # === 待辦事項提醒參數 ===
 TODO_REMINDER_INTERVAL_SECONDS = int(
     os.getenv("TODO_REMINDER_INTERVAL_SECONDS", "3600")
@@ -149,7 +156,12 @@ taiwan_tz = pytz.timezone("Asia/Taipei")
 
 # OpenAI API 配置
 USE_AZURE_OPENAI = os.getenv("USE_AZURE_OPENAI", "true").lower() == "true"
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")  # 主要對話模型
+OPENAI_INTENT_MODEL = os.getenv("OPENAI_INTENT_MODEL", "gpt-5-nano")  # 意圖分析專用模型
+OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-4o-mini")  # 彙總專用模型
+ENABLE_AI_INTENT_ANALYSIS = (
+    os.getenv("ENABLE_AI_INTENT_ANALYSIS", "false").lower() == "true"
+)  # 是否啟用AI意圖分析
 
 if USE_AZURE_OPENAI:
     openai_client = AzureOpenAI(
@@ -351,22 +363,15 @@ def hourly_todo_reminder():
             if len(pending_todos) > 0:
                 users_with_todos += 1
                 try:
-                    # 構建提醒訊息
-                    reminder_text = f"📝 您有 {len(pending_todos)} 個待辦事項：\n\n"
-                    for i, todo in enumerate(pending_todos, 1):
-                        reminder_text += f"{i}. {todo['content']}\n"
-                    reminder_text += "\n回覆「@ok 編號」來標記完成事項"
-
-                    # 發送 Teams 提醒訊息
+                    # 發送 Teams 提醒訊息（使用 Adaptive Card）
                     if user_mail in user_conversation_refs:
                         try:
                             conversation_ref = user_conversation_refs[user_mail]
+                            language = determine_language(user_mail)
 
                             async def send_reminder(turn_context):
-                                await turn_context.send_activity(
-                                    Activity(
-                                        type=ActivityTypes.message, text=reminder_text
-                                    )
+                                await send_todo_reminder_card(
+                                    turn_context, user_mail, pending_todos, language
                                 )
 
                             # 使用正確的身份和 App ID 進行對話
@@ -404,6 +409,737 @@ def hourly_todo_reminder():
 # 安排首次上傳 - 計算到下次早上7點台灣時間的時間
 initial_seconds_until_7am = calculate_seconds_until_next_7am()
 Timer(initial_seconds_until_7am, daily_s3_upload).start()
+
+
+async def send_todo_reminder_card(
+    turn_context: TurnContext, user_mail: str, pending_todos: list, language: str
+):
+    """發送待辦事項提醒卡片"""
+    try:
+        # 創建下拉選項
+        choices = []
+        for i, todo in enumerate(pending_todos):
+            display_text = f"{i+1}. {todo['content']}"
+            choices.append({"title": display_text, "value": str(i)})
+
+        reminder_card = {
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [
+                {
+                    "type": "TextBlock",
+                    "text": (
+                        "📝 待辦事項提醒"
+                        if language == "zh-TW"
+                        else "📝 TODOリマインダー"
+                    ),
+                    "weight": "Bolder",
+                    "size": "Medium",
+                },
+                {
+                    "type": "TextBlock",
+                    "text": (
+                        f"您有 {len(pending_todos)} 個待辦事項："
+                        if language == "zh-TW"
+                        else f"{len(pending_todos)} 件のTODOがあります："
+                    ),
+                    "spacing": "Medium",
+                },
+                {
+                    "type": "Input.ChoiceSet",
+                    "id": "selectedTodo",
+                    "style": "compact",
+                    "placeholder": (
+                        "選擇要完成的事項..."
+                        if language == "zh-TW"
+                        else "完了するアイテムを選択..."
+                    ),
+                    "choices": choices,
+                },
+            ],
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": (
+                        "✅ 完成選中的事項"
+                        if language == "zh-TW"
+                        else "✅ 選択したアイテムを完了"
+                    ),
+                    "data": {"action": "completeTodo"},
+                    "style": "positive",
+                },
+                {
+                    "type": "Action.Submit",
+                    "title": (
+                        "❌ 關閉提醒"
+                        if language == "zh-TW"
+                        else "❌ リマインダーを閉じる"
+                    ),
+                    "data": {"action": "closeTodoReminder"},
+                    "style": "default",
+                },
+            ],
+        }
+
+        from botbuilder.schema import Attachment
+
+        card_attachment = Attachment(
+            content_type="application/vnd.microsoft.card.adaptive",
+            content=reminder_card,
+        )
+
+        await turn_context.send_activity(
+            Activity(
+                type=ActivityTypes.message,
+                text=(
+                    "⏰ 待辦事項提醒："
+                    if language == "zh-TW"
+                    else "⏰ TODOリマインダー："
+                ),
+                attachments=[card_attachment],
+            )
+        )
+
+    except Exception as e:
+        print(f"發送待辦提醒卡片失敗: {str(e)}")
+        # 如果卡片發送失敗，回退到文字提醒
+        fallback_text = f"📝 您有 {len(pending_todos)} 個待辦事項：\n\n"
+        for i, todo in enumerate(pending_todos, 1):
+            fallback_text += f"{i}. {todo['content']}\n"
+        fallback_text += "\n回覆「@ok 編號」來標記完成事項"
+
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=fallback_text)
+        )
+
+
+async def send_todo_list_card(
+    turn_context: TurnContext, user_mail: str, pending_todos: list, language: str
+):
+    """發送待辦事項清單卡片（用於 @ls 查看指令）"""
+    try:
+        # 創建下拉選項
+        choices = []
+        for i, todo in enumerate(pending_todos):
+            display_text = f"{i+1}. #{todo['id']}: {todo['content']}"
+            choices.append({"title": display_text, "value": str(i)})
+
+        todo_list_card = {
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [
+                {
+                    "type": "TextBlock",
+                    "text": (
+                        "📝 待辦事項清單" if language == "zh-TW" else "📝 TODOリスト"
+                    ),
+                    "weight": "Bolder",
+                    "size": "Medium",
+                },
+                {
+                    "type": "TextBlock",
+                    "text": (
+                        f"您有 {len(pending_todos)} 個待辦事項："
+                        if language == "zh-TW"
+                        else f"{len(pending_todos)} 件のTODOがあります："
+                    ),
+                    "spacing": "Medium",
+                },
+                {
+                    "type": "Input.ChoiceSet",
+                    "id": "selectedTodo",
+                    "style": "compact",
+                    "placeholder": (
+                        "選擇要完成的事項..."
+                        if language == "zh-TW"
+                        else "完了するアイテムを選択..."
+                    ),
+                    "choices": choices,
+                },
+            ],
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": (
+                        "✅ 完成選中的事項"
+                        if language == "zh-TW"
+                        else "✅ 選択したアイテムを完了"
+                    ),
+                    "data": {"action": "completeTodo"},
+                    "style": "positive",
+                },
+                {
+                    "type": "Action.Submit",
+                    "title": (
+                        "❌ 關閉清單" if language == "zh-TW" else "❌ リストを閉じる"
+                    ),
+                    "data": {"action": "closeTodoList"},
+                    "style": "default",
+                },
+            ],
+        }
+
+        from botbuilder.schema import Attachment
+
+        card_attachment = Attachment(
+            content_type="application/vnd.microsoft.card.adaptive",
+            content=todo_list_card,
+        )
+
+        await turn_context.send_activity(
+            Activity(
+                type=ActivityTypes.message,
+                text=(
+                    "📋 您的待辦事項：" if language == "zh-TW" else "📋 あなたのTODO："
+                ),
+                attachments=[card_attachment],
+            )
+        )
+
+    except Exception as e:
+        print(f"發送待辦清單卡片失敗: {str(e)}")
+        # 如果卡片發送失敗，回退到文字清單
+        fallback_text = f"📝 您有 {len(pending_todos)} 個待辦事項：\n\n"
+        for i, todo in enumerate(pending_todos, 1):
+            fallback_text += f"{i}. #{todo['id']}: {todo['content']}\n"
+        fallback_text += "\n回覆「@ok 編號」來標記完成事項"
+
+        suggested_replies = get_suggested_replies("@ls", user_mail)
+        await turn_context.send_activity(
+            Activity(
+                type=ActivityTypes.message,
+                text=fallback_text,
+                suggested_actions=SuggestedActions(actions=suggested_replies),
+            )
+        )
+
+
+# === AI意圖分析系統 ===
+
+
+async def analyze_user_intent(user_message: str) -> dict:
+    """
+    使用 AI 分析用戶意圖
+    返回格式：{
+        "category": "todo|meeting|info|other",
+        "action": "query|add|complete|book|cancel|...",
+        "content": "相關內容",
+        "confidence": 0.0-1.0
+    }
+    """
+    try:
+        # 只在 OpenAI 模式下使用 AI 意圖分析，Azure 使用預設模型
+        if not USE_AZURE_OPENAI:
+            # 使用 gpt-5-nano 節省費用
+            intent_api_key = os.getenv("OPENAI_API_KEY")
+            if not intent_api_key:
+                print("警告：未設置 OPENAI_API_KEY 環境變數，意圖分析將失敗")
+                return {
+                    "category": "other",
+                    "action": "chat",
+                    "content": "",
+                    "confidence": 0.0,
+                }
+
+            intent_client = OpenAI(api_key=intent_api_key)
+
+            system_prompt = """你是一個意圖分析助手，分析用戶輸入並返回JSON格式結果。
+
+支援的功能分類和動作：
+1. todo (待辦事項): query(查詢), add(新增), complete(完成), clear(清空)
+2. meeting (會議室): query(查詢預約), book(預約), cancel(取消)
+3. info (資訊查詢): help(幫助), status(狀態), user_info(個人資訊)
+4. other (其他): chat(一般對話)
+
+重要區別：
+- 包含"會議"、"預約"、"參加"、"出席" → meeting
+- 包含"待辦"、"任務"、"todo" → todo
+- 如果同時提到會議相關詞彙，優先判斷為meeting
+
+請分析用戶輸入，返回JSON：
+{
+    "category": "分類",
+    "action": "動作", 
+    "content": "提取的具體內容(如待辦事項內容、會議主題等)",
+    "confidence": 0.0-1.0的信心值
+}
+
+例子：
+- "我的待辦事項有哪些" → {"category":"todo","action":"query","content":"","confidence":0.9}
+- "我目前要參加的會議有哪些" → {"category":"meeting","action":"query","content":"","confidence":0.9}
+- "提醒我明天開會" → {"category":"todo","action":"add","content":"明天開會","confidence":0.8}
+- "預約會議室" → {"category":"meeting","action":"book","content":"","confidence":0.9}
+- "有預約的?" → {"category":"meeting","action":"query","content":"","confidence":0.8}
+- "天氣如何" → {"category":"other","action":"chat","content":"天氣","confidence":0.9}
+
+如果不確定，confidence設為較低值。只返回JSON，不要其他文字。"""
+
+            try:
+                print("🤖 [AI意圖分析] 開始調用 OpenAI API...")
+                print(f"📝 [AI意圖分析] 用戶輸入: {user_message}")
+                print(f"🔧 [AI意圖分析] 使用意圖模型: {OPENAI_INTENT_MODEL}")
+
+                response = intent_client.chat.completions.create(
+                    model=OPENAI_INTENT_MODEL,  # 使用參數化的意圖分析模型
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                    max_tokens=200,
+                    temperature=0.1,  # 低溫度確保一致性
+                )
+
+                # 記錄 token 使用量和費用
+                if hasattr(response, "usage") and response.usage:
+                    prompt_tokens = response.usage.prompt_tokens
+                    completion_tokens = response.usage.completion_tokens
+                    total_tokens = response.usage.total_tokens
+
+                    print(f"💰 [AI意圖分析] Token 使用量:")
+                    print(f"   📥 輸入 tokens: {prompt_tokens}")
+                    print(f"   📤 輸出 tokens: {completion_tokens}")
+                    print(f"   📊 總計 tokens: {total_tokens}")
+                    print(
+                        f"   💵 估算費用: ${total_tokens * 0.000001:.6f} (假設每1K tokens $0.001)"
+                    )
+                else:
+                    print("⚠️  [AI意圖分析] 無法取得 token 使用量資訊")
+
+                intent_result = response.choices[0].message.content.strip()
+                print(f"🎯 [AI意圖分析] 分析結果: {intent_result}")
+
+                # 解析JSON回應
+                import json
+
+                parsed_result = json.loads(intent_result)
+                print(
+                    f"✅ [AI意圖分析] 解析成功 - 類別: {parsed_result.get('category')}, 動作: {parsed_result.get('action')}, 信心度: {parsed_result.get('confidence')}"
+                )
+                return parsed_result
+
+            except Exception as api_error:
+                print(f"OpenAI 意圖分析失敗: {api_error}")
+                return {
+                    "category": "other",
+                    "action": "chat",
+                    "content": "",
+                    "confidence": 0.0,
+                }
+
+        else:
+            # Azure 模式：使用預設模型進行意圖分析
+            system_prompt = """你是一個意圖分析助手，分析用戶輸入並返回JSON格式結果。
+
+支援的功能分類和動作：
+1. todo (待辦事項): query(查詢), add(新增), complete(完成), clear(清空)  
+2. meeting (會議室): query(查詢預約), book(預約), cancel(取消)
+3. info (資訊查詢): help(幫助), status(狀態), user_info(個人資訊)
+4. other (其他): chat(一般對話)
+
+重要區別：
+- 包含"會議"、"預約"、"參加"、"出席" → meeting
+- 包含"待辦"、"任務"、"todo" → todo
+- 如果同時提到會議相關詞彙，優先判斷為meeting
+
+請分析用戶輸入，返回JSON：
+{
+    "category": "分類",
+    "action": "動作",
+    "content": "提取的具體內容", 
+    "confidence": 0.0-1.0的信心值
+}
+
+例子：
+- "我的待辦事項有哪些" → {"category":"todo","action":"query","content":"","confidence":0.9}
+- "我目前要參加的會議有哪些" → {"category":"meeting","action":"query","content":"","confidence":0.9}
+- "有預約的?" → {"category":"meeting","action":"query","content":"","confidence":0.8}
+
+只返回JSON，不要其他文字。"""
+
+            try:
+                print("🤖 [AI意圖分析-Azure] 開始調用 Azure OpenAI API...")
+                print(f"📝 [AI意圖分析-Azure] 用戶輸入: {user_message}")
+                print(
+                    f"🔧 [AI意圖分析-Azure] 使用固定意圖模型: o1-mini (不受用戶模型選擇影響)"
+                )
+
+                # 直接調用Azure OpenAI，不經過call_openai以避免受用戶模型選擇影響
+                response = openai_client.chat.completions.create(
+                    model="o1-mini",  # Azure固定使用o1-mini進行意圖分析
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                    max_completion_tokens=200,
+                    timeout=15,
+                )
+
+                intent_result = response.choices[0].message.content.strip()
+                print(f"🎯 [AI意圖分析-Azure] 分析結果: {intent_result}")
+
+                import json
+
+                parsed_result = json.loads(intent_result)
+                print(
+                    f"✅ [AI意圖分析-Azure] 解析成功 - 類別: {parsed_result.get('category')}, 動作: {parsed_result.get('action')}, 信心度: {parsed_result.get('confidence')}"
+                )
+                print("💰 [AI意圖分析-Azure] 注意：使用Azure OpenAI會產生費用")
+
+                return parsed_result
+
+            except Exception as api_error:
+                print(f"❌ [AI意圖分析-Azure] 失敗: {api_error}")
+                return {
+                    "category": "other",
+                    "action": "chat",
+                    "content": "",
+                    "confidence": 0.0,
+                }
+
+    except Exception as e:
+        print(f"意圖分析系統錯誤: {e}")
+        return {"category": "other", "action": "chat", "content": "", "confidence": 0.0}
+
+
+def analyze_intent_by_keywords(user_message: str) -> dict:
+    """
+    使用關鍵字匹配分析用戶意圖（快速、免費的後備方案）
+    """
+    message_lower = user_message.lower()
+
+    # 會議室相關關鍵字（優先級較高，因為更具體）
+    meeting_keywords = ["會議", "meeting", "預約", "booking"]
+    meeting_query_indicators = ["有哪些", "什麼", "查詢", "我的", "參加", "出席"]
+    meeting_book_keywords = ["預約", "訂", "會議室", "booking", "reserve", "預定"]
+    meeting_cancel_keywords = ["取消預約", "取消會議", "cancel", "不要", "取消"]
+
+    # 待辦事項相關關鍵字
+    todo_keywords = ["待辦", "todo", "任務", "task", "待辦事項"]
+    todo_query_indicators = [
+        "有哪些",
+        "什麼事",
+        "清單",
+        "list",
+        "查看",
+        "列出",
+        "目前",
+        "我的",
+        "顯示",
+        "查詢",
+    ]
+    todo_add_keywords = ["新增", "添加", "提醒我", "記住", "幫我加", "建立", "創建"]
+    todo_complete_keywords = ["完成", "做完", "標記", "打勾", "結束"]
+
+    # 資訊查詢相關
+    info_help_keywords = ["幫助", "help", "功能", "怎麼用", "說明"]
+    info_status_keywords = ["狀態", "status", "系統"]
+    info_user_keywords = ["我的資訊", "個人", "用戶", "profile"]
+
+    # 優先檢查會議相關（因為會議和待辦可能有重疊關鍵字）
+    has_meeting_keyword = any(keyword in message_lower for keyword in meeting_keywords)
+    has_meeting_query = any(
+        indicator in message_lower for indicator in meeting_query_indicators
+    )
+
+    if has_meeting_keyword:
+        if has_meeting_query or "有哪些" in message_lower or "什麼" in message_lower:
+            return {
+                "category": "meeting",
+                "action": "query",
+                "content": "",
+                "confidence": 0.9,
+            }
+        elif any(keyword in message_lower for keyword in meeting_book_keywords):
+            return {
+                "category": "meeting",
+                "action": "book",
+                "content": "",
+                "confidence": 0.8,
+            }
+        elif any(keyword in message_lower for keyword in meeting_cancel_keywords):
+            return {
+                "category": "meeting",
+                "action": "cancel",
+                "content": "",
+                "confidence": 0.8,
+            }
+
+    # 檢查待辦事項（排除已被會議處理的情況）
+    has_todo_keyword = any(keyword in message_lower for keyword in todo_keywords)
+    has_todo_query = any(
+        indicator in message_lower for indicator in todo_query_indicators
+    )
+
+    if has_todo_keyword or (has_todo_query and not has_meeting_keyword):
+        if has_todo_query or "有哪些" in message_lower:
+            return {
+                "category": "todo",
+                "action": "query",
+                "content": "",
+                "confidence": 0.8,
+            }
+
+    # 待辦事項新增 - 增強版本，支援更多自然語言模式
+    smart_todo_patterns = [
+        "記著",
+        "記住",
+        "記錄",
+        "幫我記",
+        "提醒我",
+        "新增",
+        "添加",
+        "幫我加",
+        "記錄為",
+        "記錄成",
+        "幫我記錄",
+        "記下",
+        "記著為",
+        "記住要",
+        "幫我記著",
+    ]
+
+    if any(keyword in message_lower for keyword in todo_add_keywords) or any(
+        pattern in message_lower for pattern in smart_todo_patterns
+    ):
+        # 智能提取待辦內容
+        content = user_message
+
+        # 移除常見的指令詞彙 - 按長度排序，優先匹配更長的模式
+        remove_patterns = [
+            "記錄為一筆待辦",
+            "幫我記著為待辦",
+            "記著為待辦",
+            "記錄為待辦",
+            "幫我記錄",
+            "幫我記著",
+            "幫我記",
+            "記著為",
+            "記錄為",
+            "記錄成",
+            "記著",
+            "記住",
+            "記錄",
+            "提醒我",
+            "新增",
+            "添加",
+            "幫我加",
+            "記下",
+        ]
+
+        for pattern in remove_patterns:
+            if pattern in content:
+                # 找到模式後，移除它以及後面可能的標點符號和空格
+                content = content.replace(pattern, "").strip()
+                content = content.rstrip("，。！？,.").strip()  # 移除可能的標點符號
+                break
+
+        # 如果內容不為空，返回智能待辦新增意圖
+        if content:
+            return {
+                "category": "todo",
+                "action": "smart_add",
+                "content": content,
+                "confidence": 0.9,
+            }
+
+    # 待辦事項完成
+    if any(keyword in message_lower for keyword in todo_complete_keywords):
+        return {
+            "category": "todo",
+            "action": "complete",
+            "content": "",
+            "confidence": 0.7,
+        }
+
+    # 檢查資訊查詢
+    if any(keyword in message_lower for keyword in info_help_keywords):
+        return {"category": "info", "action": "help", "content": "", "confidence": 0.9}
+    elif any(keyword in message_lower for keyword in info_status_keywords):
+        return {
+            "category": "info",
+            "action": "status",
+            "content": "",
+            "confidence": 0.8,
+        }
+    elif any(keyword in message_lower for keyword in info_user_keywords):
+        return {
+            "category": "info",
+            "action": "user_info",
+            "content": "",
+            "confidence": 0.8,
+        }
+
+    # 預設為一般對話
+    return {
+        "category": "other",
+        "action": "chat",
+        "content": user_message,
+        "confidence": 0.3,
+    }
+
+
+async def handle_intent_action(
+    turn_context: TurnContext, user_mail: str, intent: dict
+) -> bool:
+    """
+    根據意圖執行相對應的功能
+    返回 True 表示已處理，False 表示未處理或失敗
+    """
+    try:
+        category = intent.get("category")
+        action = intent.get("action")
+        content = intent.get("content", "").strip()
+        language = determine_language(user_mail)
+
+        # 處理待辦事項相關意圖
+        if category == "todo":
+            if action == "query":
+                # 查詢待辦事項
+                pending_todos = get_user_pending_todos(user_mail)
+                if pending_todos:
+                    await send_todo_list_card(
+                        turn_context, user_mail, pending_todos, language
+                    )
+                    # 添加使用提示
+                    hint_msg = (
+                        "💡 小提示：下次可以直接輸入 `@ls` 快速查看待辦清單"
+                        if language == "zh-TW"
+                        else "💡 ヒント：次回は `@ls` で素早くTODOリストを確認できます"
+                    )
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=hint_msg)
+                    )
+                else:
+                    await turn_context.send_activity(
+                        Activity(
+                            type=ActivityTypes.message,
+                            text=(
+                                "🎉 目前沒有待辦事項"
+                                if language == "zh-TW"
+                                else "🎉 現在はTODOがありません"
+                            ),
+                        )
+                    )
+                return True
+
+            elif action == "smart_add" and content:
+                # 智能新增待辦事項（包含相似性檢查）
+                await smart_add_todo(turn_context, user_mail, content)
+                return True
+
+            elif action == "add" and content:
+                # 新增待辦事項
+                todo_id = add_todo_item(user_mail, content)
+                if todo_id:
+                    success_msg = (
+                        f"✅ 已新增待辦事項：{content}"
+                        if language == "zh-TW"
+                        else f"✅ TODOを追加しました：{content}"
+                    )
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=success_msg)
+                    )
+
+                    # 添加使用提示
+                    hint_msg = (
+                        "💡 小提示：下次可以使用 `@add 內容` 快速新增待辦"
+                        if language == "zh-TW"
+                        else "💡 ヒント：次回は `@add 内容` で素早くTODOを追加できます"
+                    )
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=hint_msg)
+                    )
+                    return True
+
+            elif action == "complete":
+                # 顯示待辦清單供完成
+                pending_todos = get_user_pending_todos(user_mail)
+                if pending_todos:
+                    await send_todo_list_card(
+                        turn_context, user_mail, pending_todos, language
+                    )
+                    return True
+                else:
+                    await turn_context.send_activity(
+                        Activity(
+                            type=ActivityTypes.message,
+                            text=(
+                                "🎉 沒有待辦事項需要完成"
+                                if language == "zh-TW"
+                                else "🎉 完了するTODOはありません"
+                            ),
+                        )
+                    )
+                    return True
+
+        # 處理會議室相關意圖
+        elif category == "meeting":
+            if action == "book":
+                # 顯示會議室預約表單
+                await show_room_booking_options(turn_context, user_mail)
+                hint_msg = (
+                    "💡 小提示：也可以使用 `@會議室預約` 快速開啟預約表單"
+                    if language == "zh-TW"
+                    else "💡 ヒント：`@会議室予約` でも素早く予約フォームを開けます"
+                )
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=hint_msg)
+                )
+                return True
+
+            elif action == "query":
+                # 查詢會議室預約
+                await show_my_bookings(turn_context, user_mail)
+                hint_msg = (
+                    "💡 小提示：也可以使用 `@查詢預約` 快速查看預約"
+                    if language == "zh-TW"
+                    else "💡 ヒント：`@予約確認` でも素早く予約を確認できます"
+                )
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=hint_msg)
+                )
+                return True
+
+            elif action == "cancel":
+                # 取消會議室預約
+                await show_cancel_booking_options(turn_context, user_mail)
+                hint_msg = (
+                    "💡 小提示：也可以使用 `@取消預約` 快速取消預約"
+                    if language == "zh-TW"
+                    else "💡 ヒント：`@予約キャンセル` でも素早く予約をキャンセルできます"
+                )
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=hint_msg)
+                )
+                return True
+
+        # 處理資訊查詢相關意圖
+        elif category == "info":
+            if action == "help":
+                # 顯示功能說明
+                await show_help_options(turn_context)
+                return True
+            elif action == "user_info":
+                # 顯示用戶資訊
+                await show_user_info(turn_context, user_mail)
+                return True
+            elif action == "status":
+                # 顯示系統狀態（可以擴展）
+                status_msg = (
+                    "🔧 系統運作正常\n💡 輸入 `/help` 查看所有功能"
+                    if language == "zh-TW"
+                    else "🔧 システムは正常に動作中\n💡 `/help` ですべての機能を確認できます"
+                )
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=status_msg)
+                )
+                return True
+
+        return False
+
+    except Exception as e:
+        print(f"處理意圖動作時發生錯誤: {str(e)}")
+        return False
 
 
 # === 智能建議回覆系統 ===
@@ -488,6 +1224,207 @@ def get_suggested_replies(user_message, user_mail=None):
 
 
 # === 待辦事項管理函數 ===
+
+
+def extract_todo_features(content):
+    """提取待辦事項的特徵：時間、人員、物件"""
+    import re
+
+    content_lower = content.lower()
+
+    # 時間相關關鍵字
+    time_keywords = [
+        "下午",
+        "上午",
+        "晚上",
+        "早上",
+        "今天",
+        "明天",
+        "後天",
+        "週一",
+        "週二",
+        "週三",
+        "週四",
+        "週五",
+        "週六",
+        "週日",
+        "月份",
+        "小時",
+        "分鐘",
+        "點",
+        "時",
+        "分",
+        "秒",
+    ]
+
+    # 提取人員（假設包含常見中文姓名或英文名）
+    person_pattern = r"([A-Za-z]+|[\u4e00-\u9fff]{2,4})"
+    potential_persons = re.findall(person_pattern, content)
+
+    # 動作關鍵字（通常表示要做的事）
+    action_keywords = [
+        "討論",
+        "開會",
+        "會議",
+        "聯絡",
+        "打電話",
+        "發信",
+        "寫",
+        "完成",
+        "處理",
+        "檢查",
+        "確認",
+        "準備",
+    ]
+
+    features = {
+        "time_mentioned": any(keyword in content_lower for keyword in time_keywords),
+        "persons": [p for p in potential_persons if len(p) >= 2],  # 過濾太短的字串
+        "actions": [keyword for keyword in action_keywords if keyword in content_lower],
+        "content_words": set(content_lower.split()),
+    }
+
+    return features
+
+
+def calculate_todo_similarity(todo1_content, todo2_content):
+    """計算兩個待辦事項的相似度（0-1之間）"""
+    features1 = extract_todo_features(todo1_content)
+    features2 = extract_todo_features(todo2_content)
+
+    similarity_score = 0
+    weight_total = 0
+
+    # 人員相似度（權重：0.4）
+    person_weight = 0.4
+    if features1["persons"] or features2["persons"]:
+        common_persons = set(features1["persons"]) & set(features2["persons"])
+        total_persons = set(features1["persons"]) | set(features2["persons"])
+        if total_persons:
+            person_similarity = len(common_persons) / len(total_persons)
+            similarity_score += person_similarity * person_weight
+        weight_total += person_weight
+
+    # 動作相似度（權重：0.3）
+    action_weight = 0.3
+    if features1["actions"] or features2["actions"]:
+        common_actions = set(features1["actions"]) & set(features2["actions"])
+        total_actions = set(features1["actions"]) | set(features2["actions"])
+        if total_actions:
+            action_similarity = len(common_actions) / len(total_actions)
+            similarity_score += action_similarity * action_weight
+        weight_total += action_weight
+
+    # 內容詞彙相似度（權重：0.2）
+    content_weight = 0.2
+    common_words = features1["content_words"] & features2["content_words"]
+    total_words = features1["content_words"] | features2["content_words"]
+    if total_words:
+        content_similarity = len(common_words) / len(total_words)
+        similarity_score += content_similarity * content_weight
+    weight_total += content_weight
+
+    # 時間特徵相似度（權重：0.1）
+    time_weight = 0.1
+    if features1["time_mentioned"] == features2["time_mentioned"]:
+        similarity_score += time_weight
+    weight_total += time_weight
+
+    # 正規化分數
+    if weight_total > 0:
+        return similarity_score / weight_total
+    return 0
+
+
+async def check_similar_todos(user_mail, new_content):
+    """檢查是否有相似的待辦事項"""
+    if user_mail not in user_todos:
+        return []
+
+    similar_todos = []
+    pending_todos = get_user_pending_todos(user_mail)
+
+    for todo in pending_todos:
+        similarity = calculate_todo_similarity(new_content, todo["content"])
+        if similarity > 0.6:  # 相似度閾值
+            similar_todos.append({"todo": todo, "similarity": similarity})
+
+    return sorted(similar_todos, key=lambda x: x["similarity"], reverse=True)
+
+
+async def smart_add_todo(turn_context: TurnContext, user_mail: str, content: str):
+    """智能新增待辦事項，包含相似性檢查"""
+    # 檢查相似的待辦事項
+    similar_todos = await check_similar_todos(user_mail, content)
+
+    if similar_todos:
+        language = determine_language(user_mail)
+
+        # 構建相似項目的文字描述
+        similar_list = ""
+        for i, item in enumerate(similar_todos[:3], 1):  # 最多顯示3個相似項目
+            todo = item["todo"]
+            similarity_percent = int(item["similarity"] * 100)
+            similar_list += f"{i}. #{todo['id']}: {todo['content']} (相似度: {similarity_percent}%)\n"
+
+        confirmation_text = (
+            f"⚠️ 發現相似的待辦事項：\n{similar_list}\n是否仍要新增「{content}」？"
+            if language == "zh-TW"
+            else f"⚠️ 類似のTODOが見つかりました：\n{similar_list}\n「{content}」を追加しますか？"
+        )
+
+        # 創建確認卡片
+        confirmation_card = {
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [{"type": "TextBlock", "text": confirmation_text, "wrap": True}],
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": "✅ 仍要新增" if language == "zh-TW" else "✅ 追加する",
+                    "data": {"action": "confirmAddTodo", "todoContent": content},
+                    "style": "positive",
+                },
+                {
+                    "type": "Action.Submit",
+                    "title": "❌ 取消" if language == "zh-TW" else "❌ キャンセル",
+                    "data": {"action": "cancelAddTodo"},
+                    "style": "default",
+                },
+            ],
+        }
+
+        from botbuilder.schema import Attachment
+
+        card_attachment = Attachment(
+            content_type="application/vnd.microsoft.card.adaptive",
+            content=confirmation_card,
+        )
+
+        await turn_context.send_activity(
+            Activity(
+                type=ActivityTypes.message,
+                text="檢查重複項目中...",
+                attachments=[card_attachment],
+            )
+        )
+        return None
+
+    else:
+        # 沒有相似項目，直接新增
+        todo_id = add_todo_item(user_mail, content)
+        if todo_id:
+            language = determine_language(user_mail)
+            success_msg = (
+                f"✅ 已新增待辦事項 #{todo_id}：{content}"
+                if language == "zh-TW"
+                else f"✅ TODO #{todo_id} を追加しました：{content}"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=success_msg)
+            )
+            return todo_id
+        return None
 
 
 def add_todo_item(user_mail, content):
@@ -1064,9 +2001,36 @@ def determine_language(user_mail: str):
     return "zh-TW"
 
 
+async def get_real_user_email(
+    turn_context: TurnContext, fallback_user_mail: str = None
+) -> str:
+    """獲取真實的用戶郵箱（支援 Debug 模式）"""
+    # Debug 模式：如果指定了 DEBUG_ACCOUNT，直接返回該帳號
+    if DEBUG_MODE and DEBUG_ACCOUNT:
+        print(f"Debug 模式：使用指定帳號 {DEBUG_ACCOUNT}")
+        return DEBUG_ACCOUNT
+
+    try:
+        aad_object_id = turn_context.activity.from_property.aad_object_id
+        if not aad_object_id:
+            return fallback_user_mail or "unknown@debug.com"
+        user_info = await graph_api.get_user_info(aad_object_id)
+        return user_info.get(
+            "userPrincipalName", fallback_user_mail or "unknown@debug.com"
+        )
+    except Exception as e:
+        print(f"取得真實用戶 email 時發生錯誤: {str(e)}")
+        return fallback_user_mail or "unknown@debug.com"
+
+
 async def get_user_email(turn_context: TurnContext) -> str:
     """查詢目前user mail"""
     try:
+        # Debug 模式：如果指定了 DEBUG_ACCOUNT，直接返回該帳號
+        if DEBUG_MODE and DEBUG_ACCOUNT:
+            print(f"Debug 模式：使用指定帳號 {DEBUG_ACCOUNT}")
+            return DEBUG_ACCOUNT
+
         aad_object_id = turn_context.activity.from_property.aad_object_id
         if not aad_object_id:
             print("No AAD Object ID found")
@@ -1324,7 +2288,9 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
                 max_tokens=max_tokens,
             )
         else:
-            summary_model = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-5-mini")
+            # 使用全局參數的彙總模型
+            summary_model = OPENAI_SUMMARY_MODEL
+            print(f"🔧 [文本摘要] 使用彙總模型: {summary_model}")
 
             if summary_model.startswith("gpt-5"):
                 response = openai_client.chat.completions.create(
@@ -1468,25 +2434,79 @@ async def message_handler(turn_context: TurnContext):
                 await handle_cancel_booking(turn_context, user_mail)
                 return
 
+            # 處理關閉取消清單
+            elif card_action == "closeCancelList":
+                language = determine_language(user_mail)
+                close_msg = (
+                    "✅ 清單已關閉"
+                    if language == "zh-TW"
+                    else "✅ リストが閉じられました"
+                )
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=close_msg)
+                )
+                return
+
+            # 處理待辦事項完成
+            elif card_action == "completeTodo":
+                await handle_complete_todo(turn_context, user_mail)
+                return
+
+            # 處理關閉待辦提醒
+            elif card_action == "closeTodoReminder":
+                language = determine_language(user_mail)
+                close_msg = (
+                    "✅ 提醒已關閉"
+                    if language == "zh-TW"
+                    else "✅ リマインダーが閉じられました"
+                )
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=close_msg)
+                )
+                return
+
+            # 處理關閉待辦清單
+            elif card_action == "closeTodoList":
+                language = determine_language(user_mail)
+                close_msg = (
+                    "✅ 待辦清單已關閉"
+                    if language == "zh-TW"
+                    else "✅ TODOリストが閉じられました"
+                )
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=close_msg)
+                )
+                return
+
             # 處理新增待辦事項
             elif card_action == "addTodoItem":
-                todo_content = turn_context.activity.value.get("todoContent", "").strip()
+                todo_content = turn_context.activity.value.get(
+                    "todoContent", ""
+                ).strip()
                 if todo_content:
                     todo_id = add_todo_item(user_mail, todo_content)
                     if todo_id:
                         # 產生建議回覆
-                        suggested_replies = get_suggested_replies(f"完成新增", user_mail)
-                        
+                        suggested_replies = get_suggested_replies(
+                            f"完成新增", user_mail
+                        )
+
                         await turn_context.send_activity(
                             Activity(
                                 type=ActivityTypes.message,
                                 text=f"✅ 已新增待辦事項 #{todo_id}：{todo_content}",
-                                suggested_actions=SuggestedActions(actions=suggested_replies) if suggested_replies else None,
+                                suggested_actions=(
+                                    SuggestedActions(actions=suggested_replies)
+                                    if suggested_replies
+                                    else None
+                                ),
                             )
                         )
                     else:
                         await turn_context.send_activity(
-                            Activity(type=ActivityTypes.message, text="❌ 新增待辦事項失敗")
+                            Activity(
+                                type=ActivityTypes.message, text="❌ 新增待辦事項失敗"
+                            )
                         )
                 else:
                     await turn_context.send_activity(
@@ -1532,6 +2552,90 @@ async def message_handler(turn_context: TurnContext):
                 print("Empty log directory has been removed.")
         except Exception as e:
             print(f"Delete Log File Error: {str(e)}")
+
+        # === 自然語言意圖分析 ===
+        # 先檢查是否為指令模式
+        if turn_context.activity.text and not turn_context.activity.text.startswith(
+            "@"
+        ):
+            user_message = turn_context.activity.text.strip()
+
+            # === 智能意圖分析系統（優化版）===
+            # 步驟1：先嘗試關鍵字匹配（快速、免費、準確）
+            keyword_intent = analyze_intent_by_keywords(user_message)
+            print(f"🔍 [關鍵字匹配] 結果: {keyword_intent}")
+
+            # 步驟2：根據關鍵字信心度決定處理策略
+            if keyword_intent["confidence"] >= 0.7:
+                # 高信心度：直接使用關鍵字結果，不調用AI
+                intent = keyword_intent
+                print(
+                    f"✅ [高信心度] 使用關鍵字結果，跳過AI分析 (信心度: {keyword_intent['confidence']:.2f})"
+                )
+
+                # 執行意圖處理
+                if intent["category"] != "other":
+                    print(
+                        f"🚀 [執行意圖] 開始處理: {intent['category']}.{intent['action']}"
+                    )
+                    success = await handle_intent_action(
+                        turn_context, user_mail, intent
+                    )
+                    if success:
+                        print(f"✅ [執行完成] 意圖處理成功")
+                        return
+                    else:
+                        print(f"❌ [執行失敗] 意圖處理失敗，轉為一般對話")
+
+            elif keyword_intent["confidence"] >= 0.5:
+                # 中等信心度：嘗試執行，失敗則直接轉AI對話
+                intent = keyword_intent
+                print(
+                    f"🔶 [中信心度] 嘗試關鍵字結果 (信心度: {keyword_intent['confidence']:.2f})"
+                )
+
+                if intent["category"] != "other":
+                    print(f"🚀 [嘗試執行] {intent['category']}.{intent['action']}")
+                    success = await handle_intent_action(
+                        turn_context, user_mail, intent
+                    )
+                    if success:
+                        print(f"✅ [執行成功] 關鍵字處理成功")
+                        return
+                    else:
+                        print(
+                            f"📞 [轉為對話] 關鍵字處理失敗，直接使用主要AI對話（避免雙重調用）"
+                        )
+                        # 直接跳到AI對話，不再進行意圖分析
+
+            else:
+                # 低信心度：根據設定決定是否使用AI意圖分析
+                if ENABLE_AI_INTENT_ANALYSIS and keyword_intent["confidence"] < 0.3:
+                    print(
+                        f"🔻 [AI意圖分析] 關鍵字信心度極低，嘗試AI意圖分析 (信心度: {keyword_intent['confidence']:.2f})"
+                    )
+                    ai_intent = await analyze_user_intent(user_message)
+                    print(f"🤖 [AI分析] 結果: {ai_intent}")
+
+                    if (
+                        ai_intent["confidence"] > 0.6
+                        and ai_intent["category"] != "other"
+                    ):
+                        print(
+                            f"🚀 [AI意圖執行] {ai_intent['category']}.{ai_intent['action']}"
+                        )
+                        success = await handle_intent_action(
+                            turn_context, user_mail, ai_intent
+                        )
+                        if success:
+                            print(f"✅ [AI意圖成功] AI意圖處理成功")
+                            return
+
+                print(
+                    f"🔻 [低信心度] 關鍵字信心度過低 (信心度: {keyword_intent['confidence']:.2f})，轉為AI對話"
+                )
+
+            print(f"💬 [轉為對話] 使用主要AI進行對話處理")
 
         if turn_context.activity.text and turn_context.activity.text.startswith("@"):
             user_message = turn_context.activity.text.lstrip("@")
@@ -1597,19 +2701,9 @@ async def message_handler(turn_context: TurnContext):
             if user_message == "ls":
                 pending_todos = get_user_pending_todos(user_mail)
                 if pending_todos:
-                    todos_text = f"📝 您有 {len(pending_todos)} 個待辦事項：\n\n"
-                    for i, todo in enumerate(pending_todos, 1):
-                        todos_text += f"{i}. #{todo['id']}: {todo['content']}\n"
-                    todos_text += "\n回覆「@ok 編號」來標記完成事項"
-                    suggested_replies = get_suggested_replies("@ls", user_mail)
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text=todos_text,
-                            suggested_actions=SuggestedActions(
-                                actions=suggested_replies
-                            ),
-                        )
+                    language = determine_language(user_mail)
+                    await send_todo_list_card(
+                        turn_context, user_mail, pending_todos, language
                     )
                 else:
                     # 添加建議回覆
@@ -2016,6 +3110,25 @@ async def messages():
 async def show_user_info(turn_context: TurnContext):
     """顯示用戶個人資訊"""
     try:
+        # Debug 模式處理
+        if DEBUG_MODE and DEBUG_ACCOUNT:
+            # 在 Debug 模式下顯示模擬資訊
+            info_text = f"""👤 **個人資訊** (Debug 模式)
+
+📧 **郵箱**：{DEBUG_ACCOUNT}
+👨‍💼 **姓名**：Debug 用戶
+🏢 **部門**：測試部門
+📱 **職稱**：系統測試員
+📞 **電話**：未設定
+
+⚠️ 這是 Debug 模式的模擬資訊"""
+
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=info_text)
+            )
+            return
+
+        # 一般模式
         aad_object_id = turn_context.activity.from_property.aad_object_id
         if not aad_object_id:
             await turn_context.send_activity(
@@ -2070,7 +3183,7 @@ async def show_self_info(turn_context: TurnContext, user_mail: str):
 async def show_add_todo_card(turn_context: TurnContext, user_mail: str):
     """顯示新增待辦事項輸入卡片"""
     language = determine_language(user_mail)
-    
+
     todo_card = {
         "type": "AdaptiveCard",
         "version": "1.4",
@@ -2084,7 +3197,11 @@ async def show_add_todo_card(turn_context: TurnContext, user_mail: str):
             {
                 "type": "Input.Text",
                 "id": "todoContent",
-                "placeholder": "請輸入待辦事項內容..." if language == "zh-TW" else "タスクの内容を入力してください...",
+                "placeholder": (
+                    "請輸入待辦事項內容..."
+                    if language == "zh-TW"
+                    else "タスクの内容を入力してください..."
+                ),
                 "maxLength": 200,
                 "isMultiline": True,
             },
@@ -2107,7 +3224,11 @@ async def show_add_todo_card(turn_context: TurnContext, user_mail: str):
     await turn_context.send_activity(
         Activity(
             type=ActivityTypes.message,
-            text="請填寫待辦事項內容：" if language == "zh-TW" else "タスクの内容を記入してください：",
+            text=(
+                "請填寫待辦事項內容："
+                if language == "zh-TW"
+                else "タスクの内容を記入してください："
+            ),
             attachments=[card_attachment],
         )
     )
@@ -2333,22 +3454,21 @@ async def show_room_booking_options(turn_context: TurnContext, user_mail: str):
 
         date_choices.append({"title": display_date, "value": date_str})
 
-    # 產生時間選項（8:00-18:00，每30分鐘）
-    # 注意：這裡先生成所有選項，實際的過濾會在提交時進行
+    # 產生時間選項（8:00-18:30，每30分鐘）
     time_choices = []
     for hour in range(8, 19):
         for minute in [0, 30]:
+            if hour == 18 and minute == 30:  # 18:30 是最後一個可用時段
+                break
             time_str = f"{hour:02d}:{minute:02d}"
             time_choices.append({"title": time_str, "value": time_str})
 
-    # 添加提示：如果是今天，系統會自動過濾過去的時間
-    time_note = ""
-    if start_offset == 0:  # 今天可以預約
-        time_note = (
-            f"\n💡 提示：系統會自動過濾已過去的時間"
-            if language == "zh-TW"
-            else f"\n💡 ヒント：過去の時間は自動的にフィルタされます"
-        )
+    # 添加提示：系統會驗證時間有效性
+    time_note = (
+        "\n💡 提示：系統會自動驗證時間有效性和會議室可用性"
+        if language == "zh-TW"
+        else "\n💡 ヒント：システムが自動的に時間の有効性と会議室の可用性を確認します"
+    )
 
     # 產生會議室選項
     room_choices = []
@@ -2472,12 +3592,7 @@ async def show_my_bookings(turn_context: TurnContext, user_mail: str):
 
     try:
         # 取得真實的用戶郵箱
-        try:
-            aad_object_id = turn_context.activity.from_property.aad_object_id
-            user_info = await graph_api.get_user_info(aad_object_id)
-            real_user_email = user_info.get("userPrincipalName", user_mail)
-        except:
-            real_user_email = user_mail
+        real_user_email = await get_real_user_email(turn_context, user_mail)
 
         if "@unknown.com" in real_user_email:
             error_msg = (
@@ -2490,11 +3605,11 @@ async def show_my_bookings(turn_context: TurnContext, user_mail: str):
             )
             return
 
-        # 查詢未來7天的預約（只查自己的）
+        # 查詢未來30天的預約（只查自己的）
         from datetime import datetime, timedelta
 
         start_time = datetime.now(taiwan_tz)
-        end_time = start_time + timedelta(days=7)
+        end_time = start_time + timedelta(days=30)
 
         # 發送查詢中的訊息
         loading_msg = (
@@ -2523,13 +3638,28 @@ async def show_my_bookings(turn_context: TurnContext, user_mail: str):
 
         room_bookings = []
         for event in events:
+            # 只顯示從當前時間開始的會議
+            event_start = datetime.fromisoformat(
+                event["start"]["dateTime"].replace("Z", "+00:00")
+            )
+            # 轉換為台灣時間進行比較
+            if event_start.tzinfo is None:
+                # 如果沒有時區信息，假設是UTC
+                event_start = event_start.replace(tzinfo=pytz.UTC)
+            event_start_tw = event_start.astimezone(taiwan_tz)
+            current_time = datetime.now(taiwan_tz)
+            if event_start_tw <= current_time:
+                continue
+
             # 檢查會議的與會者中是否包含會議室
             attendees = event.get("attendees", [])
-            
+
             # 判斷用戶是主辦者還是參與者
-            organizer_email = event.get("organizer", {}).get("emailAddress", {}).get("address", "")
+            organizer_email = (
+                event.get("organizer", {}).get("emailAddress", {}).get("address", "")
+            )
             is_organizer = organizer_email.lower() == real_user_email.lower()
-            
+
             for attendee in attendees:
                 email = attendee.get("emailAddress", {}).get("address", "")
                 if email in room_emails:
@@ -2567,16 +3697,54 @@ async def show_my_bookings(turn_context: TurnContext, user_mail: str):
         )
 
         for i, booking in enumerate(room_bookings, 1):
-            start_dt = datetime.fromisoformat(booking["start"].replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(booking["end"].replace("Z", "+00:00"))
+            print(
+                f"查詢預約 - 原始時間字串: start={booking['start']}, end={booking['end']}"
+            )
+
+            # 處理不同的時間格式
+            start_str = booking["start"]
+            end_str = booking["end"]
+
+            # 如果時間字串已經包含時區信息但不是Z結尾
+            if "T" in start_str and (
+                "+" in start_str or "-" in start_str.split("T")[1]
+            ):
+                start_dt = datetime.fromisoformat(start_str)
+                end_dt = datetime.fromisoformat(end_str)
+            else:
+                # 處理Z結尾的UTC時間或無時區的時間
+                start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+
+            print(f"查詢預約 - 解析後時間: start_dt={start_dt}, end_dt={end_dt}")
 
             # 轉換為台灣時間
+            if start_dt.tzinfo is None:
+                # 如果沒有時區信息，假設是UTC
+                start_dt = start_dt.replace(tzinfo=pytz.UTC)
+                end_dt = end_dt.replace(tzinfo=pytz.UTC)
+
             start_tw = start_dt.astimezone(taiwan_tz)
             end_tw = end_dt.astimezone(taiwan_tz)
+            print(f"查詢預約 - 轉換台灣時間: start_tw={start_tw}, end_tw={end_tw}")
+            print(
+                f"查詢預約 - 格式化時間: {start_tw.strftime('%H:%M')} - {end_tw.strftime('%H:%M')}"
+            )
+
+            # 測試：如果顯示01:00，檢查是否正確加了8小時
+            test_utc = datetime(2025, 8, 24, 1, 0, tzinfo=pytz.UTC)  # UTC 01:00
+            test_tw = test_utc.astimezone(taiwan_tz)  # 應該是台灣09:00
+            print(
+                f"測試時區轉換: UTC {test_utc.strftime('%H:%M')} -> 台灣 {test_tw.strftime('%H:%M')}"
+            )
 
             # 判斷身份標示
-            role_indicator = "" if booking["is_organizer"] else " (參與)" if language == "zh-TW" else " (参加)"
-            
+            role_indicator = (
+                ""
+                if booking["is_organizer"]
+                else " (參與)" if language == "zh-TW" else " (参加)"
+            )
+
             bookings_text += f"""**{i}. {booking['subject']}{role_indicator}**
 🏢 會議室：{booking['location']}
 📅 日期：{start_tw.strftime('%Y/%m/%d (%a)')}
@@ -2605,12 +3773,7 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
 
     try:
         # 取得真實的用戶郵箱
-        try:
-            aad_object_id = turn_context.activity.from_property.aad_object_id
-            user_info = await graph_api.get_user_info(aad_object_id)
-            real_user_email = user_info.get("userPrincipalName", user_mail)
-        except:
-            real_user_email = user_mail
+        real_user_email = await get_real_user_email(turn_context, user_mail)
 
         if "@unknown.com" in real_user_email:
             error_msg = (
@@ -2650,9 +3813,13 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
             event_start = datetime.fromisoformat(
                 event["start"]["dateTime"].replace("Z", "+00:00")
             )
-            # 確保兩個時間都有時區信息
+            # 轉換為台灣時間進行比較
+            if event_start.tzinfo is None:
+                # 如果沒有時區信息，假設是UTC
+                event_start = event_start.replace(tzinfo=pytz.UTC)
+            event_start_tw = event_start.astimezone(taiwan_tz)
             current_time = datetime.now(taiwan_tz)
-            if event_start <= current_time:
+            if event_start_tw <= current_time:
                 continue
 
             attendees = event.get("attendees", [])
@@ -2684,15 +3851,46 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
             )
             return
 
-        # 創建取消預約的 Adaptive Card
+        # 創建取消預約的 Adaptive Card - 使用下拉選單+取消按鈕
         choices = []
         for booking in room_bookings:
-            start_dt = datetime.fromisoformat(booking["start"].replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(booking["end"].replace("Z", "+00:00"))
+            print(
+                f"取消預約 - 原始時間字串: start={booking['start']}, end={booking['end']}"
+            )
+
+            # 處理不同的時間格式
+            start_str = booking["start"]
+            end_str = booking["end"]
+
+            # 如果時間字串已經包含時區信息但不是Z結尾
+            if "T" in start_str and (
+                "+" in start_str or "-" in start_str.split("T")[1]
+            ):
+                start_dt = datetime.fromisoformat(start_str)
+                end_dt = datetime.fromisoformat(end_str)
+            else:
+                # 處理Z結尾的UTC時間或無時區的時間
+                start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+
+            print(f"取消預約 - 解析後時間: start_dt={start_dt}, end_dt={end_dt}")
+
+            # 轉換為台灣時間
+            if start_dt.tzinfo is None:
+                # 如果沒有時區信息，假設是UTC
+                start_dt = start_dt.replace(tzinfo=pytz.UTC)
+                end_dt = end_dt.replace(tzinfo=pytz.UTC)
+
             start_tw = start_dt.astimezone(taiwan_tz)
             end_tw = end_dt.astimezone(taiwan_tz)
+            print(f"取消預約 - 轉換台灣時間: start_tw={start_tw}, end_tw={end_tw}")
+            print(
+                f"取消預約 - 格式化時間: {start_tw.strftime('%H:%M')} - {end_tw.strftime('%H:%M')}"
+            )
 
             display_text = f"{booking['subject']} - {booking['location']} ({start_tw.strftime('%m/%d %H:%M')}-{end_tw.strftime('%H:%M')})"
+            print(f"顯示文字: {display_text}")
+
             choices.append({"title": display_text, "value": booking["id"]})
 
         cancel_card = {
@@ -2702,9 +3900,9 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
                 {
                     "type": "TextBlock",
                     "text": (
-                        "❌ 取消會議室預約"
+                        "❌ 取消會議預約"
                         if language == "zh-TW"
-                        else "❌ 会議室予約キャンセル"
+                        else "❌ 会議予約キャンセル"
                     ),
                     "weight": "Bolder",
                     "size": "Medium",
@@ -2712,9 +3910,9 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
                 {
                     "type": "TextBlock",
                     "text": (
-                        f"您有 {len(room_bookings)} 個可取消的預約："
+                        f"您有 {len(room_bookings)} 個可取消的會議："
                         if language == "zh-TW"
-                        else f"{len(room_bookings)} 件のキャンセル可能な予約があります："
+                        else f"{len(room_bookings)} 件のキャンセル可能な会議があります："
                     ),
                     "spacing": "Medium",
                 },
@@ -2723,9 +3921,9 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
                     "id": "selectedBooking",
                     "style": "compact",
                     "placeholder": (
-                        "選擇要取消的預約..."
+                        "選擇要取消的會議..."
                         if language == "zh-TW"
-                        else "キャンセルする予約を選択..."
+                        else "キャンセルする会議を選択..."
                     ),
                     "choices": choices,
                 },
@@ -2734,10 +3932,21 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
                 {
                     "type": "Action.Submit",
                     "title": (
-                        "❌ 確認取消" if language == "zh-TW" else "❌ キャンセル確認"
+                        "❌ 取消選中的會議"
+                        if language == "zh-TW"
+                        else "❌ 選択した会議をキャンセル"
                     ),
                     "data": {"action": "cancelBooking"},
-                }
+                    "style": "destructive",
+                },
+                {
+                    "type": "Action.Submit",
+                    "title": (
+                        "❌ 關閉清單" if language == "zh-TW" else "❌ リストを閉じる"
+                    ),
+                    "data": {"action": "closeCancelList"},
+                    "style": "default",
+                },
             ],
         }
 
@@ -2790,12 +3999,7 @@ async def handle_cancel_booking(turn_context: TurnContext, user_mail: str):
             return
 
         # 取得真實的用戶郵箱
-        try:
-            aad_object_id = turn_context.activity.from_property.aad_object_id
-            user_info = await graph_api.get_user_info(aad_object_id)
-            real_user_email = user_info.get("userPrincipalName", user_mail)
-        except:
-            real_user_email = user_mail
+        real_user_email = await get_real_user_email(turn_context, user_mail)
 
         if "@unknown.com" in real_user_email:
             error_msg = (
@@ -2821,13 +4025,16 @@ async def handle_cancel_booking(turn_context: TurnContext, user_mail: str):
 
         if success:
             success_msg = (
-                "✅ 會議室預約已成功取消"
+                "✅ 會議預約已成功取消"
                 if language == "zh-TW"
-                else "✅ 会議室予約が正常にキャンセルされました"
+                else "✅ 会議予約が正常にキャンセルされました"
             )
             await turn_context.send_activity(
                 Activity(type=ActivityTypes.message, text=success_msg)
             )
+
+            # 取消成功後，檢查是否還有會議，有的話重新顯示更新的取消預約選項
+            await update_cancel_booking_list_if_needed(turn_context, user_mail)
         else:
             error_msg = (
                 "❌ 取消預約失敗"
@@ -2839,14 +4046,194 @@ async def handle_cancel_booking(turn_context: TurnContext, user_mail: str):
             )
 
     except Exception as e:
-        error_msg = (
-            f"❌ 取消預約時發生錯誤：{str(e)}"
+        error_str = str(e)
+        # 檢查是否為已經刪除的會議
+        if "ErrorItemNotFound" in error_str or "not found" in error_str.lower():
+            friendly_msg = (
+                "✅ 此會議已經被取消，或可能已被其他人取消"
+                if language == "zh-TW"
+                else "✅ この会議は既にキャンセルされているか、他の人によってキャンセルされた可能性があります"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=friendly_msg)
+            )
+
+            # 重新顯示更新的取消預約選項（如果還有會議的話）
+            await update_cancel_booking_list_if_needed(turn_context, user_mail)
+        else:
+            error_msg = (
+                f"❌ 取消預約時發生錯誤：{error_str}"
+                if language == "zh-TW"
+                else f"❌ 予約キャンセル中にエラーが発生しました：{error_str}"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+
+
+async def handle_complete_todo(turn_context: TurnContext, user_mail: str):
+    """處理完成待辦事項"""
+    language = determine_language(user_mail)
+
+    try:
+        card_data = turn_context.activity.value
+        selected_todo_index = card_data.get("selectedTodo")
+
+        if selected_todo_index is None:
+            error_msg = (
+                "❌ 請選擇要完成的事項"
+                if language == "zh-TW"
+                else "❌ 完了するアイテムを選択してください"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+            return
+
+        todo_index = int(selected_todo_index)
+
+        # 獲取用戶的待辦事項
+        if user_mail not in user_todos:
+            user_todos[user_mail] = {}
+
+        pending_todos = get_user_pending_todos(user_mail)
+
+        if todo_index >= len(pending_todos):
+            error_msg = (
+                "❌ 選擇的事項不存在"
+                if language == "zh-TW"
+                else "❌ 選択されたアイテムが存在しません"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+            return
+
+        # 標記為完成
+        todo_to_complete = pending_todos[todo_index]
+        todo_id = todo_to_complete["id"]
+
+        # 在用戶的待辦字典中找到並標記為完成
+        if todo_id in user_todos[user_mail]:
+            user_todos[user_mail][todo_id]["status"] = "completed"
+            user_todos[user_mail][todo_id]["completed_at"] = datetime.now(
+                taiwan_tz
+            ).isoformat()
+        else:
+            error_msg = (
+                "❌ 待辦事項不存在"
+                if language == "zh-TW"
+                else "❌ TODOアイテムが存在しません"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=error_msg)
+            )
+            return
+
+        success_msg = (
+            f"✅ 已完成：{todo_to_complete['content']}"
             if language == "zh-TW"
-            else f"❌ 予約キャンセル中にエラーが発生しました：{str(e)}"
+            else f"✅ 完了しました：{todo_to_complete['content']}"
+        )
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=success_msg)
+        )
+
+        # 檢查是否還有其他待辦事項，如果有的話重新發送清單卡片
+        remaining_todos = get_user_pending_todos(user_mail)
+        if len(remaining_todos) > 0:
+            await send_todo_list_card(
+                turn_context, user_mail, remaining_todos, language
+            )
+        else:
+            all_done_msg = (
+                "🎉 所有待辦事項都完成了！"
+                if language == "zh-TW"
+                else "🎉 すべてのTODOが完了しました！"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=all_done_msg)
+            )
+
+    except Exception as e:
+        error_msg = (
+            f"❌ 完成事項時發生錯誤：{str(e)}"
+            if language == "zh-TW"
+            else f"❌ アイテム完了中にエラーが発生しました：{str(e)}"
         )
         await turn_context.send_activity(
             Activity(type=ActivityTypes.message, text=error_msg)
         )
+
+
+async def update_cancel_booking_list_if_needed(
+    turn_context: TurnContext, user_mail: str
+):
+    """檢查是否還有會議，有的話重新顯示取消預約選項"""
+    language = determine_language(user_mail)
+
+    try:
+        # 取得真實的用戶郵箱
+        real_user_email = await get_real_user_email(turn_context, user_mail)
+        if "@unknown.com" in real_user_email:
+            return
+
+        # 查詢未來的預約
+        from datetime import datetime, timedelta
+
+        start_time = datetime.now(taiwan_tz)
+        end_time = start_time + timedelta(days=30)  # 查詢未來30天
+
+        events_data = await graph_api.get_user_calendar_events(
+            real_user_email, start_time, end_time
+        )
+        events = events_data.get("value", [])
+
+        # 過濾出會議室相關的預約
+        room_emails = [
+            "meetingroom01@rinnai.com.tw",
+            "meetingroom02@rinnai.com.tw",
+            "meetingroom03@rinnai.com.tw",
+            "meetingroom04@rinnai.com.tw",
+            "meetingroom05@rinnai.com.tw",
+            "rinnaicars@rinnai.com.tw",
+        ]
+
+        room_bookings = []
+        for event in events:
+            # 只顯示未來的預約（可以取消的）
+            event_start = datetime.fromisoformat(
+                event["start"]["dateTime"].replace("Z", "+00:00")
+            )
+            # 轉換為台灣時間進行比較
+            event_start_tw = event_start.astimezone(taiwan_tz)
+            current_time = datetime.now(taiwan_tz)
+            if event_start_tw <= current_time:
+                continue
+
+            attendees = event.get("attendees", [])
+            for attendee in attendees:
+                email = attendee.get("emailAddress", {}).get("address", "")
+                if email in room_emails:
+                    room_bookings.append(event)
+                    break
+
+        # 只有當還有會議時才重新顯示列表
+        if len(room_bookings) > 0:
+            await show_cancel_booking_options(turn_context, user_mail)
+        else:
+            no_more_msg = (
+                "✅ 您已經沒有可取消的會議了"
+                if language == "zh-TW"
+                else "✅ キャンセル可能な会議はもうありません"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=no_more_msg)
+            )
+
+    except Exception as e:
+        print(f"更新取消列表時發生錯誤: {str(e)}")
+        # 錯誤時不做任何處理，避免干擾用戶
 
 
 async def handle_room_booking(turn_context: TurnContext, user_mail: str):
@@ -2954,6 +4341,195 @@ async def handle_room_booking(turn_context: TurnContext, user_mail: str):
         except:
             room_name = room_email
 
+        # 檢查會議室是否在該時段已被預約
+        try:
+            # 擴展檢查範圍，確保能抓到所有相關事件
+            check_start = start_time - timedelta(hours=1)
+            check_end = end_time + timedelta(hours=1)
+
+            print(f"=== 開始檢查會議室衝突 ===")
+            print(f"會議室: {room_email}")
+            print(f"新預約時間: {start_time} - {end_time}")
+            print(f"檢查範圍: {check_start} - {check_end}")
+
+            # 先嘗試查詢會議室的行事曆，如果失敗則查詢用戶自己的行事曆
+            room_events = None
+            try:
+                room_events = await graph_api.get_user_calendar_events(
+                    user_email=room_email, start_time=check_start, end_time=check_end
+                )
+                print(f"成功查詢會議室行事曆")
+            except Exception as room_error:
+                print(f"查詢會議室行事曆失敗: {room_error}")
+                # 改查用戶自己的行事曆，看是否有包含該會議室的預約
+                real_user_email = await get_real_user_email(turn_context, user_mail)
+                print(f"改查用戶 {real_user_email} 的行事曆")
+                room_events = await graph_api.get_user_calendar_events(
+                    user_email=real_user_email,
+                    start_time=check_start,
+                    end_time=check_end,
+                )
+
+            print(f"API 回傳結果: {room_events}")
+
+            # 檢查是否有時間衝突
+            if "value" in room_events and room_events["value"]:
+                print(f"檢查會議室 {room_email} 在 {start_time} - {end_time} 的衝突")
+                print(f"找到 {len(room_events['value'])} 個現有預約")
+
+                for existing_event in room_events["value"]:
+                    # 如果查詢的是用戶行事曆，需要檢查事件是否包含目標會議室
+                    if room_email not in str(
+                        room_events
+                    ):  # 簡單判斷是否查詢會議室行事曆
+                        attendees = existing_event.get("attendees", [])
+                        room_found = False
+                        for attendee in attendees:
+                            if (
+                                attendee.get("emailAddress", {}).get("address", "")
+                                == room_email
+                            ):
+                                room_found = True
+                                break
+                        if not room_found:
+                            continue  # 跳過不包含目標會議室的事件
+                    existing_start_str = existing_event["start"]["dateTime"]
+                    existing_end_str = existing_event["end"]["dateTime"]
+
+                    # 處理時區 - 統一轉換到台灣時區進行比較
+                    if existing_start_str.endswith("Z"):
+                        existing_start = datetime.fromisoformat(
+                            existing_start_str.replace("Z", "+00:00")
+                        ).astimezone(taiwan_tz)
+                        existing_end = datetime.fromisoformat(
+                            existing_end_str.replace("Z", "+00:00")
+                        ).astimezone(taiwan_tz)
+                    elif "T" in existing_start_str and (
+                        "+" in existing_start_str
+                        or "-" in existing_start_str.split("T")[1]
+                    ):
+                        # 已有時區信息，直接解析並轉換
+                        existing_start = datetime.fromisoformat(
+                            existing_start_str
+                        ).astimezone(taiwan_tz)
+                        existing_end = datetime.fromisoformat(
+                            existing_end_str
+                        ).astimezone(taiwan_tz)
+                    else:
+                        # 無時區信息，假設是UTC並轉換
+                        existing_start = (
+                            datetime.fromisoformat(existing_start_str)
+                            .replace(tzinfo=pytz.UTC)
+                            .astimezone(taiwan_tz)
+                        )
+                        existing_end = (
+                            datetime.fromisoformat(existing_end_str)
+                            .replace(tzinfo=pytz.UTC)
+                            .astimezone(taiwan_tz)
+                        )
+
+                    # 確保新預約時間也是台灣時區（標準化）
+                    if start_time.tzinfo != taiwan_tz:
+                        start_time_normalized = start_time.astimezone(taiwan_tz)
+                        end_time_normalized = end_time.astimezone(taiwan_tz)
+                    else:
+                        start_time_normalized = start_time
+                        end_time_normalized = end_time
+
+                    # 檢查時間重疊 (邊界相接不算重疊，只有真正重疊才不允許)
+                    # 例如：09:00-09:30 和 09:30-10:00 是可以的（相接）
+                    # 但是：08:00-10:00 和 09:00-09:30 是不可以的（重疊）
+                    # 重疊判斷：新開始 < 現有結束 AND 新結束 > 現有開始 AND 不是剛好相接
+                    is_overlapping = (
+                        start_time_normalized < existing_end
+                        and end_time_normalized > existing_start
+                        and not (
+                            start_time_normalized == existing_end
+                            or end_time_normalized == existing_start
+                        )
+                    )
+
+                    existing_subject = existing_event.get("subject", "未命名會議")
+                    print(
+                        f"現有預約: {existing_subject} ({existing_start} - {existing_end})"
+                    )
+                    print(
+                        f"新預約（標準化）: {start_time_normalized} - {end_time_normalized}"
+                    )
+                    print(f"原始新預約: {start_time} - {end_time}")
+                    print(f"重疊條件檢查:")
+                    print(
+                        f"  start_time_normalized < existing_end: {start_time_normalized < existing_end}"
+                    )
+                    print(
+                        f"  end_time_normalized > existing_start: {end_time_normalized > existing_start}"
+                    )
+                    print(
+                        f"  start_time_normalized == existing_end: {start_time_normalized == existing_end}"
+                    )
+                    print(
+                        f"  end_time_normalized == existing_start: {end_time_normalized == existing_start}"
+                    )
+                    print(f"是否重疊: {is_overlapping}")
+
+                    if is_overlapping:
+                        # 檢查是否為用戶相關的會議（主辦者或參與者）
+                        real_user_email = await get_real_user_email(
+                            turn_context, user_mail
+                        )
+                        is_user_related = False
+
+                        # 檢查主辦者
+                        organizer_email = (
+                            existing_event.get("organizer", {})
+                            .get("emailAddress", {})
+                            .get("address", "")
+                        )
+                        if organizer_email.lower() == real_user_email.lower():
+                            is_user_related = True
+
+                        # 檢查參與者
+                        if not is_user_related:
+                            attendees = existing_event.get("attendees", [])
+                            for attendee in attendees:
+                                attendee_email = attendee.get("emailAddress", {}).get(
+                                    "address", ""
+                                )
+                                if attendee_email.lower() == real_user_email.lower():
+                                    is_user_related = True
+                                    break
+
+                        # 根據是否相關決定顯示內容
+                        if is_user_related:
+                            error_msg = (
+                                f"❌ 該會議室在 {existing_start.strftime('%H:%M')}-{existing_end.strftime('%H:%M')} 已被預約\n"
+                                f"預約主題：{existing_subject}\n請選擇其他時段"
+                                if language == "zh-TW"
+                                else f"❌ その会議室は {existing_start.strftime('%H:%M')}-{existing_end.strftime('%H:%M')} に予約されています\n"
+                                f"予約テーマ：{existing_subject}\n他の時間を選択してください"
+                            )
+                        else:
+                            error_msg = (
+                                f"❌ 該會議室在 {existing_start.strftime('%H:%M')}-{existing_end.strftime('%H:%M')} 已被預約"
+                                if language == "zh-TW"
+                                else f"❌ その会議室は {existing_start.strftime('%H:%M')}-{existing_end.strftime('%H:%M')} に予約されています"
+                            )
+                        await turn_context.send_activity(
+                            Activity(type=ActivityTypes.message, text=error_msg)
+                        )
+                        return
+
+        except Exception as e:
+            print(f"檢查會議室可用性時發生錯誤: {str(e)}")
+            print(f"錯誤類型: {type(e)}")
+            import traceback
+
+            print(f"完整錯誤: {traceback.format_exc()}")
+
+            # 如果檢查失敗，記錄詳細信息但允許預約繼續（避免阻擋正常預約）
+            print("⚠️ 會議室衝突檢查失敗，但允許預約繼續")
+            # 不再阻擋預約，讓用戶可以正常預約
+
         # 發送確認中的訊息
         loading_msg = (
             "📅 正在預約會議室..." if language == "zh-TW" else "📅 会議室を予約中..."
@@ -2964,12 +4540,7 @@ async def handle_room_booking(turn_context: TurnContext, user_mail: str):
 
         try:
             # 取得真實的用戶郵箱
-            try:
-                aad_object_id = turn_context.activity.from_property.aad_object_id
-                user_info = await graph_api.get_user_info(aad_object_id)
-                real_user_email = user_info.get("userPrincipalName", user_mail)
-            except:
-                real_user_email = user_mail
+            real_user_email = await get_real_user_email(turn_context, user_mail)
 
             # 如果用戶郵箱還是包含 @unknown.com，使用預設郵箱或拋出錯誤
             if "@unknown.com" in real_user_email:
