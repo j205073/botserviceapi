@@ -35,7 +35,7 @@
         {
           "name": "Upload All Users",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/audit/upload-all",
@@ -47,7 +47,7 @@
         {
           "name": "Upload User Logs",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/audit/upload/test@example.com",

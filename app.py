@@ -468,16 +468,6 @@ async def send_todo_reminder_card(
                     "data": {"action": "completeTodo"},
                     "style": "positive",
                 },
-                {
-                    "type": "Action.Submit",
-                    "title": (
-                        "❌ 關閉提醒"
-                        if language == "zh-TW"
-                        else "❌ リマインダーを閉じる"
-                    ),
-                    "data": {"action": "closeTodoReminder"},
-                    "style": "default",
-                },
             ],
         }
 
@@ -567,15 +557,7 @@ async def send_todo_list_card(
                     ),
                     "data": {"action": "completeTodo"},
                     "style": "positive",
-                },
-                {
-                    "type": "Action.Submit",
-                    "title": (
-                        "❌ 關閉清單" if language == "zh-TW" else "❌ リストを閉じる"
-                    ),
-                    "data": {"action": "closeTodoList"},
-                    "style": "default",
-                },
+                }
             ],
         }
 
@@ -1078,9 +1060,9 @@ async def handle_intent_action(
                 # 顯示會議室預約表單
                 await show_room_booking_options(turn_context, user_mail)
                 hint_msg = (
-                    "💡 小提示：也可以使用 `@會議室預約` 快速開啟預約表單"
+                    "💡 小提示：也可以使用 `@book-room` 快速開啟預約表單"
                     if language == "zh-TW"
-                    else "💡 ヒント：`@会議室予約` でも素早く予約フォームを開けます"
+                    else "💡 ヒント：`@book-room` でも素早く予約フォームを開けます"
                 )
                 await turn_context.send_activity(
                     Activity(type=ActivityTypes.message, text=hint_msg)
@@ -1091,9 +1073,9 @@ async def handle_intent_action(
                 # 查詢會議室預約
                 await show_my_bookings(turn_context, user_mail)
                 hint_msg = (
-                    "💡 小提示：也可以使用 `@查詢預約` 快速查看預約"
+                    "💡 小提示：也可以使用 `@check-booking` 快速查看預約"
                     if language == "zh-TW"
-                    else "💡 ヒント：`@予約確認` でも素早く予約を確認できます"
+                    else "💡 ヒント：`@check-booking` でも素早く予約を確認できます"
                 )
                 await turn_context.send_activity(
                     Activity(type=ActivityTypes.message, text=hint_msg)
@@ -1104,9 +1086,9 @@ async def handle_intent_action(
                 # 取消會議室預約
                 await show_cancel_booking_options(turn_context, user_mail)
                 hint_msg = (
-                    "💡 小提示：也可以使用 `@取消預約` 快速取消預約"
+                    "💡 小提示：也可以使用 `@cancel-booking` 快速取消預約"
                     if language == "zh-TW"
-                    else "💡 ヒント：`@予約キャンセル` でも素早く予約をキャンセルできます"
+                    else "💡 ヒント：`@cancel-booking` でも素早く予約をキャンセルできます"
                 )
                 await turn_context.send_activity(
                     Activity(type=ActivityTypes.message, text=hint_msg)
@@ -1209,7 +1191,7 @@ def get_suggested_replies(user_message, user_mail=None):
         return [
             CardAction(title="查看幫助", type=ActionTypes.im_back, text="/help"),
             CardAction(title="查看狀態", type=ActionTypes.im_back, text="/status"),
-            CardAction(title="重新開始", type=ActionTypes.im_back, text="@開啟新對話"),
+            CardAction(title="重新開始", type=ActionTypes.im_back, text="@new-chat"),
             CardAction(title="切換模型", type=ActionTypes.im_back, text="@model"),
         ]
 
@@ -1651,7 +1633,7 @@ async def list_routes():
     return await make_response(jsonify({"routes": routes}), 200)
 
 
-@app.route("/api/audit/upload-all", methods=["POST"])
+@app.route("/api/audit/upload-all", methods=["GET"])
 async def upload_all_users():
     """上傳所有用戶的稽核日誌"""
     try:
@@ -1672,7 +1654,7 @@ async def upload_all_users():
         return await make_response(jsonify(error_data), 500)
 
 
-@app.route("/api/audit/upload/<user_mail>", methods=["POST"])
+@app.route("/api/audit/upload/<user_mail>", methods=["GET"])
 async def manual_upload_audit_logs(user_mail):
     """手動上傳指定用戶的稽核日誌"""
     try:
@@ -2434,50 +2416,6 @@ async def message_handler(turn_context: TurnContext):
                 await handle_cancel_booking(turn_context, user_mail)
                 return
 
-            # 處理關閉取消清單
-            elif card_action == "closeCancelList":
-                language = determine_language(user_mail)
-                close_msg = (
-                    "✅ 清單已關閉"
-                    if language == "zh-TW"
-                    else "✅ リストが閉じられました"
-                )
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=close_msg)
-                )
-                return
-
-            # 處理待辦事項完成
-            elif card_action == "completeTodo":
-                await handle_complete_todo(turn_context, user_mail)
-                return
-
-            # 處理關閉待辦提醒
-            elif card_action == "closeTodoReminder":
-                language = determine_language(user_mail)
-                close_msg = (
-                    "✅ 提醒已關閉"
-                    if language == "zh-TW"
-                    else "✅ リマインダーが閉じられました"
-                )
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=close_msg)
-                )
-                return
-
-            # 處理關閉待辦清單
-            elif card_action == "closeTodoList":
-                language = determine_language(user_mail)
-                close_msg = (
-                    "✅ 待辦清單已關閉"
-                    if language == "zh-TW"
-                    else "✅ TODOリストが閉じられました"
-                )
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=close_msg)
-                )
-                return
-
             # 處理新增待辦事項
             elif card_action == "addTodoItem":
                 todo_content = turn_context.activity.value.get(
@@ -2641,7 +2579,7 @@ async def message_handler(turn_context: TurnContext):
             user_message = turn_context.activity.text.lstrip("@")
 
             # 處理開啟新對話指令
-            if user_message == "開啟新對話":
+            if user_message == "new-chat":
                 await confirm_new_conversation(turn_context)
                 return
 
@@ -2970,13 +2908,13 @@ async def message_handler(turn_context: TurnContext):
                 return
 
             # 處理會議室相關指令
-            if user_message == "會議室預約":
+            if user_message == "book-room":
                 await show_room_booking_options(turn_context, user_mail)
                 return
-            elif user_message == "查詢預約":
+            elif user_message == "check-booking":
                 await show_my_bookings(turn_context, user_mail)
                 return
-            elif user_message == "取消預約":
+            elif user_message == "cancel-booking":
                 await show_cancel_booking_options(turn_context, user_mail)
                 return
 
@@ -3281,9 +3219,9 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 {model_switch_info_zh}
 
 🏢 **會議室功能**：
-- @會議室預約 - 預約會議室
-- @查詢預約 - 查看我的會議室預約
-- @取消預約 - 取消已預約的會議室
+- @book-room - 預約會議室
+- @check-booking - 查看我的會議室預約
+- @cancel-booking - 取消已預約的會議室
 
 📊 **系統指令**：
 - /help - 查看功能說明
@@ -3297,9 +3235,9 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 {model_switch_info_ja}
 
 🏢 **会議室機能**：
-- @會議室預約 - 会議室予約
-- @查詢預約 - 私の会議室予約を確認
-- @取消預約 - 予約した会議室をキャンセル
+- @book-room - 会議室予約
+- @check-booking - 私の会議室予約を確認
+- @cancel-booking - 予約した会議室をキャンセル
 
 📊 **システムコマンド**：
 - /help - 機能説明表示
@@ -3318,15 +3256,15 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
         },
         {
             "title": "🏢 會議室預約" if language == "zh-TW" else "🏢 会議室予約",
-            "value": "@會議室預約",
+            "value": "@book-room",
         },
         {
             "title": "📅 查詢預約" if language == "zh-TW" else "📅 予約確認",
-            "value": "@查詢預約",
+            "value": "@check-booking",
         },
         {
             "title": "❌ 取消預約" if language == "zh-TW" else "❌ 予約キャンセル",
-            "value": "@取消預約",
+            "value": "@cancel-booking",
         },
         {
             "title": "👤 個人資訊" if language == "zh-TW" else "👤 個人情報",
@@ -3939,17 +3877,8 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
                     "data": {"action": "cancelBooking"},
                     "style": "destructive",
                 },
-                {
-                    "type": "Action.Submit",
-                    "title": (
-                        "❌ 關閉清單" if language == "zh-TW" else "❌ リストを閉じる"
-                    ),
-                    "data": {"action": "closeCancelList"},
-                    "style": "default",
-                },
             ],
         }
-
         from botbuilder.schema import Attachment
 
         card_attachment = Attachment(
