@@ -83,7 +83,7 @@
         {
           "name": "Test Upload",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/audit/test-upload",
@@ -216,7 +216,7 @@
         {
           "name": "Clear User Memory",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/memory/clear?user_mail=test@example.com",
@@ -234,7 +234,7 @@
         {
           "name": "Clear All Memory",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/memory/clear",

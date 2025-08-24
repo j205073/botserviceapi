@@ -1850,34 +1850,6 @@ async def get_s3_bucket_info():
         )
 
 
-@app.route("/api/audit/test-upload", methods=["POST"])
-async def test_upload_audit_logs():
-    """測試用：立即上傳所有待上傳的稽核日誌"""
-    try:
-        results = []
-        upload_count = 0
-
-        for user_mail in list(audit_logs_by_user.keys()):
-            if audit_logs_by_user[user_mail]:
-                result = await upload_user_audit_logs(user_mail)
-                results.append({"user": user_mail, "result": result})
-                if result["success"]:
-                    upload_count += 1
-
-        return await make_response(
-            jsonify(
-                {
-                    "success": True,
-                    "message": f"測試上傳完成，成功上傳 {upload_count} 個用戶的日誌",
-                    "details": results,
-                    "total_processed": len(results),
-                }
-            )
-        )
-    except Exception as e:
-        return await make_response(jsonify({"success": False, "message": str(e)}), 500)
-
-
 @app.route("/api/audit/local-files", methods=["GET"])
 async def get_local_audit_files():
     """查看本地稽核日誌檔案狀態"""
@@ -1926,7 +1898,7 @@ async def get_local_audit_files():
         return await make_response(jsonify({"success": False, "message": str(e)}), 500)
 
 
-@app.route("/api/memory/clear", methods=["POST"])
+@app.route("/api/memory/clear", methods=["GET"])
 async def clear_user_memory():
     """清除用戶記憶體 API"""
     try:
