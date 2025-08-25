@@ -3726,7 +3726,7 @@ async def show_my_bookings(turn_context: TurnContext, user_mail: str):
             Activity(type=ActivityTypes.message, text=loading_msg)
         )
 
-        events_data = await graph_api.get_user_calendar_events(
+        events_data = await graph_api.get_user_calendarView(
             real_user_email, start_time, end_time
         )
         events = events_data.get("value", [])
@@ -3897,7 +3897,7 @@ async def show_cancel_booking_options(turn_context: TurnContext, user_mail: str)
         start_time = datetime.now(taiwan_tz)
         end_time = start_time + timedelta(days=30)  # 查詢未來30天
 
-        events_data = await graph_api.get_user_calendar_events(
+        events_data = await graph_api.get_user_calendarView(
             real_user_email, start_time, end_time
         )
         events = events_data.get("value", [])
@@ -4280,7 +4280,7 @@ async def update_cancel_booking_list_if_needed(
         start_time = datetime.now(taiwan_tz)
         end_time = start_time + timedelta(days=30)  # 查詢未來30天
 
-        events_data = await graph_api.get_user_calendar_events(
+        events_data = await graph_api.get_user_calendarView(
             real_user_email, start_time, end_time
         )
         events = events_data.get("value", [])
@@ -4451,7 +4451,7 @@ async def handle_room_booking(turn_context: TurnContext, user_mail: str):
             # 先嘗試查詢會議室的行事曆，如果失敗則查詢用戶自己的行事曆
             room_events = None
             try:
-                room_events = await graph_api.get_user_calendar_events(
+                room_events = await graph_api.get_user_calendarView(
                     user_email=room_email, start_time=check_start, end_time=check_end
                 )
                 print(f"成功查詢會議室行事曆")
@@ -4460,7 +4460,7 @@ async def handle_room_booking(turn_context: TurnContext, user_mail: str):
                 # 改查用戶自己的行事曆，看是否有包含該會議室的預約
                 real_user_email = await get_real_user_email(turn_context, user_mail)
                 print(f"改查用戶 {real_user_email} 的行事曆")
-                room_events = await graph_api.get_user_calendar_events(
+                room_events = await graph_api.get_user_calendarView(
                     user_email=real_user_email,
                     start_time=check_start,
                     end_time=check_end,

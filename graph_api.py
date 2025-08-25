@@ -2,6 +2,7 @@ import aiohttp
 from datetime import datetime, timedelta
 import json
 import os
+import pytz
 from typing import Optional, Dict, Any
 from token_manager import TokenManager
 
@@ -176,7 +177,7 @@ class GraphAPI:
     async def get_user_calendar_events(
         self, user_email: str, start_time: datetime, end_time: datetime
     ) -> Dict[str, Any]:
-        """取得用戶的行事曆事件（包含會議室預約）"""
+        """取得用戶的行事曆事件（包含會議室預約）- 保留向後兼容性"""
         endpoint = f"{self.base_url}/users/{user_email}/calendar/events"
 
         # 設定查詢參數
@@ -198,6 +199,38 @@ class GraphAPI:
                 else:
                     text = await response.text()
                     raise Exception(f"Failed to get calendar events: {text}")
+
+    async def get_user_calendarView(
+        self, user_email: str, start_time: datetime, end_time: datetime
+    ) -> Dict[str, Any]:
+        """使用 calendarView 取得用戶的行事曆事件（推薦使用）
+        
+        注意：start_time 和 end_time 必須是已經設定為台灣時區的時間
+        函數內不做任何時區轉換處理
+        """
+        endpoint = f"{self.base_url}/users/{user_email}/calendarView"
+
+        # 直接使用台灣時區格式 (+08:00)
+        # 傳入前調用方必須已經將時間轉換為台灣時區
+        start_str = start_time.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        end_str = end_time.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+
+        params = {
+            "startDateTime": start_str,
+            "endDateTime": end_str,
+            "$select": "subject,start,end,organizer,attendees,id,location",
+            "$orderby": "start/dateTime",
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                endpoint, headers=self._get_headers(), params=params
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    text = await response.text()
+                    raise Exception(f"Failed to get calendar view: {text}")
 
     async def delete_meeting(self, user_email: str, event_id: str) -> bool:
         """刪除會議"""
