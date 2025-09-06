@@ -156,6 +156,11 @@ MODEL_INFO = {
     },
 }
 
+# 管理警示設定
+ADMIN_ALERT_EMAIL = os.getenv(
+    "ADMIN_ALERT_EMAIL", "juncheng.liu@rinnai.com.tw"
+)
+
 # 台灣時區
 taiwan_tz = pytz.timezone("Asia/Taipei")
 
@@ -2154,6 +2159,12 @@ async def call_openai(prompt, conversation_id, user_mail=None):
         error_log = {"role": "system", "content": f"API 錯誤：{error_msg}"}
         log_message_to_audit(conversation_id, error_log, user_mail)
 
+        # 嘗試通知管理員
+        try:
+            await notify_admin_of_error(error_msg, user_mail, conversation_id)
+        except Exception as notify_err:
+            print(f"通知管理員失敗: {notify_err}")
+
         return "抱歉，服務暫時不可用，請稍後再試。"
 
 
@@ -2167,6 +2178,47 @@ def sanitize_url(url):
     encoded_path = "/".join(quote(segment) for segment in path.split("/"))
     sanitized_url = urljoin(base, encoded_path)
     return sanitized_url
+
+
+async def notify_admin_of_error(error_msg: str, user_mail: str, conversation_id: str):
+    """當出現服務不可用訊息時，主動通知管理員 Teams 帳號並附上錯誤內容。"""
+    try:
+        admin_mail = (ADMIN_ALERT_EMAIL or "").lower()
+        if not admin_mail:
+            print("未設定 ADMIN_ALERT_EMAIL，略過管理員通知")
+            return
+
+        # 避免訊息過長
+        safe_error = (error_msg or "").strip()
+        if len(safe_error) > 1500:
+            safe_error = safe_error[:1500] + "... (truncated)"
+
+        # 需要先有管理員的對話參考
+        if admin_mail not in user_conversation_refs:
+            print(
+                f"尚未建立管理員對話參考，無法主動通知: {admin_mail}"
+            )
+            return
+
+        conversation_ref = user_conversation_refs[admin_mail]
+
+        async def send_alert(turn_context: TurnContext):
+            text = (
+                "🚨 系統錯誤通知\n"
+                f"使用者: {user_mail}\n"
+                f"對話ID: {conversation_id}\n"
+                f"錯誤: {safe_error}"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=text)
+            )
+
+        await adapter.continue_conversation(
+            conversation_ref, send_alert, bot_id=appId
+        )
+        print(f"已通知管理員 {admin_mail} 錯誤: {safe_error}")
+    except Exception as e:
+        print(f"notify_admin_of_error 失敗: {e}")
 
 
 async def download_attachment_and_write(attachment: Attachment) -> dict:
