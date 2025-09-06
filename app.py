@@ -157,9 +157,7 @@ MODEL_INFO = {
 }
 
 # 管理警示設定
-ADMIN_ALERT_EMAIL = os.getenv(
-    "ADMIN_ALERT_EMAIL", "juncheng.liu@rinnai.com.tw"
-)
+ADMIN_ALERT_EMAIL = os.getenv("ADMIN_ALERT_EMAIL", "juncheng.liu@rinnai.com.tw")
 
 # 台灣時區
 taiwan_tz = pytz.timezone("Asia/Taipei")
@@ -2195,9 +2193,7 @@ async def notify_admin_of_error(error_msg: str, user_mail: str, conversation_id:
 
         # 需要先有管理員的對話參考
         if admin_mail not in user_conversation_refs:
-            print(
-                f"尚未建立管理員對話參考，無法主動通知: {admin_mail}"
-            )
+            print(f"尚未建立管理員對話參考，無法主動通知: {admin_mail}")
             return
 
         conversation_ref = user_conversation_refs[admin_mail]
@@ -2213,9 +2209,7 @@ async def notify_admin_of_error(error_msg: str, user_mail: str, conversation_id:
                 Activity(type=ActivityTypes.message, text=text)
             )
 
-        await adapter.continue_conversation(
-            conversation_ref, send_alert, bot_id=appId
-        )
+        await adapter.continue_conversation(conversation_ref, send_alert, bot_id=appId)
         print(f"已通知管理員 {admin_mail} 錯誤: {safe_error}")
     except Exception as e:
         print(f"notify_admin_of_error 失敗: {e}")
@@ -2481,7 +2475,9 @@ async def message_handler(turn_context: TurnContext):
                                 turn_context, user_mail, pending_todos, language
                             )
                         else:
-                            suggested_actions = get_suggested_replies("無待辦事項", user_mail)
+                            suggested_actions = get_suggested_replies(
+                                "無待辦事項", user_mail
+                            )
                             await turn_context.send_activity(
                                 Activity(
                                     type=ActivityTypes.message,
@@ -2521,11 +2517,14 @@ async def message_handler(turn_context: TurnContext):
                                 )
                             )
                             return
-                        
+
                         # OpenAI 模式：直接顯示模型選擇卡片
-                        current_model = user_model_preferences.get(user_mail, OPENAI_MODEL)
+                        current_model = user_model_preferences.get(
+                            user_mail, OPENAI_MODEL
+                        )
                         model_info = MODEL_INFO.get(
-                            current_model, {"speed": "未知", "time": "未知", "use_case": "未知"}
+                            current_model,
+                            {"speed": "未知", "time": "未知", "use_case": "未知"},
                         )
 
                         # 創建 Adaptive Card
@@ -2668,7 +2667,9 @@ async def message_handler(turn_context: TurnContext):
                         if 0 <= todo_index < len(pending_todos):
                             actual_todo_id = pending_todos[todo_index]["id"]
                             # 完成選中的待辦事項
-                            completed_items = mark_todo_completed(user_mail, [actual_todo_id])
+                            completed_items = mark_todo_completed(
+                                user_mail, [actual_todo_id]
+                            )
                             if completed_items:
                                 await turn_context.send_activity(
                                     Activity(
@@ -2751,7 +2752,7 @@ async def message_handler(turn_context: TurnContext):
             if user_message == "new-chat":
                 await confirm_new_conversation(turn_context)
                 return
-            
+
             # 其他@指令繼續在後面處理（保持向後兼容）
         elif turn_context.activity.text and not turn_context.activity.text.startswith(
             "@"
@@ -2947,7 +2948,6 @@ async def message_handler(turn_context: TurnContext):
                         )
                     )
                 return
-
 
             # 處理模型選擇指令
             if user_message == "model":
@@ -4439,16 +4439,16 @@ async def handle_room_booking(turn_context: TurnContext, user_mail: str):
 
             # 驗證不能預約過去的時間
             current_time = datetime.now(taiwan_tz)
-            if start_time <= current_time:
-                error_msg = (
-                    "❌ 不能預約過去的時間，請選擇未來的時段"
-                    if language == "zh-TW"
-                    else "❌ 過去の時間は予約できません。将来の時間を選択してください"
-                )
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=error_msg)
-                )
-                return
+            # if start_time <= current_time:
+            #     error_msg = (
+            #         "❌ 不能預約過去的時間，請選擇未來的時段"
+            #         if language == "zh-TW"
+            #         else "❌ 過去の時間は予約できません。将来の時間を選択してください"
+            #     )
+            #     await turn_context.send_activity(
+            #         Activity(type=ActivityTypes.message, text=error_msg)
+            #     )
+            #     return
 
             # 驗證會議時間至少30分鐘
             duration = (end_time - start_time).total_seconds() / 60
