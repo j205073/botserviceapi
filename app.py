@@ -2147,6 +2147,8 @@ async def call_openai(prompt, conversation_id, user_mail=None):
             print(f"使用 OpenAI 直接 API - 模型: {model_engine}")
 
         # 記錄助手回應
+                    await notify_admin_of_error(error_msg, user_mail, conversation_id)
+
         message = response.choices[0].message
         assistant_message = {"role": "assistant", "content": message.content}
         await manage_conversation_history_with_limit_check(
@@ -3475,10 +3477,7 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
 {model_switch_info_zh}
 
-🏢 **會議室功能**：
-- @book-room - 預約會議室
-- @check-booking - 查看我的會議室預約
-- @cancel-booking - 取消已預約的會議室
+🏢 **會議室功能**、
 
 📊 **系統指令**：
 - @help - 查看功能說明
@@ -3491,10 +3490,7 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
 {model_switch_info_ja}
 
-🏢 **会議室機能**：
-- @book-room - 会議室予約
-- @check-booking - 私の会議室予約を確認
-- @cancel-booking - 予約した会議室をキャンセル
+🏢 **会議室機能**、
 
 📊 **システムコマンド**：
 - @help - 機能説明表示
