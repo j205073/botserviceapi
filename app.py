@@ -100,6 +100,8 @@ adapter = BotFrameworkAdapter(settings)
 conversation_history = {}
 conversation_message_counts = {}
 conversation_timestamps = {}
+# 使用者顯示名稱快取
+user_display_names: Dict[str, str] = {}
 
 # 稽核日誌 - 用於完整記錄和上傳 S3（按用戶郵箱分組）
 audit_logs_by_user = {}  # {user_mail: [messages]}
@@ -2122,14 +2124,18 @@ async def call_openai(prompt, conversation_id, user_mail=None):
 
                 response = openai_client.chat.completions.create(
                     model=model_engine,
-                    messages=conversation_history[conversation_id],
+                    messages=normalize_messages_for_model(
+                        conversation_history[conversation_id], model_engine
+                    ),
                     timeout=timeout_value,
                     **extra_params,
                 )
             else:
                 response = openai_client.chat.completions.create(
                     model=model_engine,
-                    messages=conversation_history[conversation_id],
+                    messages=normalize_messages_for_model(
+                        conversation_history[conversation_id], model_engine
+                    ),
                     max_tokens=max_tokens,
                     temperature=0.7,
                     top_p=0.9,
@@ -2198,10 +2204,13 @@ async def notify_admin_of_error(error_msg: str, user_mail: str, conversation_id:
 
         conversation_ref = user_conversation_refs[admin_mail]
 
+        # 嘗試取得顯示名稱
+        display_name = user_display_names.get(user_mail) or "(unknown)"
+
         async def send_alert(turn_context: TurnContext):
             text = (
                 "🚨 系統錯誤通知\n"
-                f"使用者: {user_mail}\n"
+                f"使用者: {display_name} <{user_mail}>\n"
                 f"對話ID: {conversation_id}\n"
                 f"錯誤: {safe_error}"
             )
@@ -2213,6 +2222,33 @@ async def notify_admin_of_error(error_msg: str, user_mail: str, conversation_id:
         print(f"已通知管理員 {admin_mail} 錯誤: {safe_error}")
     except Exception as e:
         print(f"notify_admin_of_error 失敗: {e}")
+
+
+def normalize_messages_for_model(messages: List[Dict[str, str]], model: str):
+    """若模型不支援 system 角色，將 system 內容合併至第一個 user 訊息前置文字。
+
+    - 目前假設 gpt-5 系列與部分 Azure 部署不接受 system 角色。
+    - 保守處理：遇到不支援就降級為 user 前置說明，避免 400 錯誤。
+    """
+    def supports_system_role(m: str) -> bool:
+        # 未知模型一律視為支援，以減少行為改變；已知 gpt-5* 則不支援
+        return not m.startswith("gpt-5")
+
+    if supports_system_role(model):
+        return messages
+
+    sys_contents = [m.get("content", "") for m in messages if m.get("role") == "system"]
+    other_msgs = [m for m in messages if m.get("role") != "system"]
+    if not sys_contents:
+        return other_msgs
+
+    preface = "[System instructions]\n" + "\n\n".join(sys_contents).strip()
+    if other_msgs:
+        first = other_msgs[0].copy()
+        first["content"] = f"{preface}\n\n{first.get('content', '')}"
+        return [first] + other_msgs[1:]
+    else:
+        return [{"role": "user", "content": preface}]
 
 
 async def download_attachment_and_write(attachment: Attachment) -> dict:
@@ -2446,12 +2482,14 @@ async def message_handler(turn_context: TurnContext):
 
         print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
 
-        # 儲存用戶的對話參考，用於主動發送訊息
+        # 儲存用戶的對話參考與顯示名稱，用於主動發送訊息與通知
         from botbuilder.core import TurnContext
 
         user_conversation_refs[user_mail] = TurnContext.get_conversation_reference(
             turn_context.activity
         )
+        if user_mail:
+            user_display_names[user_mail] = user_name or user_display_names.get(user_mail)
 
         # 處理 Adaptive Card 回應
         if turn_context.activity.value:
