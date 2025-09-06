@@ -170,6 +170,9 @@ USE_AZURE_OPENAI = os.getenv("USE_AZURE_OPENAI", "true").lower() == "true"
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")  # 主要對話模型
 OPENAI_INTENT_MODEL = os.getenv("OPENAI_INTENT_MODEL", "gpt-5-nano")  # 意圖分析專用模型
 OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-4o-mini")  # 彙總專用模型
+# Azure 部署名稱（需在 Azure Portal 建立對應部署並填入環境變數）
+AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+AZURE_OPENAI_SUMMARY_DEPLOYMENT = os.getenv("AZURE_OPENAI_SUMMARY_DEPLOYMENT")
 ENABLE_AI_INTENT_ANALYSIS = (
     os.getenv("ENABLE_AI_INTENT_ANALYSIS", "false").lower() == "true"
 )  # 是否啟用AI意圖分析
@@ -687,12 +690,17 @@ async def analyze_user_intent(user_message: str) -> dict:
                 print(f"📝 [AI意圖分析] 用戶輸入: {user_message}")
                 print(f"🔧 [AI意圖分析] 使用意圖模型: {OPENAI_INTENT_MODEL}")
 
-                response = intent_client.chat.completions.create(
-                    model=OPENAI_INTENT_MODEL,  # 使用參數化的意圖分析模型
-                    messages=[
+                intent_messages = normalize_messages_for_model(
+                    [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_message},
                     ],
+                    OPENAI_INTENT_MODEL,
+                )
+
+                response = intent_client.chat.completions.create(
+                    model=OPENAI_INTENT_MODEL,  # 使用參數化的意圖分析模型
+                    messages=intent_messages,
                     max_tokens=200,
                     temperature=0.1,  # 低溫度確保一致性
                 )
@@ -1640,7 +1648,20 @@ async def compress_conversation_history(conversation_id, user_mail):
             user_mail,
         )
 
-        summary_msg = {"role": "system", "content": f"對話摘要（重要信息）：{summary}"}
+        # 針對不支援 system 的模型（o1*），將摘要訊息 role 改為 user
+        if USE_AZURE_OPENAI:
+            current_model = "o1-mini"
+        else:
+            current_model = user_model_preferences.get(user_mail, OPENAI_MODEL)
+
+        role_for_summary = (
+            "system" if not (current_model.lower().startswith("o1")) else "user"
+        )
+
+        summary_msg = {
+            "role": role_for_summary,
+            "content": f"對話摘要（重要信息）：{summary}",
+        }
         conversation_history[conversation_id] = system_msgs + [summary_msg]
 
         # 記錄壓縮動作到稽核日誌
@@ -2092,11 +2113,15 @@ async def call_openai(prompt, conversation_id, user_mail=None):
         conversation_id, user_message, user_mail
     )
 
+    response = None
+
     try:
         if USE_AZURE_OPENAI:
             response = openai_client.chat.completions.create(
                 model="o1-mini",
-                messages=conversation_history[conversation_id],
+                messages=normalize_messages_for_model(
+                    conversation_history[conversation_id], "o1-mini"
+                ),
                 max_completion_tokens=max_tokens,
                 timeout=15,
             )
@@ -2145,15 +2170,18 @@ async def call_openai(prompt, conversation_id, user_mail=None):
                 )
 
             print(f"使用 OpenAI 直接 API - 模型: {model_engine}")
+        if response is None:
+            raise ValueError("OpenAI API 未返回任何回應")
 
-        # 記錄助手回應
-                    await notify_admin_of_error(error_msg, user_mail, conversation_id)
-
-        message = response.choices[0].message
-        assistant_message = {"role": "assistant", "content": message.content}
-        await manage_conversation_history_with_limit_check(
-            conversation_id, assistant_message, user_mail
-        )
+        try:
+            # 記錄助手回應
+            message = response.choices[0].message
+            assistant_message = {"role": "assistant", "content": message.content}
+            await manage_conversation_history_with_limit_check(
+                conversation_id, assistant_message, user_mail
+            )
+        except Exception as e:
+            print(f"通知管理員失敗: {e}")
 
         return message.content
 
@@ -2232,9 +2260,11 @@ def normalize_messages_for_model(messages: List[Dict[str, str]], model: str):
     - 目前假設 gpt-5 系列與部分 Azure 部署不接受 system 角色。
     - 保守處理：遇到不支援就降級為 user 前置說明，避免 400 錯誤。
     """
+
     def supports_system_role(m: str) -> bool:
-        # 未知模型一律視為支援，以減少行為改變；已知 gpt-5* 則不支援
-        return not m.startswith("gpt-5")
+        # 已知 family：o1*, gpt-5* 不支援 system 角色
+        ml = (m or "").lower()
+        return not (ml.startswith("o1") or ml.startswith("gpt-5"))
 
     if supports_system_role(model):
         return messages
@@ -2362,12 +2392,15 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
         system_prompt = system_prompts.get(language, system_prompts["zh-TW"])
 
         if USE_AZURE_OPENAI:
+            # 以環境變數指定 Azure 部署名稱，避免找不到部署
+            deployment = AZURE_OPENAI_SUMMARY_DEPLOYMENT
+            az_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ]
             response = openai_client.chat.completions.create(
-                model="gpt-4o-mini-deploy",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text},
-                ],
+                model=deployment,
+                messages=normalize_messages_for_model(az_messages, deployment),
                 max_tokens=max_tokens,
             )
         else:
@@ -2375,13 +2408,18 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
             summary_model = OPENAI_SUMMARY_MODEL
             print(f"🔧 [文本摘要] 使用彙總模型: {summary_model}")
 
+            summary_messages = normalize_messages_for_model(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+                summary_model,
+            )
+
             if summary_model.startswith("gpt-5"):
                 response = openai_client.chat.completions.create(
                     model=summary_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": text},
-                    ],
+                    messages=summary_messages,
                     reasoning_effort="low",
                     verbosity="low",
                     timeout=20,
@@ -2389,10 +2427,7 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
             else:
                 response = openai_client.chat.completions.create(
                     model=summary_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": text},
-                    ],
+                    messages=summary_messages,
                     max_tokens=max_tokens,
                     temperature=0.3,
                     timeout=20,
@@ -2402,7 +2437,13 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
         return message.content
 
     except Exception as e:
-        return f"摘要處理時發生錯誤：{str(e)}"
+        err = str(e)
+        if "does not exist" in err and "deployment" in err.lower():
+            print(
+                "Azure OpenAI 部署不存在或名稱不正確。請設定 AZURE_OPENAI_SUMMARY_DEPLOYMENT 為實際的部署名稱，"
+                "或至 Azure Portal 建立對應的 Chat Completions 部署。"
+            )
+        return f"摘要處理時發生錯誤：{err}"
 
 
 async def welcome_user(turn_context: TurnContext):
@@ -2491,7 +2532,9 @@ async def message_handler(turn_context: TurnContext):
             turn_context.activity
         )
         if user_mail:
-            user_display_names[user_mail] = user_name or user_display_names.get(user_mail)
+            user_display_names[user_mail] = user_name or user_display_names.get(
+                user_mail
+            )
 
         # 處理 Adaptive Card 回應
         if turn_context.activity.value:
