@@ -74,7 +74,7 @@ if DEBUG_MODE and DEBUG_ACCOUNT:
 
 # === 對話管理參數 ===
 CONVERSATION_RETENTION_DAYS = int(os.getenv("CONVERSATION_RETENTION_DAYS", "30"))
-MAX_CONTEXT_MESSAGES = int(os.getenv("MAX_CONTEXT_MESSAGES", "30"))
+MAX_CONTEXT_MESSAGES = int(os.getenv("MAX_CONTEXT_MESSAGES", "5"))
 # === 稽核日誌參數 ===
 # S3_UPLOAD_INTERVAL_HOURS = int(os.getenv("S3_UPLOAD_INTERVAL_HOURS", "24"))
 # === 待辦事項提醒參數 ===
@@ -167,9 +167,9 @@ taiwan_tz = pytz.timezone("Asia/Taipei")
 
 # OpenAI API 配置
 USE_AZURE_OPENAI = os.getenv("USE_AZURE_OPENAI", "true").lower() == "true"
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")  # 主要對話模型
-OPENAI_INTENT_MODEL = os.getenv("OPENAI_INTENT_MODEL", "gpt-5-nano")  # 意圖分析專用模型
-OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-4o-mini")  # 彙總專用模型
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")  # 主要對話模型
+OPENAI_INTENT_MODEL = os.getenv("OPENAI_INTENT_MODEL", "gpt-5-mini")  # 意圖分析專用模型
+OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-5-mini")  # 彙總專用模型
 # Azure 部署名稱（需在 Azure Portal 建立對應部署並填入環境變數）
 AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
 AZURE_OPENAI_SUMMARY_DEPLOYMENT = os.getenv("AZURE_OPENAI_SUMMARY_DEPLOYMENT")
@@ -624,8 +624,19 @@ async def analyze_user_intent(user_message: str) -> dict:
     }
     """
     try:
-        # 構建統一的 system_prompt；OpenAI 模式會額外加入「模型選擇」意圖
-        base_prompt = """你是智能助手的意圖分析器，判斷用戶需求是否為現有功能。
+        # 構建統一的 system_prompt；用插入字串的方式在 OpenAI 模式加入「模型選擇」意圖
+        model_section = (
+            """
+🧠 模型選擇:
+  - category: "model" (必須使用此英文代碼)
+    === 判斷原則 ===
+    - 切換/更換/更改/選擇模型（例：我要切換模型、幫我換模型、切換到 gpt-4o、我要用 gpt-5-mini 等等表達要切換模型的語句）
+"""
+            if not USE_AZURE_OPENAI
+            else ""
+        )
+
+        base_prompt = f"""你是智能助手的意圖分析器，判斷用戶需求是否為現有功能。
 
 === 現有功能清單 ===
 📝 待辦事項管理:
@@ -642,20 +653,20 @@ async def analyze_user_intent(user_message: str) -> dict:
 
 ℹ️ 資訊查詢:
   - category: "info" (必須使用此英文代碼)
-  - user_info: 個人資訊查詢（例如：我的單位/部門、我的職稱、我的 email）
+  - user_info: 個人資訊查詢（例如：我是誰，我的單位/部門、我的職稱、我的 email）
   - bot_info: 機器人自我介紹（例如：你是誰？你有哪些功能？）
   - help: 系統幫助、使用說明
   - status: 系統狀態、功能介紹
 
 === 回傳格式 ===
-{
+{{
   "is_existing_feature": true/false,
   "category": "英文代碼 (todo/meeting/info[,+model])",
   "action": "動作名稱",
   "content": "提取的具體內容",
   "confidence": 0.0-1.0,
   "reason": "判斷原因"
-}
+}}
 
 === 判斷原則 ===
 ✅ 現有功能範例：
@@ -665,26 +676,17 @@ async def analyze_user_intent(user_message: str) -> dict:
 - "我有什麼會議" → meeting.query
 - "取消預約" → meeting.cancel
 - "怎麼使用" → info.help
-- "我是誰/我的單位/我的部門/我的 email" → info.user_info
-- "你是誰？你會做什麼？介紹一下你" → info.bot_info
+- "我是誰？/我的單位？/我的部門？/我的 email" → info.user_info
+- "你是誰？/你會做什麼？/介紹一下你" → info.bot_info
+- 我是誰和你是誰不要搞混，前者是 info.user_info，後者是 info.bot_info
 
 ❌ 非現有功能範例：
 - "天氣如何"、"寫一份報告"、"計算數學題" → is_existing_feature: false
+
+{model_section}
 """
 
-        openai_model_section = """
-🧠 模型選擇（僅限 OpenAI 模式）:
-  - category: "model" (必須使用此英文代碼)
-  - switch: 切換/更換/更改/選擇模型（例：切換到 gpt-4o、我要用 gpt-5-mini）
-  - list: 查看/顯示可用模型
-
-✅ 模型選擇範例：
-- "切換到 gpt-4o" → {"is_existing_feature": true, "category": "model", "action": "switch", "content": "gpt-4o"}
-- "我要用 gpt-5-mini" → {"is_existing_feature": true, "category": "model", "action": "switch", "content": "gpt-5-mini"}
-- "顯示可用模型" → {"is_existing_feature": true, "category": "model", "action": "list", "content": ""}
-"""
-
-        system_prompt = base_prompt + ("\n\n" + openai_model_section if not USE_AZURE_OPENAI else "")
+        system_prompt = base_prompt
 
         # 只在 OpenAI 模式下使用 AI 意圖分析，Azure 使用預設模型
         if not USE_AZURE_OPENAI:
@@ -713,7 +715,7 @@ async def analyze_user_intent(user_message: str) -> dict:
                     OPENAI_INTENT_MODEL,
                 )
 
-                response = intent_client.chat.completions.create(
+                response =   intent_client.chat.completions.create(
                     model=OPENAI_INTENT_MODEL,
                     messages=intent_messages,
                     max_tokens=200,
@@ -739,6 +741,7 @@ async def analyze_user_intent(user_message: str) -> dict:
                 print(f"🎯 [AI意圖分析] 分析結果: {intent_result}")
 
                 import json
+
                 parsed_result = json.loads(intent_result)
                 parsed_result = normalize_intent_output(parsed_result)
                 print(
@@ -773,7 +776,7 @@ async def analyze_user_intent(user_message: str) -> dict:
                     az_model,
                 )
 
-                response = openai_client.chat.completions.create(
+                response =   openai_client.chat.completions.create(
                     model=az_model,
                     messages=az_messages,
                     max_tokens=200,
@@ -785,6 +788,7 @@ async def analyze_user_intent(user_message: str) -> dict:
                 print(f"🎯 [AI意圖分析-Azure] 分析結果: {intent_result}")
 
                 import json
+
                 parsed_result = json.loads(intent_result)
                 parsed_result = normalize_intent_output(parsed_result)
                 print(
@@ -811,183 +815,6 @@ async def analyze_user_intent(user_message: str) -> dict:
             "content": "",
             "confidence": 0.0,
         }
-
-
-def analyze_intent_by_keywords(user_message: str) -> dict:
-    """
-    使用關鍵字匹配分析用戶意圖（快速、免費的後備方案）
-    """
-    message_lower = user_message.lower()
-
-    # 會議室相關關鍵字（優先級較高，因為更具體）
-    meeting_keywords = ["會議", "meeting", "預約", "booking"]
-    meeting_query_indicators = ["有哪些", "什麼", "查詢", "我的", "參加", "出席"]
-    meeting_book_keywords = ["預約", "訂", "會議室", "booking", "reserve", "預定"]
-    meeting_cancel_keywords = ["取消預約", "取消會議", "cancel", "不要", "取消"]
-
-    # 待辦事項相關關鍵字
-    todo_keywords = ["待辦", "todo", "任務", "task", "待辦事項"]
-    todo_query_indicators = [
-        "有哪些",
-        "什麼事",
-        "清單",
-        "list",
-        "查看",
-        "列出",
-        "目前",
-        "我的",
-        "顯示",
-        "查詢",
-    ]
-    todo_add_keywords = ["新增", "添加", "提醒我", "記住", "幫我加", "建立", "創建"]
-    todo_complete_keywords = ["完成", "做完", "標記", "打勾", "結束"]
-
-    # 資訊查詢相關
-    info_help_keywords = ["幫助", "help", "功能", "怎麼用", "說明"]
-    info_status_keywords = ["狀態", "status", "系統"]
-    info_user_keywords = ["我的資訊", "個人", "用戶", "profile"]
-
-    # 優先檢查會議相關（因為會議和待辦可能有重疊關鍵字）
-    has_meeting_keyword = any(keyword in message_lower for keyword in meeting_keywords)
-    has_meeting_query = any(
-        indicator in message_lower for indicator in meeting_query_indicators
-    )
-
-    if has_meeting_keyword:
-        if has_meeting_query or "有哪些" in message_lower or "什麼" in message_lower:
-            return {
-                "category": "meeting",
-                "action": "query",
-                "content": "",
-                "confidence": 0.9,
-            }
-        elif any(keyword in message_lower for keyword in meeting_book_keywords):
-            return {
-                "category": "meeting",
-                "action": "book",
-                "content": "",
-                "confidence": 0.8,
-            }
-        elif any(keyword in message_lower for keyword in meeting_cancel_keywords):
-            return {
-                "category": "meeting",
-                "action": "cancel",
-                "content": "",
-                "confidence": 0.8,
-            }
-
-    # 檢查待辦事項（排除已被會議處理的情況）
-    has_todo_keyword = any(keyword in message_lower for keyword in todo_keywords)
-    has_todo_query = any(
-        indicator in message_lower for indicator in todo_query_indicators
-    )
-
-    if has_todo_keyword or (has_todo_query and not has_meeting_keyword):
-        if has_todo_query or "有哪些" in message_lower:
-            return {
-                "category": "todo",
-                "action": "query",
-                "content": "",
-                "confidence": 0.8,
-            }
-
-    # 待辦事項新增 - 增強版本，支援更多自然語言模式
-    smart_todo_patterns = [
-        "記著",
-        "記住",
-        "記錄",
-        "幫我記",
-        "提醒我",
-        "新增",
-        "添加",
-        "幫我加",
-        "記錄為",
-        "記錄成",
-        "幫我記錄",
-        "記下",
-        "記著為",
-        "記住要",
-        "幫我記著",
-    ]
-
-    if any(keyword in message_lower for keyword in todo_add_keywords) or any(
-        pattern in message_lower for pattern in smart_todo_patterns
-    ):
-        # 智能提取待辦內容
-        content = user_message
-
-        # 移除常見的指令詞彙 - 按長度排序，優先匹配更長的模式
-        remove_patterns = [
-            "記錄為一筆待辦",
-            "幫我記著為待辦",
-            "記著為待辦",
-            "記錄為待辦",
-            "幫我記錄",
-            "幫我記著",
-            "幫我記",
-            "記著為",
-            "記錄為",
-            "記錄成",
-            "記著",
-            "記住",
-            "記錄",
-            "提醒我",
-            "新增",
-            "添加",
-            "幫我加",
-            "記下",
-        ]
-
-        for pattern in remove_patterns:
-            if pattern in content:
-                # 找到模式後，移除它以及後面可能的標點符號和空格
-                content = content.replace(pattern, "").strip()
-                content = content.rstrip("，。！？,.").strip()  # 移除可能的標點符號
-                break
-
-        # 如果內容不為空，返回智能待辦新增意圖
-        if content:
-            return {
-                "category": "todo",
-                "action": "smart_add",
-                "content": content,
-                "confidence": 0.9,
-            }
-
-    # 待辦事項完成
-    if any(keyword in message_lower for keyword in todo_complete_keywords):
-        return {
-            "category": "todo",
-            "action": "complete",
-            "content": "",
-            "confidence": 0.7,
-        }
-
-    # 檢查資訊查詢
-    if any(keyword in message_lower for keyword in info_help_keywords):
-        return {"category": "info", "action": "help", "content": "", "confidence": 0.9}
-    elif any(keyword in message_lower for keyword in info_status_keywords):
-        return {
-            "category": "info",
-            "action": "status",
-            "content": "",
-            "confidence": 0.8,
-        }
-    elif any(keyword in message_lower for keyword in info_user_keywords):
-        return {
-            "category": "info",
-            "action": "user_info",
-            "content": "",
-            "confidence": 0.8,
-        }
-
-    # 預設為一般對話
-    return {
-        "is_existing_feature": False,
-        "category": "",
-        "content": user_message,
-        "confidence": 0.3,
-    }
 
 
 async def handle_intent_action(
@@ -2160,7 +1987,7 @@ async def call_openai(prompt, conversation_id, user_mail=None):
         try:
             meetings = await get_user_meetings(user_mail)
             booking_info = (
-                "您今天沒有會議室預約。" if not meetings else "您今天的預約如下:\n"
+                "您今天沒有會議室預約。" if not meetings else "您今天的預約如下:\n" 
             )
             for meeting in meetings:
                 booking_info += f"- {meeting['location']}: {meeting['start']}-{meeting['end']} {meeting['subject']}\n"
@@ -2196,7 +2023,7 @@ async def call_openai(prompt, conversation_id, user_mail=None):
 
     try:
         if USE_AZURE_OPENAI:
-            response = openai_client.chat.completions.create(
+            response =   openai_client.chat.completions.create(
                 model="o1-mini",
                 messages=normalize_messages_for_model(
                     conversation_history[conversation_id], "o1-mini"
@@ -2226,7 +2053,7 @@ async def call_openai(prompt, conversation_id, user_mail=None):
                 else:
                     extra_params = {}
 
-                response = openai_client.chat.completions.create(
+                response =  openai_client.chat.completions.create(
                     model=model_engine,
                     messages=normalize_messages_for_model(
                         conversation_history[conversation_id], model_engine
@@ -2235,7 +2062,7 @@ async def call_openai(prompt, conversation_id, user_mail=None):
                     **extra_params,
                 )
             else:
-                response = openai_client.chat.completions.create(
+                response =  openai_client.chat.completions.create(
                     model=model_engine,
                     messages=normalize_messages_for_model(
                         conversation_history[conversation_id], model_engine
@@ -2343,7 +2170,7 @@ def normalize_messages_for_model(messages: List[Dict[str, str]], model: str):
     def supports_system_role(m: str) -> bool:
         # 已知 family：o1*, gpt-5* 不支援 system 角色
         ml = (m or "").lower()
-        return not (ml.startswith("o1") or ml.startswith("gpt-5"))
+        return ml.startswith("gpt")
 
     if supports_system_role(model):
         return messages
@@ -2512,7 +2339,7 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
             ]
-            response = openai_client.chat.completions.create(
+            response =  openai_client.chat.completions.create(
                 model=deployment,
                 messages=normalize_messages_for_model(az_messages, deployment),
                 max_tokens=max_tokens,
@@ -2530,8 +2357,8 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
                 summary_model,
             )
 
-            if summary_model.startswith("gpt-5"):
-                response = openai_client.chat.completions.create(
+            if summary_model.startswith("gpt-"):
+                response =  openai_client.chat.completions.create(
                     model=summary_model,
                     messages=summary_messages,
                     reasoning_effort="low",
@@ -2539,7 +2366,7 @@ async def summarize_text(text, conversation_id, user_mail=None) -> str:
                     timeout=20,
                 )
             else:
-                response = openai_client.chat.completions.create(
+                response =  openai_client.chat.completions.create(
                     model=summary_model,
                     messages=summary_messages,
                     max_tokens=max_tokens,
@@ -2581,7 +2408,7 @@ async def welcome_user(turn_context: TurnContext):
 🤖 AI 模型功能：
 - 輸入 @model 可切換 AI 模型
 - 支援 gpt-4o、gpt-5-mini、gpt-5-nano、gpt-5 等模型
-- 預設使用：gpt-5-nano（輕量查詢專用）
+- 預設使用：gpt-5-mini (輕量版推理模型)
 """
         model_switch_info_ja = """
 🤖 AI モデル機能：
@@ -3309,7 +3136,7 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 🤖 **AI 模型功能**：
 - 輸入 @model 可切換 AI 模型
 - 支援 gpt-4o、gpt-5-mini、gpt-5-nano、gpt-5 等模型
-- 預設使用：gpt-5-nano（輕量查詢專用）"""
+- 預設使用：gpt-5-mini (輕量版推理模型)"""
 
         model_switch_info_ja = """
 
