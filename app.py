@@ -656,6 +656,7 @@ async def analyze_user_intent(user_message: str) -> dict:
 
 ℹ️ 資訊查詢:
   - category: "info" (必須使用此英文代碼)
+  - user_info: 個人資訊查詢（例如：我是誰、我的單位/部門、我的職稱、我的 email）
   - help: 系統幫助、使用說明
   - status: 系統狀態、功能介紹
 
@@ -677,6 +678,7 @@ async def analyze_user_intent(user_message: str) -> dict:
 - "我有什麼會議" → meeting.query
 - "取消預約" → meeting.cancel
 - "怎麼使用" → info.help
+ - "我是誰"、"我的單位"、"我的部門"、"我的 email" → info.user_info
 
 ❌ 非現有功能範例：
 - "天氣如何" → is_existing_feature: false
@@ -728,6 +730,7 @@ async def analyze_user_intent(user_message: str) -> dict:
                 import json
 
                 parsed_result = json.loads(intent_result)
+                parsed_result = normalize_intent_output(parsed_result)
                 print(
                     f"✅ [AI意圖分析] 解析成功 - 類別: {parsed_result.get('category')}, 動作: {parsed_result.get('action')}, 信心度: {parsed_result.get('confidence')}"
                 )
@@ -761,6 +764,7 @@ async def analyze_user_intent(user_message: str) -> dict:
 
 ℹ️ 資訊查詢:
   - category: "info" (必須使用此英文代碼)
+  - user_info: 個人資訊查詢（例如：我是誰、我的單位/部門、我的職稱、我的 email）
   - help: 系統幫助、使用說明
   - status: 系統狀態、功能介紹
 
@@ -782,6 +786,7 @@ async def analyze_user_intent(user_message: str) -> dict:
 - "我有什麼會議" → meeting.query
 - "取消預約" → meeting.cancel
 - "怎麼使用" → info.help
+ - "我是誰"、"我的單位"、"我的部門"、"我的 email" → info.user_info
 
 ❌ 非現有功能範例：
 - "天氣如何" → is_existing_feature: false
@@ -815,6 +820,7 @@ async def analyze_user_intent(user_message: str) -> dict:
                 import json
 
                 parsed_result = json.loads(intent_result)
+                parsed_result = normalize_intent_output(parsed_result)
                 print(
                     f"✅ [AI意圖分析-Azure] 解析成功 - 類別: {parsed_result.get('category')}, 動作: {parsed_result.get('action')}, 信心度: {parsed_result.get('confidence')}"
                 )
@@ -2283,6 +2289,41 @@ def normalize_messages_for_model(messages: List[Dict[str, str]], model: str):
         return [{"role": "user", "content": preface}]
 
 
+def normalize_intent_output(result: Dict[str, Any]) -> Dict[str, Any]:
+    """規整 AI 意圖輸出，確保 category 與 confidence 合理對應。
+
+    - category 僅允許 {todo, meeting, info}，其他一律視為非現有功能。
+    - confidence 介於 [0, 1]，缺省為 0.0。
+    - 若 category 非法則強制 is_existing_feature=False, confidence=0.0。
+    - 保留 action/content 原樣，不做硬編碼判斷。
+    """
+    allowed = {"todo", "meeting", "info"}
+    out = dict(result or {})
+    cat = (out.get("category") or "").strip().lower()
+    conf = out.get("confidence")
+
+    # 規範 confidence
+    try:
+        conf = float(conf)
+    except Exception:
+        conf = 0.0
+    conf = max(0.0, min(1.0, conf))
+
+    if cat not in allowed:
+        out["is_existing_feature"] = False
+        out["category"] = ""
+        out["confidence"] = 0.0
+        return out
+
+    # 合法類別：若模型未提供 is_existing_feature，按類別存在判定為 True
+    if "is_existing_feature" not in out:
+        out["is_existing_feature"] = True
+
+    out["category"] = cat
+    out["confidence"] = conf
+    return out
+
+
 async def download_attachment_and_write(attachment: Attachment) -> dict:
     """下載並儲存附件"""
     try:
@@ -2842,35 +2883,38 @@ async def message_handler(turn_context: TurnContext):
         ):
             user_message = turn_context.activity.text.strip()
 
-            # === 新的AI優先意圖分析系統 ===
-            print(f"🎯 [AI意圖分析] 開始分析用戶意圖: {user_message}")
+            if ENABLE_AI_INTENT_ANALYSIS:
+                # === AI 優先意圖分析系統（可由環境變數開關） ===
+                print(f"🎯 [AI意圖分析] 開始分析用戶意圖: {user_message}")
 
-            # 所有問題都直接交給AI意圖分析
-            ai_intent = await analyze_user_intent(user_message)
-            print(f"🤖 [AI分析結果] {ai_intent}")
+                ai_intent = await analyze_user_intent(user_message)
+                print(f"🤖 [AI分析結果] {ai_intent}")
 
-            # 判斷是否為現有功能
-            if (
-                ai_intent.get("is_existing_feature", False)
-                and ai_intent.get("confidence", 0) > 0.7
-                and ai_intent.get("category")
-            ):
+                # 判斷是否為現有功能
+                if (
+                    ai_intent.get("is_existing_feature", False)
+                    and ai_intent.get("confidence", 0) > 0.7
+                    and ai_intent.get("category")
+                ):
+                    print(
+                        f"✅ [現有功能] 識別為: {ai_intent['category']}.{ai_intent['action']}"
+                    )
 
-                print(
-                    f"✅ [現有功能] 識別為: {ai_intent['category']}.{ai_intent['action']}"
-                )
-
-                # 執行現有功能
-                success = await handle_intent_action(turn_context, user_mail, ai_intent)
-                if success:
-                    print(f"🎉 [處理成功] 功能執行完成")
-                    return
+                    # 執行現有功能
+                    success = await handle_intent_action(
+                        turn_context, user_mail, ai_intent
+                    )
+                    if success:
+                        print("🎉 [處理成功] 功能執行完成")
+                        return
+                    else:
+                        print("⚠️ [處理失敗] 功能執行失敗，轉為AI對話")
                 else:
-                    print(f"⚠️ [處理失敗] 功能執行失敗，轉為AI對話")
+                    print(
+                        "💭 [非現有功能] 轉交主要AI處理 (AI意圖分析未命中或信心不足)"
+                    )
             else:
-                print(
-                    f"💭 [非現有功能] 轉交主要AI處理 (is_existing_feature: {ai_intent.get('is_existing_feature', False)}, confidence: {ai_intent.get('confidence', 0)})"
-                )
+                print("ℹ️ 已停用 AI 意圖分析（ENABLE_AI_INTENT_ANALYSIS=false）")
 
         # @指令已在前面處理，這裡改為直接進入主要AI對話
         if False:  # 原本的@指令處理已移到前面
