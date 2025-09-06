@@ -656,7 +656,8 @@ async def analyze_user_intent(user_message: str) -> dict:
 
 ℹ️ 資訊查詢:
   - category: "info" (必須使用此英文代碼)
-  - user_info: 個人資訊查詢（例如：我是誰、我的單位/部門、我的職稱、我的 email）
+  - user_info: 個人資訊查詢（例如：我的單位/部門、我的職稱、我的 email）
+  - bot_info: 機器人自我介紹（例如：你是誰？你有哪些功能？）
   - help: 系統幫助、使用說明
   - status: 系統狀態、功能介紹
 
@@ -678,7 +679,8 @@ async def analyze_user_intent(user_message: str) -> dict:
 - "我有什麼會議" → meeting.query
 - "取消預約" → meeting.cancel
 - "怎麼使用" → info.help
- - "我是誰"、"我的單位"、"我的部門"、"我的 email" → info.user_info
+ - "我的單位"、"我的部門"、"我的 email" → info.user_info
+ - "你是誰？"、"你會做什麼？"、"介紹一下你" → info.bot_info
 
 ❌ 非現有功能範例：
 - "天氣如何" → is_existing_feature: false
@@ -764,7 +766,8 @@ async def analyze_user_intent(user_message: str) -> dict:
 
 ℹ️ 資訊查詢:
   - category: "info" (必須使用此英文代碼)
-  - user_info: 個人資訊查詢（例如：我是誰、我的單位/部門、我的職稱、我的 email）
+  - user_info: 個人資訊查詢（例如：我的單位/部門、我的職稱、我的 email）
+  - bot_info: 機器人自我介紹（例如：你是誰？你有哪些功能？）
   - help: 系統幫助、使用說明
   - status: 系統狀態、功能介紹
 
@@ -786,7 +789,8 @@ async def analyze_user_intent(user_message: str) -> dict:
 - "我有什麼會議" → meeting.query
 - "取消預約" → meeting.cancel
 - "怎麼使用" → info.help
- - "我是誰"、"我的單位"、"我的部門"、"我的 email" → info.user_info
+ - "我的單位"、"我的部門"、"我的 email" → info.user_info
+ - "你是誰？"、"你會做什麼？"、"介紹一下你" → info.bot_info
 
 ❌ 非現有功能範例：
 - "天氣如何" → is_existing_feature: false
@@ -1169,6 +1173,10 @@ async def handle_intent_action(
                 # 顯示用戶資訊
                 await show_user_info(turn_context)
                 return True
+            elif action in ("bot_info", "you"):
+                # 顯示機器人自我介紹
+                await show_bot_intro(turn_context)
+                return True
             elif action == "status":
                 # 顯示系統狀態（可以擴展）
                 status_msg = (
@@ -1181,12 +1189,7 @@ async def handle_intent_action(
                 )
                 return True
 
-        return False
-
-    except Exception as e:
-        print(f"處理意圖動作時發生錯誤: {str(e)}")
-        return False
-
+    return False
 
 # === 智能建議回覆系統 ===
 
@@ -2630,6 +2633,10 @@ async def message_handler(turn_context: TurnContext):
                     elif selected_function == "@info":
                         await show_user_info(turn_context)
                         return
+                    # 特殊處理機器人介紹
+                    elif selected_function == "@you":
+                        await show_bot_intro(turn_context)
+                        return
                     # 特殊處理模型選擇
                     elif selected_function == "@model":
                         # 直接顯示模型選擇卡片（僅限 OpenAI 模式）
@@ -2910,361 +2917,11 @@ async def message_handler(turn_context: TurnContext):
                     else:
                         print("⚠️ [處理失敗] 功能執行失敗，轉為AI對話")
                 else:
-                    print(
-                        "💭 [非現有功能] 轉交主要AI處理 (AI意圖分析未命中或信心不足)"
-                    )
+                    print("💭 [非現有功能] 轉交主要AI處理 (AI意圖分析未命中或信心不足)")
             else:
                 print("ℹ️ 已停用 AI 意圖分析（ENABLE_AI_INTENT_ANALYSIS=false）")
 
-        # @指令已在前面處理，這裡改為直接進入主要AI對話
-        if False:  # 原本的@指令處理已移到前面
-            user_message = turn_context.activity.text.lstrip("@")
-
-            # 處理開啟新對話指令
-            if user_message == "new-chat":
-                await confirm_new_conversation(turn_context)
-                return
-
-            # 處理新增待辦事項指令
-            if user_message == "add":
-                # 只輸入 @add 沒有內容
-                # 添加建議回覆
-                suggested_actions = get_suggested_replies("@add 提示", user_mail)
-
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text="請在 @add 後面輸入待辦事項內容，例如：@add 明天開會",
-                        suggested_actions=(
-                            SuggestedActions(actions=suggested_actions)
-                            if suggested_actions
-                            else None
-                        ),
-                    )
-                )
-                return
-            elif user_message.startswith("add "):
-                todo_content = user_message[4:].strip()  # 移除 "add " 前綴
-                if todo_content:
-                    todo_id = add_todo_item(user_mail, todo_content)
-                    if todo_id:
-                        # 產生建議回覆
-                        suggested_replies = get_suggested_replies(
-                            f"@add {todo_content}", user_mail
-                        )
-
-                        await turn_context.send_activity(
-                            Activity(
-                                type=ActivityTypes.message,
-                                text=f"✅ 已新增待辦事項 #{todo_id}：{todo_content}",
-                                suggested_actions=SuggestedActions(
-                                    actions=suggested_replies
-                                ),
-                            )
-                        )
-                    else:
-                        await turn_context.send_activity(
-                            Activity(
-                                type=ActivityTypes.message, text="❌ 新增待辦事項失敗"
-                            )
-                        )
-                else:
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text="請在 @add 後面輸入待辦事項內容，例如：@add 明天開會",
-                        )
-                    )
-                return
-
-            # 處理列出待辦事項指令
-            if user_message == "ls":
-                pending_todos = get_user_pending_todos(user_mail)
-                if pending_todos:
-                    language = determine_language(user_mail)
-                    await send_todo_list_card(
-                        turn_context, user_mail, pending_todos, language
-                    )
-                else:
-                    # 添加建議回覆
-                    suggested_actions = get_suggested_replies("無待辦事項", user_mail)
-
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text="🎉 目前沒有待辦事項",
-                            suggested_actions=(
-                                SuggestedActions(actions=suggested_actions)
-                                if suggested_actions
-                                else None
-                            ),
-                        )
-                    )
-                return
-
-            # 處理標記完成指令
-            if user_message == "ok":
-                # 只輸入 @ok 沒有編號
-                # 添加建議回覆
-                suggested_actions = get_suggested_replies("@ok 提示", user_mail)
-
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text="請輸入要完成的編號，例如：@ok 1 或 @ok 1,2,3",
-                        suggested_actions=(
-                            SuggestedActions(actions=suggested_actions)
-                            if suggested_actions
-                            else None
-                        ),
-                    )
-                )
-                return
-            elif user_message.startswith("ok "):
-                todo_ids_text = user_message[3:].strip()  # 移除 "ok " 前綴
-                try:
-                    # 解析編號，支援多個編號（用逗號或空格分隔）
-                    todo_ids = []
-                    for id_str in todo_ids_text.replace(",", " ").split():
-                        if id_str.isdigit():
-                            todo_ids.append(id_str)
-
-                    if todo_ids:
-                        completed_items = mark_todo_completed(user_mail, todo_ids)
-                        if completed_items:
-                            completed_text = "✅ 已標記完成：\n"
-                            for item in completed_items:
-                                completed_text += (
-                                    f"• #{item['id']}: {item['content']}\n"
-                                )
-
-                            # 添加建議回覆
-                            suggested_actions = get_suggested_replies(
-                                "@ok 完成", user_mail
-                            )
-
-                            await turn_context.send_activity(
-                                Activity(
-                                    type=ActivityTypes.message,
-                                    text=completed_text,
-                                    suggested_actions=(
-                                        SuggestedActions(actions=suggested_actions)
-                                        if suggested_actions
-                                        else None
-                                    ),
-                                )
-                            )
-                        else:
-                            await turn_context.send_activity(
-                                Activity(
-                                    type=ActivityTypes.message,
-                                    text="❌ 找不到指定的待辦事項編號",
-                                )
-                            )
-                    else:
-                        await turn_context.send_activity(
-                            Activity(
-                                type=ActivityTypes.message,
-                                text="請輸入正確的編號，例如：@ok 1 或 @ok 1,2,3",
-                            )
-                        )
-                except Exception as e:
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message, text="❌ 處理完成指令時發生錯誤"
-                        )
-                    )
-                return
-
-            # 處理模型選擇指令
-            if user_message == "model":
-                # 檢查是否使用 Azure OpenAI
-                if USE_AZURE_OPENAI:
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text="ℹ️ 目前使用 Azure OpenAI 服務\n📱 模型：o1-mini（固定）\n⚡ 此模式不支援模型切換",
-                        )
-                    )
-                    return
-
-                current_model = user_model_preferences.get(user_mail, OPENAI_MODEL)
-                model_info = MODEL_INFO.get(
-                    current_model, {"speed": "未知", "time": "未知", "use_case": "未知"}
-                )
-
-                # 創建 Adaptive Card
-                model_card = {
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "body": [
-                        {
-                            "type": "TextBlock",
-                            "text": f"📱 AI 模型選擇",
-                            "weight": "Bolder",
-                            "size": "Medium",
-                        },
-                        {
-                            "type": "TextBlock",
-                            "text": f"目前使用：{current_model} ({model_info['speed']} {model_info['time']})",
-                            "color": "Good",
-                            "spacing": "Small",
-                        },
-                        {
-                            "type": "Input.ChoiceSet",
-                            "id": "selectedModel",
-                            "style": "compact",
-                            "value": current_model,
-                            "choices": [
-                                {
-                                    "title": f"gpt-4o ({MODEL_INFO['gpt-4o']['speed']} {MODEL_INFO['gpt-4o']['time']}) - {MODEL_INFO['gpt-4o']['use_case']}",
-                                    "value": "gpt-4o",
-                                },
-                                {
-                                    "title": f"gpt-4o-mini ({MODEL_INFO['gpt-4o-mini']['speed']} {MODEL_INFO['gpt-4o-mini']['time']}) - {MODEL_INFO['gpt-4o-mini']['use_case']}",
-                                    "value": "gpt-4o-mini",
-                                },
-                                {
-                                    "title": f"gpt-5-mini ({MODEL_INFO['gpt-5-mini']['speed']} {MODEL_INFO['gpt-5-mini']['time']}) - {MODEL_INFO['gpt-5-mini']['use_case']}",
-                                    "value": "gpt-5-mini",
-                                },
-                                {
-                                    "title": f"gpt-5-nano ({MODEL_INFO['gpt-5-nano']['speed']} {MODEL_INFO['gpt-5-nano']['time']}) - {MODEL_INFO['gpt-5-nano']['use_case']}",
-                                    "value": "gpt-5-nano",
-                                },
-                                {
-                                    "title": f"gpt-5 ({MODEL_INFO['gpt-5']['speed']} {MODEL_INFO['gpt-5']['time']}) - {MODEL_INFO['gpt-5']['use_case']}",
-                                    "value": "gpt-5",
-                                },
-                                {
-                                    "title": f"gpt-5-chat-latest ({MODEL_INFO['gpt-5-chat-latest']['speed']} {MODEL_INFO['gpt-5-chat-latest']['time']}) - {MODEL_INFO['gpt-5-chat-latest']['use_case']}",
-                                    "value": "gpt-5-chat-latest",
-                                },
-                            ],
-                        },
-                    ],
-                    "actions": [
-                        {
-                            "type": "Action.Submit",
-                            "title": "✅ 確認選擇",
-                            "data": {"action": "selectModel"},
-                        }
-                    ],
-                }
-
-                from botbuilder.schema import Attachment
-
-                card_attachment = Attachment(
-                    content_type="application/vnd.microsoft.card.adaptive",
-                    content=model_card,
-                )
-
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text="🤖 AI 模型選擇\n\n💡 **如何切換模型**：\n1️⃣ 輸入 `@model` 打開模型選擇卡片\n2️⃣ 從下拉選單選擇適合的模型\n3️⃣ 點選「✅ 確認選擇」完成切換\n\n📊 **預設模型**：gpt-5-nano（輕量查詢專用）",
-                        attachments=[card_attachment],
-                    )
-                )
-                return
-            elif user_message.startswith("model "):
-                # 直接切換模型：@model gpt-4o
-                if USE_AZURE_OPENAI:
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text="ℹ️ Azure OpenAI 模式不支援模型切換\n📱 固定使用：o1-mini",
-                        )
-                    )
-                    return
-
-                model_name = user_message[6:].strip()
-                if model_name in MODEL_INFO:
-                    user_model_preferences[user_mail] = model_name
-                    model_info = MODEL_INFO[model_name]
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text=f"✅ 已切換至 {model_name}\n⚡ 回應速度：{model_info['speed']}（{model_info['time']}）\n🎯 適用場景：{model_info['use_case']}",
-                        )
-                    )
-                else:
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text=f"❌ 不支援的模型：{model_name}\n請使用 @model 查看可用模型",
-                        )
-                    )
-                return
-
-            # 處理清除所有待辦事項指令
-            if user_message == "cls":
-                pending_todos = get_user_pending_todos(user_mail)
-                if len(pending_todos) > 0:
-                    # 清除該用戶的所有待辦事項
-                    if user_mail in user_todos:
-                        cleared_count = len(user_todos[user_mail])
-                        user_todos[user_mail].clear()
-                        # 添加建議回覆
-                        suggested_actions = get_suggested_replies("清除完成", user_mail)
-
-                        await turn_context.send_activity(
-                            Activity(
-                                type=ActivityTypes.message,
-                                text=f"🗑️ 已清除 {cleared_count} 個待辦事項",
-                                suggested_actions=(
-                                    SuggestedActions(actions=suggested_actions)
-                                    if suggested_actions
-                                    else None
-                                ),
-                            )
-                        )
-                    else:
-                        # 添加建議回覆
-                        suggested_actions = get_suggested_replies(
-                            "無待辦事項", user_mail
-                        )
-
-                        await turn_context.send_activity(
-                            Activity(
-                                type=ActivityTypes.message,
-                                text="🎉 目前沒有待辦事項需要清除",
-                                suggested_actions=(
-                                    SuggestedActions(actions=suggested_actions)
-                                    if suggested_actions
-                                    else None
-                                ),
-                            )
-                        )
-                else:
-                    # 添加建議回覆
-                    suggested_actions = get_suggested_replies("無待辦事項", user_mail)
-
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text="🎉 目前沒有待辦事項需要清除",
-                            suggested_actions=(
-                                SuggestedActions(actions=suggested_actions)
-                                if suggested_actions
-                                else None
-                            ),
-                        )
-                    )
-                return
-
-            # 處理會議室相關指令
-            if user_message == "book-room":
-                await show_room_booking_options(turn_context, user_mail)
-                return
-            elif user_message == "check-booking":
-                await show_my_bookings(turn_context, user_mail)
-                return
-            elif user_message == "cancel-booking":
-                await show_cancel_booking_options(turn_context, user_mail)
-                return
-
-        else:
+            # 進入主要AI對話
             attachments = turn_context.activity.attachments
             if turn_context.activity.text:
 
@@ -3283,16 +2940,20 @@ async def message_handler(turn_context: TurnContext):
                     await show_user_info(turn_context)
                     return
 
+                if turn_context.activity.text.lower() == "@you":
+                    await show_bot_intro(turn_context)
+                    return
+
                 # 更新狀態查詢指令
                 if turn_context.activity.text.lower() == "@status":
                     msg_count = conversation_message_counts.get(conversation_id, 0)
                     audit_count = len(audit_logs_by_user.get(user_mail, []))
                     pending_todos = get_user_pending_todos(user_mail)
                     status_text = f"""當前對話狀態：
-• 工作記憶：{msg_count}/{MAX_CONTEXT_MESSAGES} 筆訊息
-• 稽核日誌：{audit_count} 筆完整記錄
-• 待辦事項：{len(pending_todos)} 筆待處理
-• 稽核保存期限：{CONVERSATION_RETENTION_DAYS} 天"""
+                    • 工作記憶：{msg_count}/{MAX_CONTEXT_MESSAGES} 筆訊息
+                    • 稽核日誌：{audit_count} 筆完整記錄
+                    • 待辦事項：{len(pending_todos)} 筆待處理
+                    • 稽核保存期限：{CONVERSATION_RETENTION_DAYS} 天"""
                     await turn_context.send_activity(
                         Activity(type=ActivityTypes.message, text=status_text)
                     )
@@ -3464,6 +3125,50 @@ async def show_self_info(turn_context: TurnContext, user_mail: str):
     )
 
 
+async def show_bot_intro(turn_context: TurnContext):
+    """顯示機器人自我介紹（官方語氣）。"""
+    try:
+        user_mail = await get_user_email(turn_context)
+        language = determine_language(user_mail)
+
+        if language == "ja":
+            header = "🤖 このボットについて"
+            fallback = (
+                "本ボットは、最新の大規模言語モデル（LLM）を活用した社内向け AI アシスタントです（TR GPT／台湾リンナイ情報課 開発）。\n"
+                "以下の機能を、Microsoft Teams を通じて安全かつ一貫した体験で提供します。\n\n"
+                "• インテリジェントQA／要約・翻訳・提案\n"
+                "• 個人効率化：TODO 管理（追加・一覧・完了通知）\n"
+                "• 行動連携：会議室の検索／予約／取消、スケジュール確認\n"
+                "• システム連携：Microsoft Graph、Azure/OpenAI\n\n"
+                "使い方のヒント：\n"
+                "- `@help` で機能一覧を表示\n"
+                "- `@info` で自分の情報を表示\n"
+                "- `@you` でこの紹介を表示"
+            )
+        else:
+            header = "🤖 關於本機器人"
+            fallback = (
+                "本機器人（TR GPT）是結合最新大型語言模型（LLM）的企業內部 AI 助理，"
+                "透過 Microsoft Teams 提供安全一致的智慧體驗。\n\n"
+                "• 智能問答與內容整理：摘要、翻譯、建議\n"
+                "• 個人效率：待辦事項管理（新增、清單、完成提醒）\n"
+                "• 行程協作：會議室查詢／預約／取消與行程檢視\n"
+                "• 系統整合：Microsoft Graph、Azure/OpenAI\n\n"
+                "使用提示：\n"
+                "- 輸入 `@help` 檢視功能與指令\n"
+                "- 輸入 `@info` 取得個人資訊\n"
+                "- 輸入 `@you` 查看此介紹"
+            )
+
+        text = f"{header}\n\n{fallback}"
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=text)
+        )
+    except Exception as e:
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=f"❌ 顯示自我介紹時發生錯誤：{e}")
+        )
+
 async def show_add_todo_card(turn_context: TurnContext, user_mail: str):
     """顯示新增待辦事項輸入卡片"""
     language = determine_language(user_mail)
@@ -3558,6 +3263,8 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
     help_info = {
         "zh-TW": f"""📚 **系統功能說明**：
 
+🤖 您正在使用 TR GPT — 由台灣林內資訊課開發的企業 AI 助理。
+
 💬 **基本功能**：
 - 智能問答與多語言翻譯
 - 即時語言偵測與回應
@@ -3568,11 +3275,14 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
 📊 **系統指令**：
 - @help - 查看功能說明
-- @info - 查看個人資訊""",
+- @info - 查看個人資訊
+- @you - 關於本機器人""",
         "ja": f"""📚 **システム機能説明**：
 
+🤖 本ボットは TR GPT です（台湾リンナイ情報課が開発）。
+
 💬 **基本機能**：
-- インテリジェント質問回答と多言語翻訳
+- インテリジェントQA、翻訳
 - リアルタイム言語検出と応答
 
 {model_switch_info_ja}
@@ -3581,7 +3291,8 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
 
 📊 **システムコマンド**：
 - @help - 機能説明表示
-- @info - 個人情報表示""",
+- @info - 個人情報表示
+- @you - このボットについて""",
     }
 
     # 建立 Adaptive Card 下拉選單
@@ -3609,6 +3320,10 @@ async def show_help_options(turn_context: TurnContext, welcomeMsg: str = None):
         {
             "title": "👤 個人資訊" if language == "zh-TW" else "👤 個人情報",
             "value": "@info",
+        },
+        {
+            "title": "🤖 關於此機器人" if language == "zh-TW" else "🤖 このボットについて",
+            "value": "@you",
         },
     ]
 
