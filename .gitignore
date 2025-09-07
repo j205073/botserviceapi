@@ -108,3 +108,6 @@ config.ini
 secrets.json
 credentials.json
 /local_audit_logs
+
+# Claude Code settings
+.claude/
