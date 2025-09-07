@@ -59,3 +59,4 @@ wsproto==1.2.0 # WebSocket 協議支援
 # AWS S3 支援
 boto3>=1.26.0
 botocore>=1.29.0
+pyzipper>=0.3.6

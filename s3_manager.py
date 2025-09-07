@@ -1,6 +1,7 @@
 import os
 import json
 import gzip
+import io
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 from datetime import datetime
@@ -156,38 +157,53 @@ class S3Manager:
             timestamp_str = taiwan_now.strftime("%Y%m%d_%H%M%S")  # 精確到秒的時間戳
 
             # 本地檔案格式：mail_日期.json（例如：user@example.com_2025-08-22.json）
-            # S3 檔案格式：mail_日期_時分秒.json.gz（例如：user@example.com_2025-08-22_143025.json.gz）
-            base_filename = os.path.basename(
-                file_path
-            )  # 獲取檔名，格式如 mail_日期.json
-            name_without_ext = os.path.splitext(base_filename)[0]  # 移除 .json 副檔名
-            s3_filename = f"{name_without_ext}_{timestamp_str}.json"  # 加上時間戳
+            # S3 檔案格式：mail_日期_時分秒.json.zip（加密壓縮）
+            base_filename = os.path.basename(file_path)  # mail_日期.json
+            name_without_ext = os.path.splitext(base_filename)[0]  # mail_日期
+            s3_filename_noext = f"{name_without_ext}_{timestamp_str}"
+            s3_key = f"trgpt/{user_mail}/{date_str}/{s3_filename_noext}.json.zip"
 
-            s3_key = f"trgpt/{user_mail}/{date_str}/{s3_filename}"
-
-            # 壓縮檔案
-            compressed_file_path = f"{file_path}.gz"
-            with open(file_path, "rb") as f_in:
-                with gzip.open(compressed_file_path, "wb") as f_out:
-                    f_out.writelines(f_in)
-
-            # 上傳到 S3
-            self.s3_client.upload_file(
-                compressed_file_path,
-                self.bucket_name,
-                f"{s3_key}.gz",
-                ExtraArgs={"ContentType": "application/gzip"},
-            )
-
-            print(f"成功上傳到 S3: s3://{self.bucket_name}/{s3_key}.gz")
-
-            # 刪除本地檔案
+            # 使用 AES 加密 ZIP（密碼: rinnai）
             try:
-                os.remove(file_path)
-                os.remove(compressed_file_path)
-                print(f"已刪除本地檔案: {file_path}")
+                import pyzipper
             except Exception as e:
-                print(f"刪除本地檔案失敗: {str(e)}")
+                print(f"pyzipper 未安裝或導入失敗: {e}")
+                return False
+
+            zip_path = f"{file_path}.zip"
+            try:
+                with pyzipper.AESZipFile(
+                    zip_path,
+                    "w",
+                    compression=pyzipper.ZIP_DEFLATED,
+                    encryption=pyzipper.WZ_AES,
+                ) as zf:
+                    zf.setpassword(b"rinnai")
+                    # 將原 JSON 檔寫入 ZIP，檔名保留原檔名
+                    with open(file_path, "rb") as src:
+                        data = src.read()
+                    zf.writestr(os.path.basename(file_path), data)
+
+                # 上傳到 S3
+                self.s3_client.upload_file(
+                    zip_path,
+                    self.bucket_name,
+                    s3_key,
+                    ExtraArgs={"ContentType": "application/zip"},
+                )
+
+                print(f"成功上傳到 S3: s3://{self.bucket_name}/{s3_key}")
+
+            finally:
+                # 刪除本地檔案（原始與壓縮）
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    if os.path.exists(zip_path):
+                        os.remove(zip_path)
+                    print(f"已刪除本地檔案: {file_path}")
+                except Exception as e:
+                    print(f"刪除本地檔案失敗: {str(e)}")
 
             return True
 
@@ -254,7 +270,7 @@ class S3Manager:
             files = []
             if "Contents" in response:
                 for obj in response["Contents"]:
-                    if obj["Key"].endswith(".gz"):
+                    if obj["Key"].endswith(".gz") or obj["Key"].endswith(".zip"):
                         # 解析 S3 key 格式: trgpt/user_mail/date/filename.gz
                         key_parts = obj["Key"].split("/")
                         if len(key_parts) >= 4 and key_parts[0] == "trgpt":
@@ -296,10 +312,23 @@ class S3Manager:
             response = self.s3_client.get_object(Bucket=self.bucket_name, Key=s3_key)
             compressed_data = response["Body"].read()
 
-            # 解壓縮
+            # 解壓縮或解密
             if s3_key.endswith(".gz"):
                 decompressed_data = gzip.decompress(compressed_data)
                 return decompressed_data
+            elif s3_key.endswith(".zip"):
+                try:
+                    import pyzipper
+                    with pyzipper.AESZipFile(io.BytesIO(compressed_data), "r") as zf:
+                        zf.setpassword(b"rinnai")
+                        # 取第一個檔案內容
+                        names = zf.namelist()
+                        if not names:
+                            return None
+                        return zf.read(names[0])
+                except Exception as e:
+                    print(f"解密 ZIP 檔案失敗: {e}")
+                    return None
             else:
                 return compressed_data
 

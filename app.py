@@ -327,20 +327,65 @@ def calculate_seconds_until_next_7am():
 
 
 def daily_s3_upload():
-    """每日自動上傳所有用戶的稽核日誌 - 每天早上7點台灣時間執行"""
+    """每日自動上傳本機 ./local_audit_logs 的稽核日誌 - 每天早上7點台灣時間執行
+
+    不再依賴記憶體 audit_logs_by_user，而是直接掃描目錄檔案並上傳。
+    """
     taiwan_now = datetime.now(taiwan_tz)
     print(
         f"開始每日稽核日誌上傳... 執行時間: {taiwan_now.strftime('%Y-%m-%d %H:%M:%S')} 台灣時間"
     )
 
     async def upload_all():
-        for user_mail in list(audit_logs_by_user.keys()):
-            if audit_logs_by_user[user_mail]:
+        import re
+        log_dir = "./local_audit_logs"
+        if not os.path.exists(log_dir):
+            print("沒有可上傳的檔案（local_audit_logs 不存在）")
+            return
+
+        pattern = re.compile(r"^(?P<mail>.+)_(?P<date>\d{4}-\d{2}-\d{2})\.json$")
+
+        grouped = {}
+        all_files = []
+        for filename in os.listdir(log_dir):
+            if not filename.endswith(".json"):
+                continue
+            m = pattern.match(filename)
+            if not m:
+                continue
+            user_mail = m.group("mail")
+            file_path = os.path.join(log_dir, filename)
+            grouped.setdefault(user_mail, []).append(file_path)
+            all_files.append(file_path)
+
+        if not all_files:
+            print("沒有可上傳的本機檔案")
+            return
+
+        total_success = 0
+        total_failed = 0
+        for user_mail, paths in grouped.items():
+            user_success = 0
+            user_failed = 0
+            for p in sorted(paths, key=lambda p: os.path.getmtime(p)):
                 try:
-                    result = await upload_user_audit_logs(user_mail)
-                    print(f"用戶 {user_mail} 上傳結果: {result['message']}")
+                    ok = await s3_manager.upload_file_to_s3(user_mail, p)
+                    if ok:
+                        user_success += 1
+                    else:
+                        user_failed += 1
                 except Exception as e:
-                    print(f"上傳用戶 {user_mail} 的日誌失敗: {str(e)}")
+                    print(f"上傳檔案失敗: {p} - {e}")
+                    user_failed += 1
+            total_success += user_success
+            total_failed += user_failed
+            print(
+                f"用戶 {user_mail} 上傳完成：共 {len(paths)} 檔，成功 {user_success}，失敗 {user_failed}"
+            )
+
+        print(
+            f"每日上傳結束：用戶 {len(grouped)} 位，檔案 {len(all_files)} 個，成功 {total_success}，失敗 {total_failed}"
+        )
 
     # 在新的事件迴圈中運行
     try:
@@ -612,6 +657,85 @@ async def send_todo_list_card(
 
 # === AI意圖分析系統 ===
 
+def _rule_based_intent(user_message: str, system_mode: str) -> dict:
+    """以規則比對快速辨識常見意圖（離線可用）。
+
+    - 覆蓋 zh-TW / en / ja / vi 的常見說法。
+    - OpenAI 模式允許 category:model；Azure 模式禁止。
+    - 命中則回傳完整格式；未命中回傳空 dict。
+    """
+    if not user_message:
+        return {}
+
+    text = (user_message or "").strip()
+    lower = text.lower()
+
+    def result(category: str, action: str, content: str = "", confidence: float = 0.92, reason: str = ""):
+        return {
+            "is_existing_feature": True,
+            "category": category,
+            "action": action,
+            "content": content,
+            "confidence": confidence,
+            "reason": reason or "rule-based match",
+        }
+
+    # --- info.user_info ---
+    zh_user_info = ["我是誰", "我的單位", "我的部門", "我的職稱", "我的title", "我的 email", "我的郵件", "我的信箱", "我的電子郵件"]
+    en_user_info = ["who am i", "my department", "my title", "my job title", "my email", "what is my email"]
+    ja_user_info = ["私は誰", "私の部署", "私の部門", "私の役職", "私のメール", "私のメールアドレス"]
+    vi_user_info = ["tôi là ai", "bộ phận của tôi", "chức danh của tôi", "email của tôi"]
+
+    if any(k in text for k in zh_user_info) or any(k in lower for k in en_user_info) or any(k in text for k in ja_user_info) or any(k in lower for k in vi_user_info):
+        return result("info", "user_info", content=text, reason="user identity/attributes request")
+
+    # --- info.bot_info ---
+    zh_bot_info = ["你是誰", "你會做什麼", "介紹一下你", "你有哪些功能", "你可以做什麼", "你會什麼"]
+    en_bot_info = ["who are you", "what can you do", "introduce yourself"]
+    ja_bot_info = ["あなたは誰", "何ができますか", "自己紹介"]
+    vi_bot_info = ["bạn là ai", "bạn có thể làm gì", "giới thiệu bản thân"]
+    if any(k in text for k in zh_bot_info) or any(k in lower for k in en_bot_info) or any(k in text for k in ja_bot_info) or any(k in lower for k in vi_bot_info):
+        return result("info", "bot_info", content=text, reason="bot introduction request")
+
+    # --- info.help/status ---
+    zh_help = ["怎麼使用", "幫助", "說明", "指令", "使用教學", "help"]
+    if any(k in text for k in zh_help) or "help" in lower:
+        return result("info", "help", content=text, reason="help request")
+    zh_status = ["系統狀態", "服務狀態", "功能介紹", "status"]
+    if any(k in text for k in zh_status) or "status" in lower:
+        return result("info", "status", content=text, reason="status request")
+
+    # --- todo.query ---
+    zh_todo_query = ["待辦", "待辦事項", "任務清單", "清單", "我的待辦", "有哪些待辦", "@ls"]
+    if any(k in text for k in zh_todo_query) or "todo list" in lower:
+        return result("todo", "query", content=text, reason="todo query")
+
+    # --- todo.smart_add / add ---
+    if any(k in text for k in ["提醒我", "加入待辦", "新增待辦"]) or lower.startswith("add todo") or lower.startswith("todo add"):
+        # 偏向 smart_add，因為通常帶有自然語句
+        return result("todo", "smart_add", content=text, reason="todo add request")
+
+    # --- todo.complete ---
+    if any(k in text for k in ["完成", "標記完成", "@ok"]) or "mark done" in lower:
+        return result("todo", "complete", content=text, reason="todo complete request")
+
+    # --- meeting intents ---
+    if any(k in text for k in ["預約會議室", "預定會議室"]) or "book room" in lower or "reserve meeting room" in lower:
+        return result("meeting", "book", content=text, reason="meeting booking request")
+    if any(k in text for k in ["取消會議", "取消預約"]) or "cancel meeting" in lower:
+        return result("meeting", "cancel", content=text, reason="meeting cancel request")
+    if any(k in text for k in ["我有什麼會議", "查詢會議", "查看會議", "行程"]) or "my meetings" in lower or "check meetings" in lower:
+        return result("meeting", "query", content=text, reason="meeting query")
+
+    # --- model selection (only when system_mode=openai) ---
+    if system_mode == "openai":
+        model_keywords = ["切換模型", "換模型", "更換模型", "選擇模型", "切換到", "使用 ", "用 "]
+        en_model_keywords = ["switch model", "change model", "select model", "use gpt", "switch to gpt"]
+        if any(k in text for k in model_keywords) or any(k in lower for k in en_model_keywords) or "gpt-4" in lower or "gpt-5" in lower:
+            return result("model", "select", content=text, reason="model selection/switch request")
+
+    return {}
+
 
 async def analyze_user_intent(user_message: str) -> dict:
     """
@@ -636,6 +760,25 @@ async def analyze_user_intent(user_message: str) -> dict:
             else ""
         )
 
+        # 系統模式與允許類別（提供給模型作為環境上下文）
+        system_mode = "openai" if not USE_AZURE_OPENAI else "azure"
+        available_models = ", ".join(MODEL_INFO.keys())
+        allowed_categories = (
+            "todo, meeting, info, model" if system_mode == "openai" else "todo, meeting, info"
+        ) 
+
+        prefix = f"""[SYSTEM]
+MODE: {system_mode}
+ALLOWED_CATEGORIES: {allowed_categories}
+AVAILABLE_MODELS: {available_models}
+LANGUAGES: zh-TW, en, ja, vi
+Rules:
+- If MODE=azure, do NOT return category:model.
+- Map 'Who am I / 我的單位/部門/職稱/email' to info.user_info.
+- Map 'Who are you / 你是誰/你會做什麼/介紹一下你' to info.bot_info.
+- If cannot map, set is_existing_feature=false, category="", confidence<=0.5.
+- Return JSON only without any extra text or fences."""
+
         base_prompt = f"""你是智能助手的意圖分析器，判斷用戶需求是否為現有功能。
 
 === 現有功能清單 ===
@@ -644,6 +787,7 @@ async def analyze_user_intent(user_message: str) -> dict:
   - query: 查詢/查看我的待辦事項、任務清單
   - smart_add: 智能新增待辦事項（自動檢查重複）
   - add: 直接新增待辦事項
+  - complete: 標記完成待辦事項（語句表達完成某項）
 
 🏢 會議室管理:
   - category: "meeting" (必須使用此英文代碼)
@@ -686,7 +830,13 @@ async def analyze_user_intent(user_message: str) -> dict:
 {model_section}
 """
 
-        system_prompt = base_prompt
+        system_prompt = prefix + "\n\n" + base_prompt
+
+        # 先嘗試規則式快速命中（離線、安全、不需 API）
+        rb_hit = _rule_based_intent(user_message, system_mode)
+        if rb_hit:
+            print(f"✅ [AI意圖分析] 規則命中：{rb_hit}")
+            return normalize_intent_output(rb_hit)
 
         # 只在 OpenAI 模式下使用 AI 意圖分析，Azure 使用預設模型
         if not USE_AZURE_OPENAI:
@@ -715,7 +865,7 @@ async def analyze_user_intent(user_message: str) -> dict:
                     OPENAI_INTENT_MODEL,
                 )
 
-                response =   intent_client.chat.completions.create(
+                response = intent_client.chat.completions.create(
                     model=OPENAI_INTENT_MODEL,
                     messages=intent_messages,
                     max_tokens=200,
@@ -740,17 +890,38 @@ async def analyze_user_intent(user_message: str) -> dict:
                 intent_result = response.choices[0].message.content.strip()
                 print(f"🎯 [AI意圖分析] 分析結果: {intent_result}")
 
-                import json
-
-                parsed_result = json.loads(intent_result)
+                import json, re
+                txt = intent_result.strip()
+                if txt.startswith("```"):
+                    txt = re.sub(r"^```[a-zA-Z0-9_]*\n|\n```$", "", txt)
+                try:
+                    parsed_result = json.loads(txt)
+                except Exception:
+                    m = re.search(r"\{[\s\S]*\}", txt)
+                    if m:
+                        parsed_result = json.loads(m.group(0))
+                    else:
+                        raise
                 parsed_result = normalize_intent_output(parsed_result)
                 print(
                     f"✅ [AI意圖分析] 解析成功 - 類別: {parsed_result.get('category')}, 動作: {parsed_result.get('action')}, 信心度: {parsed_result.get('confidence')}"
                 )
+                # 若 AI 結果無法對應，回退到規則判斷一次
+                if not parsed_result.get("is_existing_feature"):
+                    rb_fallback = _rule_based_intent(user_message, system_mode)
+                    if rb_fallback:
+                        print("🔁 [AI意圖分析] AI未命中，使用規則回退結果")
+                        return normalize_intent_output(rb_fallback)
+
                 return parsed_result
 
             except Exception as api_error:
                 print(f"OpenAI 意圖分析失敗: {api_error}")
+                # API 失敗時，嘗試規則回退
+                rb_fallback = _rule_based_intent(user_message, system_mode)
+                if rb_fallback:
+                    print("🔁 [AI意圖分析] OpenAI 失敗，使用規則回退結果")
+                    return normalize_intent_output(rb_fallback)
                 return {
                     "is_existing_feature": False,
                     "category": "",
@@ -776,7 +947,7 @@ async def analyze_user_intent(user_message: str) -> dict:
                     az_model,
                 )
 
-                response =   openai_client.chat.completions.create(
+                response = openai_client.chat.completions.create(
                     model=az_model,
                     messages=az_messages,
                     max_tokens=200,
@@ -787,19 +958,40 @@ async def analyze_user_intent(user_message: str) -> dict:
                 intent_result = response.choices[0].message.content.strip()
                 print(f"🎯 [AI意圖分析-Azure] 分析結果: {intent_result}")
 
-                import json
-
-                parsed_result = json.loads(intent_result)
+                import json, re
+                txt = intent_result.strip()
+                if txt.startswith("```"):
+                    txt = re.sub(r"^```[a-zA-Z0-9_]*\n|\n```$", "", txt)
+                try:
+                    parsed_result = json.loads(txt)
+                except Exception:
+                    m = re.search(r"\{[\s\S]*\}", txt)
+                    if m:
+                        parsed_result = json.loads(m.group(0))
+                    else:
+                        raise
                 parsed_result = normalize_intent_output(parsed_result)
                 print(
                     f"✅ [AI意圖分析-Azure] 解析成功 - 類別: {parsed_result.get('category')}, 動作: {parsed_result.get('action')}, 信心度: {parsed_result.get('confidence')}"
                 )
                 print("💰 [AI意圖分析-Azure] 注意：使用Azure OpenAI會產生費用")
 
+                # 若 AI 結果無法對應，回退到規則判斷一次
+                if not parsed_result.get("is_existing_feature"):
+                    rb_fallback = _rule_based_intent(user_message, system_mode)
+                    if rb_fallback:
+                        print("🔁 [AI意圖分析-Azure] AI未命中，使用規則回退結果")
+                        return normalize_intent_output(rb_fallback)
+
                 return parsed_result
 
             except Exception as api_error:
                 print(f"❌ [AI意圖分析-Azure] 失敗: {api_error}")
+                # API 失敗時，嘗試規則回退
+                rb_fallback = _rule_based_intent(user_message, system_mode)
+                if rb_fallback:
+                    print("🔁 [AI意圖分析-Azure] 失敗，使用規則回退結果")
+                    return normalize_intent_output(rb_fallback)
                 return {
                     "is_existing_feature": False,
                     "category": "",
@@ -809,6 +1001,11 @@ async def analyze_user_intent(user_message: str) -> dict:
 
     except Exception as e:
         print(f"意圖分析系統錯誤: {e}")
+        # 系統級例外，仍嘗試規則回退
+        rb_fallback = _rule_based_intent(user_message, "azure" if USE_AZURE_OPENAI else "openai")
+        if rb_fallback:
+            print("🔁 [AI意圖分析] 例外，使用規則回退結果")
+            return normalize_intent_output(rb_fallback)
         return {
             "is_existing_feature": False,
             "category": "",
@@ -1612,17 +1809,103 @@ async def list_routes():
 
 @app.route("/api/audit/upload-all", methods=["GET"])
 async def upload_all_users():
-    """上傳所有用戶的稽核日誌"""
+    """掃描本機 ./local_audit_logs 檔案，依使用者分組後上傳至 S3。
+
+    回傳：用戶數量（括號含檔案數），以及各用戶上傳結果摘要。
+    """
     try:
+        import re
+
+        log_dir = "./local_audit_logs"
+        if not os.path.exists(log_dir):
+            return await make_response(
+                jsonify(
+                    {
+                        "success": True,
+                        "message": "沒有可上傳的檔案（資料夾不存在）",
+                        "users_processed": 0,
+                        "total_files": 0,
+                        "details": [],
+                    }
+                ),
+                200,
+            )
+
+        # 依使用者信箱分組檔案：檔名格式 {mail}_{YYYY-MM-DD}.json
+        pattern = re.compile(r"^(?P<mail>.+)_(?P<date>\d{4}-\d{2}-\d{2})\.json$")
+        grouped = {}
+        all_files = []
+
+        for filename in os.listdir(log_dir):
+            if not filename.endswith(".json"):
+                continue
+            m = pattern.match(filename)
+            if not m:
+                continue
+            user_mail = m.group("mail")
+            file_path = os.path.join(log_dir, filename)
+            grouped.setdefault(user_mail, []).append(file_path)
+            all_files.append(file_path)
+
+        if not all_files:
+            return await make_response(
+                jsonify(
+                    {
+                        "success": True,
+                        "message": "沒有可上傳的本地檔案",
+                        "users_processed": 0,
+                        "total_files": 0,
+                        "details": [],
+                    }
+                ),
+                200,
+            )
+
         results = []
-        for user_mail in list(audit_logs_by_user.keys()):
-            if audit_logs_by_user[user_mail]:
-                result = await upload_user_audit_logs(user_mail)
-                results.append({"user": user_mail, "result": result})
+        total_success = 0
+        total_failed = 0
+
+        # 對每位用戶的檔案逐一上傳
+        for user_mail, paths in grouped.items():
+            user_success = 0
+            user_failed = 0
+            # 依修改時間排序（舊→新），亦可直接原順序
+            paths_sorted = sorted(paths, key=lambda p: os.path.getmtime(p))
+            for p in paths_sorted:
+                try:
+                    ok = await s3_manager.upload_file_to_s3(user_mail, p)
+                    if ok:
+                        user_success += 1
+                    else:
+                        user_failed += 1
+                except Exception as e:
+                    print(f"上傳檔案失敗: {p} - {e}")
+                    user_failed += 1
+
+            total_success += user_success
+            total_failed += user_failed
+            results.append(
+                {
+                    "user": user_mail,
+                    "files": len(paths),
+                    "success": user_success,
+                    "failed": user_failed,
+                }
+            )
+
+        users_processed = len(grouped)
+        total_files = len(all_files)
+        message = f"已處理 {users_processed} 位用戶（{total_files} 個檔案）"
+        if total_failed:
+            message += f"，成功 {total_success}，失敗 {total_failed}"
 
         response_data = {
             "success": True,
-            "message": f"已處理 {len(results)} 個用戶",
+            "message": message,
+            "users_processed": users_processed,
+            "total_files": total_files,
+            "success_files": total_success,
+            "failed_files": total_failed,
             "details": results,
         }
         return await make_response(jsonify(response_data), 200)
