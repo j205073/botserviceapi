@@ -656,361 +656,261 @@ async def send_todo_list_card(
 
 
 # === AI意圖分析系統 ===
-
-def _rule_based_intent(user_message: str, system_mode: str) -> dict:
-    """以規則比對快速辨識常見意圖（離線可用）。
-
-    - 覆蓋 zh-TW / en / ja / vi 的常見說法。
-    - OpenAI 模式允許 category:model；Azure 模式禁止。
-    - 命中則回傳完整格式；未命中回傳空 dict。
-    """
-    if not user_message:
-        return {}
-
-    text = (user_message or "").strip()
-    lower = text.lower()
-
-    def result(category: str, action: str, content: str = "", confidence: float = 0.92, reason: str = ""):
-        return {
-            "is_existing_feature": True,
-            "category": category,
-            "action": action,
-            "content": content,
-            "confidence": confidence,
-            "reason": reason or "rule-based match",
-        }
-
-    # --- info.user_info ---
-    zh_user_info = ["我是誰", "我的單位", "我的部門", "我的職稱", "我的title", "我的 email", "我的郵件", "我的信箱", "我的電子郵件"]
-    en_user_info = ["who am i", "my department", "my title", "my job title", "my email", "what is my email"]
-    ja_user_info = ["私は誰", "私の部署", "私の部門", "私の役職", "私のメール", "私のメールアドレス"]
-    vi_user_info = ["tôi là ai", "bộ phận của tôi", "chức danh của tôi", "email của tôi"]
-
-    if any(k in text for k in zh_user_info) or any(k in lower for k in en_user_info) or any(k in text for k in ja_user_info) or any(k in lower for k in vi_user_info):
-        return result("info", "user_info", content=text, reason="user identity/attributes request")
-
-    # --- info.bot_info ---
-    zh_bot_info = ["你是誰", "你會做什麼", "介紹一下你", "你有哪些功能", "你可以做什麼", "你會什麼"]
-    en_bot_info = ["who are you", "what can you do", "introduce yourself"]
-    ja_bot_info = ["あなたは誰", "何ができますか", "自己紹介"]
-    vi_bot_info = ["bạn là ai", "bạn có thể làm gì", "giới thiệu bản thân"]
-    if any(k in text for k in zh_bot_info) or any(k in lower for k in en_bot_info) or any(k in text for k in ja_bot_info) or any(k in lower for k in vi_bot_info):
-        return result("info", "bot_info", content=text, reason="bot introduction request")
-
-    # --- info.help/status ---
-    zh_help = ["怎麼使用", "幫助", "說明", "指令", "使用教學", "help"]
-    if any(k in text for k in zh_help) or "help" in lower:
-        return result("info", "help", content=text, reason="help request")
-    zh_status = ["系統狀態", "服務狀態", "功能介紹", "status"]
-    if any(k in text for k in zh_status) or "status" in lower:
-        return result("info", "status", content=text, reason="status request")
-
-    # --- todo.query ---
-    zh_todo_query = ["待辦", "待辦事項", "任務清單", "清單", "我的待辦", "有哪些待辦", "@ls"]
-    if any(k in text for k in zh_todo_query) or "todo list" in lower:
-        return result("todo", "query", content=text, reason="todo query")
-
-    # --- todo.smart_add / add ---
-    if any(k in text for k in ["提醒我", "加入待辦", "新增待辦"]) or lower.startswith("add todo") or lower.startswith("todo add"):
-        # 偏向 smart_add，因為通常帶有自然語句
-        return result("todo", "smart_add", content=text, reason="todo add request")
-
-    # --- todo.complete ---
-    if any(k in text for k in ["完成", "標記完成", "@ok"]) or "mark done" in lower:
-        return result("todo", "complete", content=text, reason="todo complete request")
-
-    # --- meeting intents ---
-    if any(k in text for k in ["預約會議室", "預定會議室"]) or "book room" in lower or "reserve meeting room" in lower:
-        return result("meeting", "book", content=text, reason="meeting booking request")
-    if any(k in text for k in ["取消會議", "取消預約"]) or "cancel meeting" in lower:
-        return result("meeting", "cancel", content=text, reason="meeting cancel request")
-    if any(k in text for k in ["我有什麼會議", "查詢會議", "查看會議", "行程"]) or "my meetings" in lower or "check meetings" in lower:
-        return result("meeting", "query", content=text, reason="meeting query")
-
-    # --- model selection (only when system_mode=openai) ---
-    if system_mode == "openai":
-        model_keywords = ["切換模型", "換模型", "更換模型", "選擇模型", "切換到", "使用 ", "用 "]
-        en_model_keywords = ["switch model", "change model", "select model", "use gpt", "switch to gpt"]
-        if any(k in text for k in model_keywords) or any(k in lower for k in en_model_keywords) or "gpt-4" in lower or "gpt-5" in lower:
-            return result("model", "select", content=text, reason="model selection/switch request")
-
-    return {}
-
-
 async def analyze_user_intent(user_message: str) -> dict:
     """
     使用 AI 分析用戶意圖
     返回格式：{
-        "category": "todo|meeting|info|other",
+        "is_existing_feature": true/false,
+        "category": "todo|meeting|info|model",
         "action": "query|add|complete|book|cancel|...",
         "content": "相關內容",
         "confidence": 0.0-1.0
     }
     """
-    try:
-        # 構建統一的 system_prompt；用插入字串的方式在 OpenAI 模式加入「模型選擇」意圖
-        model_section = (
-            """
-🧠 模型選擇:
-  - category: "model" (必須使用此英文代碼)
-    === 判斷原則 ===
-    - 切換/更換/更改/選擇模型（例：我要切換模型、幫我換模型、切換到 gpt-4o、我要用 gpt-5-mini 等等表達要切換模型的語句）
-"""
-            if not USE_AZURE_OPENAI
-            else ""
-        )
-
-        # 系統模式與允許類別（提供給模型作為環境上下文）
-        system_mode = "openai" if not USE_AZURE_OPENAI else "azure"
-        available_models = ", ".join(MODEL_INFO.keys())
-        allowed_categories = (
-            "todo, meeting, info, model" if system_mode == "openai" else "todo, meeting, info"
-        ) 
-
-        prefix = f"""[SYSTEM]
-MODE: {system_mode}
-ALLOWED_CATEGORIES: {allowed_categories}
-AVAILABLE_MODELS: {available_models}
-LANGUAGES: zh-TW, en, ja, vi
-Rules:
-- If MODE=azure, do NOT return category:model.
-- Map 'Who am I / 我的單位/部門/職稱/email' to info.user_info.
-- Map 'Who are you / 你是誰/你會做什麼/介紹一下你' to info.bot_info.
-- If cannot map, set is_existing_feature=false, category="", confidence<=0.5.
-- Return JSON only without any extra text or fences."""
-
-        base_prompt = f"""你是智能助手的意圖分析器，判斷用戶需求是否為現有功能。
-
-=== 現有功能清單 ===
-📝 待辦事項管理:
-  - category: "todo" (必須使用此英文代碼)
-  - query: 查詢/查看我的待辦事項、任務清單
-  - smart_add: 智能新增待辦事項（自動檢查重複）
-  - add: 直接新增待辦事項
-  - complete: 標記完成待辦事項（語句表達完成某項）
-
-🏢 會議室管理:
-  - category: "meeting" (必須使用此英文代碼)
-  - book: 預約/預定會議室
-  - query: 查詢/查看我的會議預約、行程
-  - cancel: 取消/刪除會議預約
-
-ℹ️ 資訊查詢:
-  - category: "info" (必須使用此英文代碼)
-  - user_info: 個人資訊查詢（例如：我是誰，我的單位/部門、我的職稱、我的 email）
-  - bot_info: 機器人自我介紹（例如：你是誰？你有哪些功能？）
-  - help: 系統幫助、使用說明
-  - status: 系統狀態、功能介紹
-
-=== 回傳格式 ===
-{{
-  "is_existing_feature": true/false,
-  "category": "英文代碼 (todo/meeting/info[,+model])",
-  "action": "動作名稱",
-  "content": "提取的具體內容",
-  "confidence": 0.0-1.0,
-  "reason": "判斷原因"
-}}
-
-=== 判斷原則 ===
-✅ 現有功能範例：
-- "我的待辦事項有哪些" → todo.query
-- "提醒我明天開會" → todo.smart_add
-- "預約會議室" → meeting.book
-- "我有什麼會議" → meeting.query
-- "取消預約" → meeting.cancel
-- "怎麼使用" → info.help
-- "我是誰？/我的單位？/我的部門？/我的 email" → info.user_info
-- "你是誰？/你會做什麼？/介紹一下你" → info.bot_info
-- 我是誰和你是誰不要搞混，前者是 info.user_info，後者是 info.bot_info
-
-❌ 非現有功能範例：
-- "天氣如何"、"寫一份報告"、"計算數學題" → is_existing_feature: false
-
-{model_section}
-"""
-
-        system_prompt = prefix + "\n\n" + base_prompt
-
-        # 先嘗試規則式快速命中（離線、安全、不需 API）
-        rb_hit = _rule_based_intent(user_message, system_mode)
-        if rb_hit:
-            print(f"✅ [AI意圖分析] 規則命中：{rb_hit}")
-            return normalize_intent_output(rb_hit)
-
-        # 只在 OpenAI 模式下使用 AI 意圖分析，Azure 使用預設模型
-        if not USE_AZURE_OPENAI:
-            intent_api_key = os.getenv("OPENAI_API_KEY")
-            if not intent_api_key:
-                print("警告：未設置 OPENAI_API_KEY 環境變數，意圖分析將失敗")
-                return {
-                    "is_existing_feature": False,
-                    "category": "",
-                    "content": "",
-                    "confidence": 0.0,
-                }
-
-            intent_client = OpenAI(api_key=intent_api_key)
-
-            try:
-                print("🤖 [AI意圖分析] 開始調用 OpenAI API...")
-                print(f"📝 [AI意圖分析] 用戶輸入: {user_message}")
-                print(f"🔧 [AI意圖分析] 使用意圖模型: {OPENAI_INTENT_MODEL}")
-
-                intent_messages = normalize_messages_for_model(
-                    [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message},
-                    ],
-                    OPENAI_INTENT_MODEL,
-                )
-
-                response = intent_client.chat.completions.create(
-                    model=OPENAI_INTENT_MODEL,
-                    messages=intent_messages,
-                    max_tokens=200,
-                    temperature=0.1,
-                )
-
-                if hasattr(response, "usage") and response.usage:
-                    prompt_tokens = response.usage.prompt_tokens
-                    completion_tokens = response.usage.completion_tokens
-                    total_tokens = response.usage.total_tokens
-
-                    print(f"💰 [AI意圖分析] Token 使用量:")
-                    print(f"   📥 輸入 tokens: {prompt_tokens}")
-                    print(f"   📤 輸出 tokens: {completion_tokens}")
-                    print(f"   📊 總計 tokens: {total_tokens}")
-                    print(
-                        f"   💵 估算費用: ${total_tokens * 0.000001:.6f} (假設每1K tokens $0.001)"
-                    )
-                else:
-                    print("⚠️  [AI意圖分析] 無法取得 token 使用量資訊")
-
-                intent_result = response.choices[0].message.content.strip()
-                print(f"🎯 [AI意圖分析] 分析結果: {intent_result}")
-
-                import json, re
-                txt = intent_result.strip()
-                if txt.startswith("```"):
-                    txt = re.sub(r"^```[a-zA-Z0-9_]*\n|\n```$", "", txt)
-                try:
-                    parsed_result = json.loads(txt)
-                except Exception:
-                    m = re.search(r"\{[\s\S]*\}", txt)
-                    if m:
-                        parsed_result = json.loads(m.group(0))
-                    else:
-                        raise
-                parsed_result = normalize_intent_output(parsed_result)
-                print(
-                    f"✅ [AI意圖分析] 解析成功 - 類別: {parsed_result.get('category')}, 動作: {parsed_result.get('action')}, 信心度: {parsed_result.get('confidence')}"
-                )
-                # 若 AI 結果無法對應，回退到規則判斷一次
-                if not parsed_result.get("is_existing_feature"):
-                    rb_fallback = _rule_based_intent(user_message, system_mode)
-                    if rb_fallback:
-                        print("🔁 [AI意圖分析] AI未命中，使用規則回退結果")
-                        return normalize_intent_output(rb_fallback)
-
-                return parsed_result
-
-            except Exception as api_error:
-                print(f"OpenAI 意圖分析失敗: {api_error}")
-                # API 失敗時，嘗試規則回退
-                rb_fallback = _rule_based_intent(user_message, system_mode)
-                if rb_fallback:
-                    print("🔁 [AI意圖分析] OpenAI 失敗，使用規則回退結果")
-                    return normalize_intent_output(rb_fallback)
-                return {
-                    "is_existing_feature": False,
-                    "category": "",
-                    "content": "",
-                    "confidence": 0.0,
-                }
-
-        else:
-            # Azure 模式：使用預設模型進行意圖分析
-            try:
-                print("🤖 [AI意圖分析-Azure] 開始調用 Azure OpenAI API...")
-                print(f"📝 [AI意圖分析-Azure] 用戶輸入: {user_message}")
-                print(
-                    f"🔧 [AI意圖分析-Azure] 使用固定意圖模型: gpt-4o-mini (支援 system role)"
-                )
-
-                az_model = "gpt-4o-mini"
-                az_messages = normalize_messages_for_model(
-                    [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message},
-                    ],
-                    az_model,
-                )
-
-                response = openai_client.chat.completions.create(
-                    model=az_model,
-                    messages=az_messages,
-                    max_tokens=200,
-                    temperature=0.1,
-                    timeout=15,
-                )
-
-                intent_result = response.choices[0].message.content.strip()
-                print(f"🎯 [AI意圖分析-Azure] 分析結果: {intent_result}")
-
-                import json, re
-                txt = intent_result.strip()
-                if txt.startswith("```"):
-                    txt = re.sub(r"^```[a-zA-Z0-9_]*\n|\n```$", "", txt)
-                try:
-                    parsed_result = json.loads(txt)
-                except Exception:
-                    m = re.search(r"\{[\s\S]*\}", txt)
-                    if m:
-                        parsed_result = json.loads(m.group(0))
-                    else:
-                        raise
-                parsed_result = normalize_intent_output(parsed_result)
-                print(
-                    f"✅ [AI意圖分析-Azure] 解析成功 - 類別: {parsed_result.get('category')}, 動作: {parsed_result.get('action')}, 信心度: {parsed_result.get('confidence')}"
-                )
-                print("💰 [AI意圖分析-Azure] 注意：使用Azure OpenAI會產生費用")
-
-                # 若 AI 結果無法對應，回退到規則判斷一次
-                if not parsed_result.get("is_existing_feature"):
-                    rb_fallback = _rule_based_intent(user_message, system_mode)
-                    if rb_fallback:
-                        print("🔁 [AI意圖分析-Azure] AI未命中，使用規則回退結果")
-                        return normalize_intent_output(rb_fallback)
-
-                return parsed_result
-
-            except Exception as api_error:
-                print(f"❌ [AI意圖分析-Azure] 失敗: {api_error}")
-                # API 失敗時，嘗試規則回退
-                rb_fallback = _rule_based_intent(user_message, system_mode)
-                if rb_fallback:
-                    print("🔁 [AI意圖分析-Azure] 失敗，使用規則回退結果")
-                    return normalize_intent_output(rb_fallback)
-                return {
-                    "is_existing_feature": False,
-                    "category": "",
-                    "content": "",
-                    "confidence": 0.0,
-                }
-
-    except Exception as e:
-        print(f"意圖分析系統錯誤: {e}")
-        # 系統級例外，仍嘗試規則回退
-        rb_fallback = _rule_based_intent(user_message, "azure" if USE_AZURE_OPENAI else "openai")
-        if rb_fallback:
-            print("🔁 [AI意圖分析] 例外，使用規則回退結果")
-            return normalize_intent_output(rb_fallback)
+    if not user_message or not user_message.strip():
         return {
             "is_existing_feature": False,
             "category": "",
+            "action": "",
             "content": "",
-            "confidence": 0.0,
+            "confidence": 0.0
+        }
+    
+    try:
+        # 構建優化的意圖分析 prompt
+        system_mode = "azure" if USE_AZURE_OPENAI else "openai"
+        
+        # 根據模式決定是否支援模型切換
+        model_features = ""
+        if system_mode == "openai":
+            model_features = """
+🧠 模型選擇 (Model Selection):
+  - category: "model"
+  - action: "select" (切換/選擇模型)
+  - 觸發詞: 切換模型、換模型、使用 gpt-4o、選擇模型等
+"""
+
+        system_prompt = f"""你是專業的意圖分析助手。分析用戶輸入並判斷是否符合以下現有功能，必須嚴格按照 JSON 格式回傳結果。
+
+=== 現有功能分類 ===
+
+📝 待辦事項管理 (TODO Management):
+  - category: "todo"
+  - actions:
+    - query: 查詢/查看待辦事項、任務清單
+    - add: 新增/添加待辦事項
+    - smart_add: 智能新增待辦（含重複檢查）
+    - complete: 完成/標記完成待辦事項
+
+🏢 會議管理 (Meeting Management):
+  - category: "meeting" 
+  - actions:
+    - book: 預約/預定會議室
+    - query: 查詢會議、查看行程
+    - cancel: 取消會議/預約
+
+ℹ️ 資訊查詢 (Information Query):
+  - category: "info"
+  - actions:
+    - user_info: 用戶個人資訊查詢（我是誰、我的部門、我的職稱、我的email等）
+    - bot_info: 機器人介紹（你是誰、你的功能、自我介紹等）
+    - help: 使用幫助、系統說明
+    - status: 系統狀態查詢
+
+{model_features}
+
+=== 重要識別規則 ===
+• "我是誰" → info.user_info (用戶查詢自己的身份)
+• "你是誰" → info.bot_info (詢問機器人身份)  
+• "我的部門/單位/職稱/email" → info.user_info
+• "你會什麼/你的功能" → info.bot_info
+
+=== 輸出格式 (必須是有效JSON) ===
+{{
+  "is_existing_feature": true/false,
+  "category": "功能分類",
+  "action": "具體動作", 
+  "content": "相關內容",
+  "confidence": 0.0到1.0之間的數值,
+  "reason": "判斷依據"
+}}
+
+=== 判斷標準 ===
+- 如果用戶輸入明確對應上述功能 → is_existing_feature: true, confidence: 0.8-0.95
+- 如果可能相關但不確定 → is_existing_feature: true, confidence: 0.6-0.79  
+- 如果完全無關（如天氣、數學題、寫報告等） → is_existing_feature: false, confidence: 0.0-0.5
+
+現在請分析用戶輸入："{user_message}"
+
+請直接返回JSON，不要添加任何其他文字或格式符號。"""
+
+        # 選擇使用的模型和客戶端
+        if USE_AZURE_OPENAI:
+            model_name = "gpt-4o-mini"  # Azure 模式使用固定模型
+            client = openai_client
+            print(f"🤖 [意圖分析-Azure] 使用模型: {model_name}")
+        else:
+            # OpenAI 模式：優先使用穩定的模型，避免 gpt-5 系列的相容性問題
+            intent_api_key = os.getenv("OPENAI_API_KEY")
+            if not intent_api_key:
+                print("⚠️ 未設置 OPENAI_API_KEY，無法進行意圖分析")
+                return {
+                    "is_existing_feature": False,
+                    "category": "",
+                    "action": "",
+                    "content": "",
+                    "confidence": 0.0
+                }
+            
+            # 優先使用相容性好的模型
+            original_model = OPENAI_INTENT_MODEL
+            if original_model.startswith("gpt-5") or original_model.startswith("o1"):
+                model_name = "gpt-4o-mini"  # 回退到穩定模型
+                print(f"⚠️ [意圖分析-OpenAI] {original_model} 可能不穩定，改用 {model_name}")
+            else:
+                model_name = original_model
+            
+            client = OpenAI(api_key=intent_api_key)
+            print(f"🤖 [意圖分析-OpenAI] 使用模型: {model_name}")
+
+        print(f"📝 [意圖分析] 用戶輸入: {user_message}")
+
+        # 構建訊息 - 針對不同模型的特殊處理
+        if model_name.startswith("o1"):
+            # o1 模型不支援 system role，需要合併到 user message
+            combined_prompt = f"{system_prompt}\n\n用戶輸入: {user_message}"
+            messages = [{"role": "user", "content": combined_prompt}]
+        else:
+            # 標準模型支援 system role
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ]
+
+        # 針對某些模型調整訊息格式
+        if hasattr(globals(), 'normalize_messages_for_model'):
+            messages = normalize_messages_for_model(messages, model_name)
+
+        # 構建請求參數
+        request_params = {
+            "model": model_name,
+            "messages": messages,
+            "timeout": 20
+        }
+        
+        # 根據模型類型添加適當的參數
+        if model_name.startswith("gpt-5") or model_name.startswith("o1"):
+            # gpt-5 和 o1 系列模型使用 max_completion_tokens 且不支援 temperature
+            request_params["max_completion_tokens"] = 300
+            print(f"🔧 [意圖分析] 使用 max_completion_tokens=300（{model_name}）")
+        else:
+            # 其他模型使用 max_tokens 和 temperature
+            request_params["max_tokens"] = 300
+            request_params["temperature"] = 0.1
+            print(f"🔧 [意圖分析] 使用 max_tokens=300, temperature=0.1（{model_name}）")
+
+        print(f"📤 [意圖分析] 發送請求...")
+        
+        # 調用 AI 分析
+        try:
+            response = client.chat.completions.create(**request_params)
+            print(f"✅ [意圖分析] API 調用成功")
+        except Exception as api_error:
+            print(f"❌ [意圖分析] API 調用失敗: {api_error}")
+            # 如果是參數問題，嘗試使用最基本的參數
+            basic_params = {
+                "model": model_name,
+                "messages": messages
+            }
+            print(f"🔄 [意圖分析] 嘗試基本參數重試...")
+            response = client.chat.completions.create(**basic_params)
+
+        # 檢查回應是否存在
+        if not response or not response.choices:
+            print(f"❌ [意圖分析] API 回應為空或無效")
+            return {
+                "is_existing_feature": False,
+                "category": "",
+                "action": "",
+                "content": "",
+                "confidence": 0.0
+            }
+
+        # 解析回應
+        message_content = response.choices[0].message.content
+        if not message_content:
+            print(f"❌ [意圖分析] 消息內容為空")
+            return {
+                "is_existing_feature": False,
+                "category": "",
+                "action": "",
+                "content": "",
+                "confidence": 0.0
+            }
+
+        result_text = message_content.strip()
+        print(f"🎯 [意圖分析] AI回應: {result_text}")
+        print(f"📏 [意圖分析] 回應長度: {len(result_text)} 字符")
+
+        if not result_text:
+            print(f"❌ [意圖分析] 回應內容為空字符串")
+            return {
+                "is_existing_feature": False,
+                "category": "",
+                "action": "",
+                "content": "",
+                "confidence": 0.0
+            }
+
+        # 清理並解析 JSON
+        import json, re
+        
+        # 移除可能的 markdown 代碼塊標記
+        cleaned_text = result_text
+        if cleaned_text.startswith("```"):
+            cleaned_text = re.sub(r'^```(?:json)?\n?', '', cleaned_text)
+            cleaned_text = re.sub(r'\n?```$', '', cleaned_text)
+            print(f"🧹 [意圖分析] 清理後內容: {cleaned_text}")
+
+        try:
+            parsed_result = json.loads(cleaned_text)
+            print(f"✅ [意圖分析] JSON 解析成功")
+        except json.JSONDecodeError as je:
+            print(f"⚠️ [意圖分析] 初次 JSON 解析失敗: {je}")
+            # 嘗試提取 JSON 對象
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned_text)
+            if json_match:
+                try:
+                    extracted_json = json_match.group()
+                    print(f"🔍 [意圖分析] 提取到的 JSON: {extracted_json}")
+                    parsed_result = json.loads(extracted_json)
+                    print(f"✅ [意圖分析] 提取的 JSON 解析成功")
+                except json.JSONDecodeError as je2:
+                    print(f"❌ [意圖分析] 提取的 JSON 解析失敗: {je2}")
+                    raise ValueError(f"無法解析JSON: {cleaned_text}")
+            else:
+                print(f"❌ [意圖分析] 找不到 JSON 格式內容")
+                raise ValueError(f"找不到有效的JSON格式: {cleaned_text}")
+
+        # 正規化結果
+        result = normalize_intent_output(parsed_result)
+        
+        print(f"✅ [意圖分析] 解析成功:")
+        print(f"   類別: {result.get('category', 'N/A')}")
+        print(f"   動作: {result.get('action', 'N/A')}")
+        print(f"   現有功能: {result.get('is_existing_feature', False)}")
+        print(f"   信心度: {result.get('confidence', 0.0)}")
+
+        return result
+
+    except Exception as e:
+        print(f"❌ [意圖分析] 失敗: {str(e)}")
+        return {
+            "is_existing_feature": False,
+            "category": "",
+            "action": "",
+            "content": "",
+            "confidence": 0.0
         }
 
 
@@ -1127,9 +1027,9 @@ async def handle_intent_action(
                 # 查詢會議室預約
                 await show_my_bookings(turn_context, user_mail)
                 hint_msg = (
-                    "💡 小提示：也可以使用 `@check-booking` 快速查看預約"
+                    "💡 小提示：也可以使用 `@query` 快速查看預約"
                     if language == "zh-TW"
-                    else "💡 ヒント：`@check-booking` でも素早く予約を確認できます"
+                    else "💡 ヒント：`@query` でも素早く予約を確認できます"
                 )
                 await turn_context.send_activity(
                     Activity(type=ActivityTypes.message, text=hint_msg)
@@ -2740,7 +2640,7 @@ async def welcome_user(turn_context: TurnContext):
 
 
 # === 修改 message_handler 函數 ===
-async def message_handler(turn_context: TurnContext):
+async def message_handler(turn_context: TurnContext): 
     try:
         user_id = turn_context.activity.from_property.id
         user_name = turn_context.activity.from_property.name
@@ -3029,7 +2929,7 @@ async def message_handler(turn_context: TurnContext):
                     )
                     return
 
-                selected_model = turn_context.activity.value.get("selectedModel")
+                selected_model = turn_context.activity.value.get("selectedModel") 
                 if selected_model and selected_model in MODEL_INFO:
                     user_model_preferences[user_mail] = selected_model
                     model_info = MODEL_INFO[selected_model]
@@ -3082,6 +2982,14 @@ async def message_handler(turn_context: TurnContext):
 
             if user_message == "you":
                 await show_bot_intro(turn_context)
+                return
+
+            if user_message == "check-booking":
+                await show_my_bookings(turn_context, user_mail)
+                return
+                
+            if user_message == "cancel-booking":
+                await show_cancel_booking_options(turn_context, user_mail)
                 return
 
             # 更新狀態查詢指令

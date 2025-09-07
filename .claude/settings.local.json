@@ -8,7 +8,9 @@
       "Bash(then echo \"舊目錄存在，建議手動刪除\")",
       "Bash(fi)",
       "Bash(grep:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(venv/Scripts/python.exe test_intent_analysis.py:*)",
+      "Bash(venv/Scripts/python.exe:*)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
