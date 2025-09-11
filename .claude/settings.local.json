@@ -10,7 +10,8 @@
       "Bash(grep:*)",
       "Bash(sed:*)",
       "Bash(venv/Scripts/python.exe test_intent_analysis.py:*)",
-      "Bash(venv/Scripts/python.exe:*)"
+      "Bash(venv/Scripts/python.exe:*)",
+      "Bash(find:*)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
