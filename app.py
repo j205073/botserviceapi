@@ -62,13 +62,7 @@ MODEL_INFO = {
         "time": "60-120秒",
         "use_case": "複雜推理",
         "timeout": 120,
-    },
-    "gpt-5-chat-latest": {
-        "speed": "快速",
-        "time": "5-15秒",
-        "use_case": "非推理版本",
-        "timeout": 25,
-    },
+    }
 }
 
 

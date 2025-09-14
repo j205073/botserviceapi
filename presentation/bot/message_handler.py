@@ -165,6 +165,21 @@ class TeamsMessageHandler:
         """處理文字訊息"""
         user_message = user_info.message_text.strip()
 
+        # 支援 /help 或 help 顯示功能選單（對齊 app_bak 行為）
+        if user_message.lower() in ["/help", "help", "@help"]:
+            language = determine_language(user_info.user_mail)
+            include_model = not self.config.openai.use_azure
+            welcome_msg = {
+                "zh": "🛠️ 功能選單",
+                "en": "🛠️ Function Menu",
+                "ja": "🛠️ 機能メニュー",
+            }.get(language, "🛠️ 功能選單")
+            help_card = self.help_card_builder.build_help_card(
+                language, welcome_msg, include_model_option=include_model
+            )
+            await turn_context.send_activity(help_card)
+            return
+
         # 處理歡迎訊息
         if user_message.lower() in ["hi", "hello", "你好", "嗨"]:
             await self._send_welcome_message(turn_context, user_info)
@@ -212,7 +227,21 @@ class TeamsMessageHandler:
             elif intent_result.category == "model" and intent_result.action == "select":
                 await self._show_model_selection(turn_context, user_info)
             else:
-                # 預設回應
+                # 進入主要AI對話 預設回應 由Openai回覆
+                # 發送 loading 訊息
+                language = determine_language(user_info.user_mail)
+                loading_messages = {
+                    "zh-TW": "🤔 思考更長時間以取得更佳回答...",
+                    "ja": "🤔 考え中です。少々お待ちください...",
+                }
+                loading_text = loading_messages.get(language, loading_messages["zh-TW"])
+
+                # 發送 typing 活動
+                await turn_context.send_activity(Activity(type="typing"))
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=loading_text)
+                )
+
                 await self._handle_direct_openai_response(turn_context, user_info)
 
         except Exception as e:

@@ -94,7 +94,7 @@ class AppConfig:
             openai=OpenAIConfig(
                 use_azure=os.getenv("USE_AZURE_OPENAI", "true").lower() == "true",
                 api_key=os.getenv("AZURE_OPENAI_KEY") if os.getenv("USE_AZURE_OPENAI", "true").lower() == "true" else os.getenv("OPENAI_API_KEY", ""),
-                endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+                endpoint=os.getenv("AZURE_OPENAI_ENDPOINT") if os.getenv("USE_AZURE_OPENAI", "true").lower() == "true" else os.getenv("OPENAI_ENDPOINT", ""),
                 api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview"),
                 model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
                 intent_model=os.getenv("OPENAI_INTENT_MODEL", "gpt-4o-mini"),

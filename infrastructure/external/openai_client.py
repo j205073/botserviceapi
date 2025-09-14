@@ -37,13 +37,96 @@ class OpenAIClient:
                 # 設置默認參數
                 model = kwargs.get("model", self.config.openai.model)
 
+                # 對 gpt-5 / o1 類推理模型優先使用 Responses API（僅 OpenAI，Azure 仍走 Chat Completions）
+                use_reasoning_responses = (
+                    not self.config.openai.use_azure
+                    and (model.startswith("gpt-5") or model.startswith("o1"))
+                )
+
+                if use_reasoning_responses:
+                    # 將 messages 簡單串接為文字輸入；Responses API 以 input 為主
+                    input_segments = []
+                    for m in messages or []:
+                        role = m.get("role", "user")
+                        content = m.get("content", "")
+                        input_segments.append(f"{role}: {content}")
+                    input_text = "\n".join(input_segments) if input_segments else ""
+
+                    # 構建 Responses API 參數
+                    responses_params = {"model": model, "input": input_text}
+
+                    # gpt-5 / o1 使用 max_output_tokens
+                    if "max_completion_tokens" in kwargs:
+                        responses_params["max_output_tokens"] = kwargs[
+                            "max_completion_tokens"
+                        ]
+                    elif "max_tokens" in kwargs:
+                        responses_params["max_output_tokens"] = kwargs["max_tokens"]
+                    else:
+                        responses_params["max_output_tokens"] = min(
+                            self.config.openai.max_tokens, 4000
+                        )
+
+                    # reasoning 努力等級（與既有行為對齊）
+                    effort = None
+                    if model == "gpt-5":
+                        effort = "medium"
+                    elif model == "gpt-5-mini":
+                        effort = "low"
+                    elif model == "gpt-5-nano":
+                        effort = "minimal"
+                    if effort:
+                        responses_params["reasoning"] = {"effort": effort}
+
+                    import json
+                    print(json.dumps({"endpoint": "responses.create", **responses_params}, ensure_ascii=False))
+
+                    # 呼叫 Responses API（同步 SDK 以執行緒池包裝）
+                    response = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: self.client.responses.create(**responses_params)
+                    )
+
+                    # 優先使用 output_text（SDK 聚合的便捷欄位）
+                    output_text = getattr(response, "output_text", None)
+                    if isinstance(output_text, str) and output_text.strip():
+                        return output_text.strip()
+
+                    # 回退解析：嘗試從結構化內容中提取文字
+                    try:
+                        outputs = getattr(response, "output", None) or []
+                        text_candidate = None
+                        for out in outputs:
+                            contents = getattr(out, "content", None) or []
+                            for part in contents:
+                                ptype = getattr(part, "type", None)
+                                ptext = getattr(part, "text", None)
+                                if ptext is None and isinstance(part, dict):
+                                    ptype = ptype or part.get("type")
+                                    ptext = part.get("text")
+                                if ptext and str(ptext).strip():
+                                    # 優先 output_text 類型
+                                    if ptype in ("output_text", "text"):
+                                        return str(ptext).strip()
+                                    if text_candidate is None:
+                                        text_candidate = str(ptext).strip()
+                        if text_candidate:
+                            return text_candidate
+                    except Exception:
+                        pass
+
+                    # 若仍無內容，提供一致的回退訊息
+                    return "抱歉，我目前沒有可回應的內容。（模型未提供文本內容）"
+
                 # 構建請求參數
+                # request_params = {
+                #     "model": model,
+                #     "messages": messages,
+                #     "timeout": kwargs.get("timeout", self.config.openai.timeout),
+                # }
                 request_params = {
                     "model": model,
                     "messages": messages,
-                    "timeout": kwargs.get("timeout", self.config.openai.timeout),
                 }
-
                 # 根據模型類型添加適當的參數
                 if model.startswith("gpt-5"):
                     extra_params = {}
@@ -66,20 +149,20 @@ class OpenAIClient:
                     # 將 extra_params 合併到 request_params
                     request_params.update(extra_params)
 
-                    # gpt-5 和 o1 系列模型使用 max_completion_tokens 且不支援 temperature
+                    # chat.completions 仍然使用 max_tokens
                     if "max_tokens" in kwargs:
-                        request_params["max_completion_tokens"] = kwargs["max_tokens"]
+                        request_params["max_tokens"] = kwargs["max_tokens"]
                     elif "max_completion_tokens" in kwargs:
-                        request_params["max_completion_tokens"] = kwargs[
-                            "max_completion_tokens"
-                        ]
-                    # 不添加 temperature 參數
+                        request_params["max_tokens"] = kwargs["max_completion_tokens"]
+                    # 不添加 temperature 參數（推理模型通常忽略）
                 else:
                     # 其他模型使用 max_tokens 和 temperature
                     if "max_tokens" in kwargs:
                         request_params["max_tokens"] = kwargs["max_tokens"]
                     if "temperature" in kwargs:
                         request_params["temperature"] = kwargs["temperature"]
+                import json
+                print(json.dumps(request_params, ensure_ascii=False))
 
                 # 使用 asyncio 將同步調用轉為異步
                 response = await asyncio.get_event_loop().run_in_executor(
@@ -97,20 +180,35 @@ class OpenAIClient:
                     # 常見情況：字串內容
                     if isinstance(content_field, str) and content_field.strip():
                         message_content = content_field.strip()
-                    # 新版 SDK 可能回傳 content parts 陣列
+                    # 新版 SDK 可能回傳 content parts 陣列（含 reasoning/output_text 等型別）
                     elif isinstance(content_field, list):
+                        preferred_text = None
+                        fallback_text = None
                         for part in content_field:
-                            text_val = None
+                            p_text = None
+                            p_type = None
                             # 兼容物件或 dict 兩種型態
                             try:
-                                text_val = getattr(part, "text", None)
+                                p_text = getattr(part, "text", None)
+                                p_type = getattr(part, "type", None)
                             except Exception:
-                                text_val = None
-                            if text_val is None and isinstance(part, dict):
-                                text_val = part.get("text")
-                            if text_val and str(text_val).strip():
-                                message_content = str(text_val).strip()
-                                break
+                                p_text = None
+                                p_type = None
+                            if isinstance(part, dict):
+                                p_text = p_text or part.get("text")
+                                p_type = p_type or part.get("type")
+                            if p_text and str(p_text).strip():
+                                if p_type in ("output_text", "text") and preferred_text is None:
+                                    preferred_text = str(p_text).strip()
+                                elif fallback_text is None:
+                                    fallback_text = str(p_text).strip()
+                        message_content = preferred_text or fallback_text
+
+                    # 可能存在拒絕/安全輸出
+                    if not message_content:
+                        refusal = getattr(msg, "refusal", None)
+                        if isinstance(refusal, str) and refusal.strip():
+                            message_content = refusal.strip()
 
                 if not message_content:
                     # 盡量避免直接拋錯：回傳可讀的fallback以提供較好體驗

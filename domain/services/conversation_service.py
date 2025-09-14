@@ -299,7 +299,6 @@ class ConversationService:
 
             # 獲取對話上下文
             context = await self.get_conversation_context(conversation_id, user_mail)
-
             # 如果是新對話，添加系統提示
             if len(context) <= 1:  # 只有用戶消息或空對話
                 system_prompt = self._get_system_prompt(user_mail)
