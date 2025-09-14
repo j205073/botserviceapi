@@ -303,12 +303,12 @@ class ConversationService:
             if len(context) <= 1:  # 只有用戶消息或空對話
                 system_prompt = self._get_system_prompt(user_mail)
                 context = [{"role": "system", "content": system_prompt}] + context
-
+            max_tokens = 4000
             # 調用 OpenAI API
             response = await self.openai_client.chat_completion(
                 messages=context,
                 model=kwargs.get("model", self.config.openai.model),
-                max_tokens=kwargs.get("max_tokens", 1000),
+                max_tokens=kwargs.get("max_tokens", max_tokens),
                 temperature=kwargs.get("temperature", 1.0),
             )
 
