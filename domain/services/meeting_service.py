@@ -96,10 +96,9 @@ class MeetingService:
             return {"success": False, "error": "日期或時間格式不正確"}
 
         now = get_taiwan_time()
+        # 僅檢查結束時間是否晚於開始時間，不再限制是否為過去時間
         if start_dt >= end_dt:
             return {"success": False, "error": "開始時間必須早於結束時間"}
-        if start_dt < now:
-            return {"success": False, "error": "不能預約過去的時間"}
 
         # 呼叫 Graph API 創建實際會議（以使用者為 organizer）
         try:
