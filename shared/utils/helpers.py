@@ -212,20 +212,62 @@ def create_success_response(
 
 async def get_user_email(turn_context) -> Optional[str]:
     """
-    從 TurnContext 獲取用戶郵箱
-    這是一個占位符實現，實際實現需要根據 Bot Framework 的具體配置
+    從 Teams/Bot Framework 取得目前使用者的郵箱。
+
+    解析順序：
+    1) 若 `from.id` 本身是郵箱則直接使用。
+    2) 透過 Teams Roster API 取成員資訊（TeamsInfo.get_member）。
+    3) 透過 AAD Object ID 呼叫 Microsoft Graph 取得 `mail`/`userPrincipalName`。
+
+    備註：若環境未設好權限或 Graph 無法連線，將回傳 None，呼叫端需自行處理後備值。
     """
     try:
-        # 嘗試從 turn_context 中提取用戶郵箱
-        # 這裡使用 AAD (Azure Active Directory) 信息
-        if hasattr(turn_context.activity, 'from_property') and turn_context.activity.from_property:
+        # 1) 直接從 from.id 判斷（有些通道會帶 email）
+        if getattr(turn_context, "activity", None) and getattr(turn_context.activity, "from_property", None):
             user_id = turn_context.activity.from_property.id
-            # 在某些配置下，用戶 ID 可能就是郵箱
-            if '@' in user_id:
+            if isinstance(user_id, str) and "@" in user_id:
                 return user_id
-            # 否則，可能需要通過 Graph API 查詢
-        
-        # 暫時返回 None，讓調用者處理
+
+        # 2) 優先用 Teams Roster 取 member.email
+        try:
+            from botbuilder.teams.teams_info import TeamsInfo  # 延遲載入避免非 Teams 環境報錯
+
+            member = await TeamsInfo.get_member(turn_context, turn_context.activity.from_property.id)
+            # TeamsChannelAccount 可能同時有 email 與 user_principal_name
+            email = getattr(member, "email", None) or getattr(member, "user_principal_name", None)
+            if email:
+                return email
+        except Exception:
+            # 可能非 Teams 環境、或無權限；忽略並進入下一步
+            pass
+
+        # 3) 使用 AAD Object ID 向 Graph 查詢
+        try:
+            aad_object_id = getattr(turn_context.activity.from_property, "aad_object_id", None)
+            if aad_object_id:
+                # 透過組態建立 Graph API 用戶端（避免與 GraphAPIClient 的雙向依賴）
+                from core.container import get_container
+                from config.settings import AppConfig
+                from token_manager import TokenManager as LegacyTokenManager
+                from graph_api import GraphAPI
+
+                container = get_container()
+                cfg: AppConfig = container.get(AppConfig)
+
+                tm = LegacyTokenManager(
+                    cfg.graph_api.tenant_id,
+                    cfg.graph_api.client_id,
+                    cfg.graph_api.client_secret,
+                )
+                graph = GraphAPI(tm)
+                user = await graph.get_user_info(aad_object_id)
+                email = user.get("mail") or user.get("userPrincipalName")
+                if email:
+                    return email
+        except Exception:
+            # Graph 無法連線或權限不足時忽略
+            pass
+
         return None
     except Exception as e:
         print(f"獲取用戶郵箱失敗: {e}")
