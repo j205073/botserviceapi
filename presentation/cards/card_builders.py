@@ -623,8 +623,29 @@ class MeetingCardBuilder(BaseCardBuilder):
         # 預設日期時間（台灣時區）
         now = get_taiwan_time()
         date_value = now.strftime("%Y-%m-%d")
-        start_time_value = now.strftime("%H:%M")
-        end_time_value = (now + timedelta(hours=1)).strftime("%H:%M")
+        # 將預設開始時間對齊到下一個 30 分鐘刻度，結束時間預設 +1 小時
+        minute = now.minute
+        if minute < 30:
+            start_aligned = now.replace(minute=30, second=0, microsecond=0)
+        else:
+            start_aligned = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        end_aligned = start_aligned + timedelta(hours=1)
+        start_time_value = start_aligned.strftime("%H:%M")
+        end_time_value = end_aligned.strftime("%H:%M")
+
+        # 時間選單（每 30 分鐘一個選項），使用 ChoiceSet 以獲得較佳的滾動/列表體驗於 Teams
+        def build_time_choices() -> list:
+            choices = []
+            for h in range(0, 24):
+                for m in (0, 30):
+                    value = f"{h:02d}:{m:02d}"
+                    # 顯示文字加上 AM/PM 提示，提升易讀性
+                    ampm = "AM" if h < 12 else "PM"
+                    title = f"{value} ({ampm})"
+                    choices.append({"title": title, "value": value})
+            return choices
+
+        time_choices = build_time_choices()
 
         card_content = {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -657,15 +678,19 @@ class MeetingCardBuilder(BaseCardBuilder):
                     "value": date_value,
                 },
                 {
-                    "type": "Input.Time",
+                    "type": "Input.ChoiceSet",
                     "id": "startTime",
                     "label": text["start_time_label"],
+                    "style": "expanded",
+                    "choices": time_choices,
                     "value": start_time_value,
                 },
                 {
-                    "type": "Input.Time",
+                    "type": "Input.ChoiceSet",
                     "id": "endTime",
                     "label": text["end_time_label"],
+                    "style": "expanded",
+                    "choices": time_choices,
                     "value": end_time_value,
                 },
                 # {
