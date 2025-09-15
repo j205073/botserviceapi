@@ -185,20 +185,29 @@ class MeetingService:
                 if not has_room:
                     continue
 
-                # 解析時間，轉台灣時區並格式化（對齊原本展示）
-                raw_start = ((ev.get("start") or {}).get("dateTime") or "").replace(
-                    "Z", "+00:00"
-                )
-                raw_end = ((ev.get("end") or {}).get("dateTime") or "").replace(
-                    "Z", "+00:00"
-                )
-                try:
-                    dt_start = datetime.fromisoformat(raw_start)
-                    dt_end = datetime.fromisoformat(raw_end)
-                    dt_start_tw = dt_start.astimezone(tz)
-                    dt_end_tw = dt_end.astimezone(tz)
-                except Exception:
-                    # 若解析失敗，略過該事件
+                # 解析時間：若 Graph 回傳已為台灣時間（header Prefer 設為 Taipei），則不再額外 +8
+                # 若包含 Z 或明確時區偏移，才轉為台灣時區
+                def parse_to_local(dt_dict: dict) -> Optional[datetime]:
+                    s = ((dt_dict or {}).get("dateTime") or "").strip()
+                    if not s:
+                        return None
+                    s2 = s.replace("Z", "+00:00")
+                    try:
+                        dtp = datetime.fromisoformat(s2)
+                    except Exception:
+                        return None
+                    if dtp.tzinfo is None:
+                        # 無時區資訊：視為已是台灣時間（因為我們在請求中帶了 Prefer: Taipei）
+                        try:
+                            return tz.localize(dtp)
+                        except Exception:
+                            return dtp
+                    else:
+                        return dtp.astimezone(tz)
+
+                dt_start_tw = parse_to_local(ev.get("start"))
+                dt_end_tw = parse_to_local(ev.get("end"))
+                if not dt_start_tw or not dt_end_tw:
                     continue
 
                 # 僅保留未來的預約
@@ -207,9 +216,7 @@ class MeetingService:
 
                 # 友善格式：日期/時間分離，卡片會直接印字串
                 date_str = dt_start_tw.strftime("%Y/%m/%d (%a)")
-                time_str = (
-                    f"{dt_start_tw.strftime('%H:%M')} - {dt_end_tw.strftime('%H:%M')}"
-                )
+                time_str = f"{dt_start_tw.strftime('%H:%M')} - {dt_end_tw.strftime('%H:%M')}"
 
                 # 判斷是否為發起人（Organizer）
                 organizer_email = (
