@@ -313,6 +313,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "desc": "新增待辦事項",
                     },
                     {
+                        "title": "🛠️ 提交IT",
+                        "value": "@it",
+                        "desc": "建立 IT 需求/問題單",
+                    },
+                    {
                         "title": "🏢 預約會議室",
                         "value": "@book-room",
                         "desc": "預約會議室",
@@ -352,6 +357,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "desc": "Add new todo item",
                     },
                     {
+                        "title": "🛠️ Submit IT",
+                        "value": "@it",
+                        "desc": "Create an IT issue/request",
+                    },
+                    {
                         "title": "🏢 Book Room",
                         "value": "@book-room",
                         "desc": "Book meeting room",
@@ -389,6 +399,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "title": "➕ タスク追加",
                         "value": "@addTodo",
                         "desc": "新しいタスクを追加",
+                    },
+                    {
+                        "title": "🛠️ IT 申請",
+                        "value": "@it",
+                        "desc": "IT 問い合わせ/リクエストを作成",
                     },
                     {
                         "title": "🏢 会議室予約",

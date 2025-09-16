@@ -95,11 +95,13 @@ class ApplicationServiceProvider(ServiceProvider):
         from application.handlers.bot_command_handler import BotCommandHandler
         from presentation.bot.message_handler import TeamsMessageHandler
         from presentation.web.api_routes import create_api_routes
+        from features.it_support.service import ITSupportService
         
         # 註冊應用服務
         container.register_singleton(ApplicationService)
         container.register_singleton(BotCommandHandler)
         container.register_singleton(TeamsMessageHandler)
+        container.register_singleton(ITSupportService)
         
         # 註冊 API 路由工廠
         def create_routes():

@@ -1,0 +1,232 @@
+{
+	"info": {
+		"_postman_id": "e24a4d8a-ae7b-49d6-b13c-f0de8fd47a09",
+		"name": "asana apis",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "38577128",
+		"_collection_link": "https://planetary-capsule-482512.postman.co/workspace/Team-Workspace~1d459911-fda8-44eb-8660-e37e565ce9e4/collection/38577128-e24a4d8a-ae7b-49d6-b13c-f0de8fd47a09?action=share&source=collection_link&creator=38577128"
+	},
+	"item": [
+		{
+			"name": "Create a task",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "accept",
+						"value": "application/json"
+					},
+					{
+						"key": "authorization",
+						"value": "Bearer {{token}}"
+					},
+					{
+						"key": "content-type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"data\": {\n        \"name\": \"AI 建立ISSUE測試\",\n        \"resource_subtype\": \"default_task\",\n        \"approval_status\": \"pending\",\n        \"assignee_status\": \"upcoming\",\n        \"completed\": false,\n        \"due_at\": \"2025-04-15T02:06:58.147Z\",\n        \"html_notes\": \"<body>Mittens <em>really</em> likes the stuff from Humboldt.</body>\",\n        // \"liked\": true,\n        \"notes\": \"Mittens really likes the stuff from Humboldt.\",\n        // \"start_at\": \"2025-05-14T02:06:58.147Z\",\n        \"assignee\": \"1208683560453534\",//指派人員\n        \"assignee_section\": \"1211277485675681\",//section\n        \"projects\": [\n            \"1208327275974093\"\n        ],\n        \"workspace\": \"1208041237608650\"\n    }\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://app.asana.com/api/1.0/tasks",
+					"protocol": "https",
+					"host": [
+						"app",
+						"asana",
+						"com"
+					],
+					"path": [
+						"api",
+						"1.0",
+						"tasks"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Create a task",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "accept",
+								"value": "application/json"
+							},
+							{
+								"key": "authorization",
+								"value": "Bearer {{token}}"
+							},
+							{
+								"key": "content-type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"data\": {\n        \"name\": \"AI 建立ISSUE測試\",\n        \"resource_subtype\": \"default_task\",\n        \"approval_status\": \"pending\",\n        \"assignee_status\": \"upcoming\",\n        \"completed\": false,\n        \"due_at\": \"2025-04-15T02:06:58.147Z\",\n        \"html_notes\": \"<body>Mittens <em>really</em> likes the stuff from Humboldt.</body>\",\n        // \"liked\": true,\n        \"notes\": \"Mittens really likes the stuff from Humboldt.\",\n        // \"start_at\": \"2025-05-14T02:06:58.147Z\",\n        \"assignee\": \"1208683560453534\",//指派人員\n        \"assignee_section\": \"1211277485675681\",//section\n        \"projects\": [\n            \"1208327275974093\"\n        ],\n        \"workspace\": \"1208041237608650\"\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://app.asana.com/api/1.0/tasks",
+							"protocol": "https",
+							"host": [
+								"app",
+								"asana",
+								"com"
+							],
+							"path": [
+								"api",
+								"1.0",
+								"tasks"
+							]
+						}
+					},
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json",
+							"name": "Content-Type",
+							"description": "",
+							"type": "text"
+						}
+					],
+					"cookie": [
+						{
+							"expires": "Invalid Date",
+							"domain": "",
+							"path": ""
+						}
+					],
+					"body": "{\r\n    \"data\": {\r\n        \"gid\": \"1211370256212273\",\r\n        \"num_likes\": 0,\r\n        \"num_hearts\": 0,\r\n        \"workspace\": {\r\n            \"gid\": \"1208041237608650\",\r\n            \"resource_type\": \"workspace\",\r\n            \"name\": \"台灣林內-資訊課\"\r\n        },\r\n        \"start_at\": null,\r\n        \"start_on\": null,\r\n        \"resource_subtype\": \"default_task\",\r\n        \"due_at\": \"2025-04-15T02:06:58.000Z\",\r\n        \"due_on\": \"2025-04-15\",\r\n        \"completed_at\": null,\r\n        \"assignee_status\": \"upcoming\",\r\n        \"completed\": false,\r\n        \"actual_time_minutes\": 0,\r\n        \"assignee\": {\r\n            \"gid\": \"1208683560453534\",\r\n            \"resource_type\": \"user\",\r\n            \"name\": \"juncheng.liu@rinnai.com.tw\"\r\n        },\r\n        \"notes\": \"Mittens really likes the stuff from Humboldt.\",\r\n        \"name\": \"AI 建立ISSUE測試\",\r\n        \"modified_at\": \"2025-09-16T07:44:57.155Z\",\r\n        \"created_at\": \"2025-09-16T07:44:56.350Z\",\r\n        \"resource_type\": \"task\",\r\n        \"projects\": [\r\n            {\r\n                \"gid\": \"1208327275974093\",\r\n                \"resource_type\": \"project\",\r\n                \"name\": \"林內MIS專案進度管理\"\r\n            }\r\n        ],\r\n        \"tags\": [],\r\n        \"parent\": null,\r\n        \"likes\": [],\r\n        \"hearts\": [],\r\n        \"liked\": false,\r\n        \"hearted\": false,\r\n        \"assignee_section\": {\r\n            \"gid\": \"1208683392604358\",\r\n            \"resource_type\": \"section\",\r\n            \"name\": \"近期指派\"\r\n        },\r\n        \"memberships\": [\r\n            {\r\n                \"project\": {\r\n                    \"gid\": \"1208327275974093\",\r\n                    \"resource_type\": \"project\",\r\n                    \"name\": \"林內MIS專案進度管理\"\r\n                },\r\n                \"section\": {\r\n                    \"gid\": \"1211277485675681\",\r\n                    \"resource_type\": \"section\",\r\n                    \"name\": \"待處理使用者提問\"\r\n                }\r\n            }\r\n        ],\r\n        \"followers\": [\r\n            {\r\n                \"gid\": \"1208683560453534\",\r\n                \"resource_type\": \"user\",\r\n                \"name\": \"juncheng.liu@rinnai.com.tw\"\r\n            }\r\n        ],\r\n        \"permalink_url\": \"https://app.asana.com/1/1208041237608650/project/1208327275974093/task/1211370256212273\"\r\n    }\r\n}"
+				}
+			]
+		},
+		{
+			"name": "Get multiple users",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "accept",
+						"value": "application/json"
+					},
+					{
+						"key": "authorization",
+						"value": "Bearer {{token}}"
+					}
+				],
+				"url": {
+					"raw": "https://app.asana.com/api/1.0/users?workspace=1208041237608650",
+					"protocol": "https",
+					"host": [
+						"app",
+						"asana",
+						"com"
+					],
+					"path": [
+						"api",
+						"1.0",
+						"users"
+					],
+					"query": [
+						{
+							"key": "workspace",
+							"value": "1208041237608650"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "Get multiple users",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "accept",
+								"value": "application/json"
+							},
+							{
+								"key": "authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "https://app.asana.com/api/1.0/users?workspace=1208041237608650",
+							"protocol": "https",
+							"host": [
+								"app",
+								"asana",
+								"com"
+							],
+							"path": [
+								"api",
+								"1.0",
+								"users"
+							],
+							"query": [
+								{
+									"key": "workspace",
+									"value": "1208041237608650"
+								}
+							]
+						}
+					},
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "Content-Type",
+							"value": "application/json",
+							"name": "Content-Type",
+							"description": "",
+							"type": "text"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"data\": [\n        {\n            \"gid\": \"1205456920754983\",\n            \"name\": \"j205073@gmail.com\",\n            \"resource_type\": \"user\"\n        },\n        {\n            \"gid\": \"1208683560453534\",\n            \"name\": \"juncheng.liu@rinnai.com.tw\",\n            \"resource_type\": \"user\"\n        },\n        {\n            \"gid\": \"1208474125794690\",\n            \"name\": \"george.chang@rinnai.com.tw\",\n            \"resource_type\": \"user\"\n        },\n        {\n            \"gid\": \"1208474125489833\",\n            \"name\": \"古\",\n            \"resource_type\": \"user\"\n        },\n        {\n            \"gid\": \"1208474125682458\",\n            \"name\": \"casper.hsu@rinnai.com.tw\",\n            \"resource_type\": \"user\"\n        },\n        {\n            \"gid\": \"1208474121511062\",\n            \"name\": \"hugo.ting@rinnai.com.tw\",\n            \"resource_type\": \"user\"\n        }\n    ]\n}"
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "token",
+			"value": "2/1208683560453534/1209688753960924:b84fc2a54914afa353ea0558bb8d356d",
+			"type": "string"
+		}
+	]
+}

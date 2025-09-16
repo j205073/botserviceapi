@@ -68,6 +68,12 @@ class TeamsMessageHandler:
                 await self._handle_card_interaction(turn_context, user_info)
                 return
 
+            # 若含有附件且最近建立 IT 單，嘗試附加圖片
+            if turn_context.activity.attachments:
+                handled = await self._try_attach_images(turn_context, user_info)
+                if handled:
+                    return
+
             # 處理文字訊息
             await self._handle_text_message(turn_context, user_info)
 
@@ -134,6 +140,47 @@ class TeamsMessageHandler:
             await self._handle_cancel_booking(turn_context, user_info)
         elif card_action == "selectModel":
             await self._handle_model_selection(turn_context, user_info)
+        elif card_action == "submitIT":
+            await self._handle_submit_it_issue(turn_context, user_info)
+
+    async def _handle_submit_it_issue(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """提交 IT 提單並建立 Asana 任務"""
+        try:
+            form = {
+                "summary": turn_context.activity.value.get("summary"),
+                "description": turn_context.activity.value.get("description"),
+                "category": turn_context.activity.value.get("category"),
+                "priority": turn_context.activity.value.get("priority"),
+            }
+
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+            result = await svc.submit_issue(form, user_info.user_name or "", user_info.user_mail)
+
+            if result.get("success"):
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=result.get("message", "✅ 已建立 IT Issue"))
+                )
+                # If the submit action also includes attachments (e.g., pasted images), try to upload immediately
+                if turn_context.activity.attachments:
+                    try:
+                        handled = await self._try_attach_images(turn_context, user_info)
+                        # If handled, no extra message needed beyond what _try_attach_images sends
+                    except Exception:
+                        pass
+
+                # No URL-based uploads anymore; users can paste/attach images directly
+            else:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=f"❌ {result.get('error', '提交失敗')}")
+                )
+        except Exception as e:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 提交 IT 提單時發生錯誤：{str(e)}")
+            )
 
     async def _handle_function_selection(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
@@ -147,6 +194,7 @@ class TeamsMessageHandler:
         function_handlers = {
             "@addTodo": self._show_add_todo_card,
             "@ls": self._show_todo_list,
+            "@it": self._show_it_issue_card,
             "@book-room": self._show_room_booking_options,
             "@check-booking": self._show_my_bookings,
             "@cancel-booking": self._show_cancel_booking_options,
@@ -158,6 +206,18 @@ class TeamsMessageHandler:
         handler = function_handlers.get(selected_function)
         if handler:
             await handler(turn_context, user_info)
+
+    async def _show_it_issue_card(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """顯示 IT 提單卡片"""
+        from core.container import get_container
+        from features.it_support.service import ITSupportService
+
+        language = determine_language(user_info.user_mail)
+        svc: ITSupportService = get_container().get(ITSupportService)
+        card = svc.build_issue_card(language, user_info.user_name or "", user_info.user_mail)
+        await turn_context.send_activity(card)
 
     async def _handle_text_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
@@ -286,6 +346,65 @@ class TeamsMessageHandler:
                 ),
             )
         )
+
+    async def _try_attach_images(self, turn_context: TurnContext, user_info: BotInteractionDTO) -> bool:
+        """If message has image attachments and user has a recent IT task, upload them to Asana.
+        Returns True if handled (uploaded or error responded), else False.
+        """
+        try:
+            atts = turn_context.activity.attachments or []
+            images = []
+            # Accept native image attachments
+            for a in atts:
+                ctype = (getattr(a, "content_type", None) or "").lower()
+                name = getattr(a, "name", None) or ""
+                url = getattr(a, "content_url", None) or getattr(a, "contentUrl", None)
+                # Teams file info attachments (e.g., application/vnd.microsoft.teams.file.download.info)
+                if not url and ctype == "application/vnd.microsoft.teams.file.download.info":
+                    content = getattr(a, "content", None) or {}
+                    url = content.get("downloadUrl") if isinstance(content, dict) else None
+                # Only accept images (by content-type or file extension)
+                is_image = ctype.startswith("image/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"))
+                if is_image and url:
+                    images.append({"url": url, "name": name or "image.jpg", "ctype": ctype if ctype.startswith("image/") else "image/jpeg"})
+            if not images:
+                return False
+
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+            gid = svc.get_recent_task_gid(user_info.user_mail)
+            if not gid:
+                # Hint user to create task first
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="ℹ️ 請先使用 @it 建立 IT 單，再上傳圖片，我會自動附加。")
+                )
+                return True
+
+            # Try attach each image by URL
+            ok = 0
+            for a in images:
+                url = a["url"]
+                name = a.get("name") or "image.jpg"
+                ctype = a.get("ctype") or "image/jpeg"
+                result = await svc.attach_image_from_url(user_info.user_mail, url, name, ctype)
+                if result.get("success"):
+                    ok += 1
+                else:
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=f"❌ 圖片上傳失敗：{result.get('error')}")
+                    )
+
+            if ok:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=f"✅ 已上傳 {ok} 張圖片至最近的 IT 單")
+                )
+            return True
+        except Exception as e:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 上傳圖片時發生錯誤：{str(e)}")
+            )
+            return True
 
     async def _send_welcome_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
