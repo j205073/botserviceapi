@@ -33,7 +33,7 @@ class OpenAIClient:
     async def chat_completion(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """聊天完成"""
         try:
-            with PerformanceTimer("OpenAI API 調用"):
+            with PerformanceTimer("OpenAI API 調用"): 
                 # 設置默認參數
                 model = kwargs.get("model", self.config.openai.model)
 
