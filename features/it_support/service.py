@@ -346,6 +346,22 @@ class ITSupportService:
             async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
                 resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
+                # Try extract filename from Content-Disposition if our filename is generic
+                try:
+                    cd = resp.headers.get("content-disposition") or resp.headers.get("Content-Disposition")
+                    if cd and (filename in ("file.bin", "image.jpg", "upload.bin")):
+                        # naive parse filename= or filename*
+                        import re as _re
+                        m = _re.search(r'filename\*=UTF-8''([^;\r\n]+)', cd)
+                        if m:
+                            from urllib.parse import unquote
+                            filename = unquote(m.group(1))
+                        else:
+                            m = _re.search(r'filename="?([^";\r\n]+)"?', cd)
+                            if m:
+                                filename = m.group(1)
+                except Exception:
+                    pass
                 content = resp.content
         except Exception as e:
             return {"success": False, "error": f"下載附件失敗：{str(e)}"}

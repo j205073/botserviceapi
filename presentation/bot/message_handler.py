@@ -434,7 +434,14 @@ class TeamsMessageHandler:
                 # Teams file info attachments (e.g., application/vnd.microsoft.teams.file.download.info)
                 if not url and ctype == "application/vnd.microsoft.teams.file.download.info":
                     content = getattr(a, "content", None) or {}
-                    url = content.get("downloadUrl") if isinstance(content, dict) else None
+                    if isinstance(content, dict):
+                        url = content.get("downloadUrl")
+                        # Try resolve a better filename
+                        if not name:
+                            name = content.get("name") or name
+                        ft = content.get("fileType")
+                        if not name and ft:
+                            name = f"upload.{ft}"
                 # Skip card attachments
                 if ctype.startswith("application/vnd.microsoft.card"):
                     continue
@@ -446,12 +453,44 @@ class TeamsMessageHandler:
                         mime = "application/octet-stream"
                         if ":" in header and ";" in header:
                             mime = header.split(":", 1)[1].split(";", 1)[0] or mime
+                        # Infer extension if name missing
+                        if not name:
+                            ext_map = {
+                                "image/png": "png",
+                                "image/jpeg": "jpg",
+                                "image/jpg": "jpg",
+                                "image/gif": "gif",
+                                "image/webp": "webp",
+                                "image/bmp": "bmp",
+                                "image/heic": "heic",
+                                "application/pdf": "pdf",
+                                "application/zip": "zip",
+                                "text/plain": "txt",
+                                "application/msword": "doc",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+                                "application/vnd.ms-excel": "xls",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+                                "application/vnd.ms-powerpoint": "ppt",
+                                "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+                            }
+                            ext = ext_map.get(mime, "bin")
+                            name = f"upload.{ext}"
                         data_bytes = base64.b64decode(b64data)
                         files.append({"data": data_bytes, "name": name or "file.bin", "ctype": mime})
                         continue
                     except Exception:
                         pass
                 if url:
+                    # Derive filename from URL if name missing
+                    if not name:
+                        try:
+                            from urllib.parse import urlparse, unquote
+                            path = urlparse(url).path
+                            base = path.rsplit("/", 1)[-1]
+                            if base:
+                                name = unquote(base)
+                        except Exception:
+                            pass
                     files.append({"url": url, "name": name or "file.bin", "ctype": ctype or "application/octet-stream"})
             if not files:
                 return False
