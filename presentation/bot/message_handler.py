@@ -420,13 +420,13 @@ class TeamsMessageHandler:
         )
 
     async def _try_attach_images(self, turn_context: TurnContext, user_info: BotInteractionDTO) -> bool:
-        """If message has image attachments and user has a recent IT task, upload them to Asana.
+        """If message has file attachments and user has a recent IT task, upload them to Asana.
         Returns True if handled (uploaded or error responded), else False.
         """
         try:
             atts = turn_context.activity.attachments or []
-            images = []
-            # Accept native image attachments
+            files = []
+            # Accept general file attachments
             for a in atts:
                 ctype = (getattr(a, "content_type", None) or "").lower()
                 name = getattr(a, "name", None) or ""
@@ -435,27 +435,25 @@ class TeamsMessageHandler:
                 if not url and ctype == "application/vnd.microsoft.teams.file.download.info":
                     content = getattr(a, "content", None) or {}
                     url = content.get("downloadUrl") if isinstance(content, dict) else None
-                # Only accept images (by content-type or file extension)
-                is_image = ctype.startswith("image/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".heic"))
-                if not is_image:
+                # Skip card attachments
+                if ctype.startswith("application/vnd.microsoft.card"):
                     continue
+                # Handle data URL (e.g., Bot Emulator inline data)
                 if url and str(url).startswith("data:"):
-                    # Handle data URL (e.g., Bot Emulator inline data)
                     try:
                         header, b64data = str(url).split(",", 1)
-                        # e.g., data:image/png;base64,....
                         import base64
-                        mime = "image/jpeg"
+                        mime = "application/octet-stream"
                         if ":" in header and ";" in header:
                             mime = header.split(":", 1)[1].split(";", 1)[0] or mime
                         data_bytes = base64.b64decode(b64data)
-                        images.append({"data": data_bytes, "name": name or "image.jpg", "ctype": mime})
+                        files.append({"data": data_bytes, "name": name or "file.bin", "ctype": mime})
                         continue
                     except Exception:
                         pass
-                if is_image and url:
-                    images.append({"url": url, "name": name or "image.jpg", "ctype": ctype if ctype.startswith("image/") else "image/jpeg"})
-            if not images:
+                if url:
+                    files.append({"url": url, "name": name or "file.bin", "ctype": ctype or "application/octet-stream"})
+            if not files:
                 return False
 
             from core.container import get_container
@@ -465,15 +463,15 @@ class TeamsMessageHandler:
             if not gid:
                 # Hint user to create task first
                 await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text="ℹ️ 請先使用 @it 建立 IT 單，再上傳圖片，我會自動附加。")
+                    Activity(type=ActivityTypes.message, text="ℹ️ 請先使用 @it 建立 IT 單，再上傳檔案，我會自動附加。")
                 )
                 return True
 
             # Try attach each image by URL
             ok = 0
-            for a in images:
-                name = a.get("name") or "image.jpg"
-                ctype = a.get("ctype") or "image/jpeg"
+            for a in files:
+                name = a.get("name") or "file.bin"
+                ctype = a.get("ctype") or "application/octet-stream"
                 if "data" in a:
                     result = await svc.attach_image_bytes(user_info.user_mail, a["data"], name, ctype)
                 else:
@@ -483,17 +481,17 @@ class TeamsMessageHandler:
                     ok += 1
                 else:
                     await turn_context.send_activity(
-                        Activity(type=ActivityTypes.message, text=f"❌ 圖片上傳失敗：{result.get('error')}")
+                        Activity(type=ActivityTypes.message, text=f"❌ 檔案上傳失敗：{result.get('error')}")
                     )
 
             if ok:
                 await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=f"✅ 已上傳 {ok} 張圖片至最近的 IT 單")
+                    Activity(type=ActivityTypes.message, text=f"✅ 已上傳 {ok} 個檔案至最近的 IT 單")
                 )
             return True
         except Exception as e:
             await turn_context.send_activity(
-                Activity(type=ActivityTypes.message, text=f"❌ 上傳圖片時發生錯誤：{str(e)}")
+                Activity(type=ActivityTypes.message, text=f"❌ 上傳檔案時發生錯誤：{str(e)}")
             )
             return True
 
