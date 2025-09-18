@@ -21,6 +21,9 @@ class ITSupportService:
         # load taxonomy for cards
         self._taxonomy = self.classifier.categories
         self._recent_task_by_user: dict[str, dict] = {}
+        self._bf_token_cache: dict[str, Any] = {}
+        # Dedicated model for IT issue analysis (per-call override; does not affect global model)
+        self.analysis_model: str = os.getenv("IT_ANALYSIS_MODEL", "gpt-5-nano").strip()
 
         # Static config from env or defaults
         # Fallback to known IDs from Postman collection if envs not set
@@ -49,18 +52,15 @@ class ITSupportService:
         Returns a dict with success, task info, and message.
         """
         description = (form.get("description") or "").strip()
-        category_code = (form.get("category") or "").strip()
+        # Always classify via OpenAI (fallback to keyword classifier internally)
+        category_code = ""
         priority = (form.get("priority") or "P3").strip()
 
         if not description:
             return {"success": False, "error": "需求/問題說明不得為空"}
 
-        # classify if needed
-        if not category_code:
-            category_code, category_label = self.classifier.classify(description)
-        else:
-            # find label
-            category_label = next((c.get("label", category_code) for c in self._taxonomy if c.get("code") == category_code), category_code)
+        # AI-based classification (uses IT_ANALYSIS_MODEL); fallback to keyword classifier
+        category_code, category_label = await self._classify_issue_ai(description)
 
         # Generate issue ID with Taiwan time
         issue_id, dt_for_id = self._generate_issue_id()
@@ -82,7 +82,7 @@ class ITSupportService:
             f"建立來源: TR GPT bot\n"
             f"建立時間: {created_at}\n\n"
             f"【需求/問題說明】\n{description}\n"
-            + ("\n【AI 分析（建議/時間/相關面向）】\n" + analysis_text if analysis_text else "")
+            + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
         )
 
         # build payload following Postman spec
@@ -200,7 +200,12 @@ class ITSupportService:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ]
-            raw = await oa.chat_completion(prompt, max_tokens=1500, temperature=0.2)
+            raw = await oa.chat_completion(
+                prompt,
+                model=(self.analysis_model or None),
+                max_tokens=600,
+                temperature=0.2,
+            )
 
             # Parse JSON
             import json as _json
@@ -222,7 +227,13 @@ class ITSupportService:
                 areas = data.get("related_areas")
                 parts = []
                 if rec:
-                    parts.append(f"- 建議：{rec}")
+                    import re as _re
+                    _rec = rec.strip()
+                    if _re.search(r"\b1\)", _rec):
+                        _rec = _re.sub(r"\s*(\d+\))", r"\n  \1 ", _rec).strip()
+                        parts.append("- 建議：\n  " + _rec)
+                    else:
+                        parts.append(f"- 建議：{_rec}")
                 if t:
                     parts.append(f"- 時間估計：{t}")
                 # 相關面向分行列點
@@ -245,6 +256,72 @@ class ITSupportService:
             pass
         return ""
 
+    async def _classify_issue_ai(self, description: str) -> tuple[str, str]:
+        """Classify issue category via OpenAI using IT_ANALYSIS_MODEL.
+        Returns (code, label). Falls back to keyword classifier on error.
+        """
+        try:
+            if not description:
+                return ("other", self.classifier._label_for("other"))
+
+            from core.container import get_container
+            from infrastructure.external.openai_client import OpenAIClient
+
+            # Prepare categories for the model to choose
+            allowed = [
+                {"code": c.get("code", "other"), "label": c.get("label", c.get("code", "other"))}
+                for c in self._taxonomy
+            ]
+            allowed_codes = [c["code"] for c in allowed]
+
+            container = get_container()
+            oa: OpenAIClient = container.get(OpenAIClient)
+
+            system = (
+                "你是一位企業 IT 服務台分單助手。請從提供的類別清單中選擇最符合的一個類別"
+                "，只允許輸出 JSON，欄位為 code, label。code 必須是清單中的一個。語言使用繁體中文。"
+            )
+            import json as _json
+            user = _json.dumps({
+                "categories": allowed,
+                "description": description,
+            }, ensure_ascii=False)
+
+            prompt = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+            raw = await oa.chat_completion(
+                prompt,
+                model=(self.analysis_model or None),
+                max_tokens=400,
+                temperature=0.0,
+            )
+
+            data = None
+            try:
+                data = _json.loads(raw)
+            except Exception:
+                import re
+                m = re.search(r"\{[\s\S]*\}", raw)
+                if m:
+                    try:
+                        data = _json.loads(m.group(0))
+                    except Exception:
+                        data = None
+            if isinstance(data, dict):
+                code = str(data.get("code", "")).strip()
+                label = str(data.get("label", "")).strip()
+                if code in allowed_codes:
+                    if not label:
+                        label = next((c.get("label") for c in self._taxonomy if c.get("code") == code), code)
+                    return (code, label)
+        except Exception:
+            pass
+
+        # Fallback to keyword classifier
+        return self.classifier.classify(description)
+
     def get_recent_task_gid(self, user_email: str) -> str | None:
         item = self._recent_task_by_user.get(user_email)
         if not item:
@@ -258,9 +335,16 @@ class ITSupportService:
             return {"success": False, "error": "找不到最近建立的 IT 單可供附檔，請先使用 @it 建立。"}
 
         import httpx
+        headers: dict[str, str] = {}
+        # For Teams/BotFramework protected URLs, try with bot token
+        if self._is_botframework_protected_url(url):
+            token = await self._get_botframework_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+                headers["Accept"] = "*/*"
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.get(url)
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
                 content = resp.content
         except Exception as e:
@@ -271,3 +355,67 @@ class ITSupportService:
             return {"success": True, "message": "✅ 已上傳圖片至 IT 單", "data": result}
         except Exception as e:
             return {"success": False, "error": f"上傳附件失敗：{str(e)}"}
+
+    async def attach_image_bytes(self, user_email: str, content: bytes, filename: str, mime_type: str) -> Dict[str, Any]:
+        """Upload raw image bytes to the user's recent task."""
+        gid = self.get_recent_task_gid(user_email)
+        if not gid:
+            return {"success": False, "error": "找不到最近建立的 IT 單可供附檔，請先使用 @it 建立。"}
+        try:
+            result = await self.asana.upload_attachment(gid, filename, content, mime_type)
+            return {"success": True, "message": "✅ 已上傳圖片至 IT 單", "data": result}
+        except Exception as e:
+            return {"success": False, "error": f"上傳附件失敗：{str(e)}"}
+
+    def _is_botframework_protected_url(self, url: str) -> bool:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).netloc.lower()
+            protected_hosts = (
+                "smba.trafficmanager.net",
+                "skype",
+                "teams.microsoft.com",
+                "api.botframework.com",
+            )
+            return any(h in host for h in protected_hosts)
+        except Exception:
+            return False
+
+    async def _get_botframework_token(self) -> str | None:
+        # Cache token briefly to avoid repeated auth
+        try:
+            import time
+            token = self._bf_token_cache.get("token")
+            exp = self._bf_token_cache.get("exp", 0)
+            if token and time.time() < exp - 60:
+                return token
+
+            app_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID")
+            app_password = os.getenv("BOT_APP_PASSWORD") or os.getenv("MICROSOFT_APP_PASSWORD")
+            if not app_id or not app_password:
+                return None
+
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": app_id,
+                "client_secret": app_password,
+                "scope": "https://api.botframework.com/.default",
+            }
+            import httpx
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token",
+                    data=data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                resp.raise_for_status()
+                js = resp.json()
+                token = js.get("access_token")
+                expires_in = int(js.get("expires_in", 1800))
+                if token:
+                    self._bf_token_cache["token"] = token
+                    self._bf_token_cache["exp"] = time.time() + expires_in
+                    return token
+        except Exception:
+            return None
+        return None

@@ -33,6 +33,66 @@ class BaseCardBuilder:
         return Activity(type=ActivityTypes.message, attachments=[attachment])
 
 
+class UploadCardBuilder(BaseCardBuilder):
+    """簡易檔案上傳引導 HeroCard（使用者仍需用 Teams 的附件功能貼上/拖曳）"""
+
+    def build_file_upload_card(self, language: str = "zh") -> Activity:
+        texts = {
+            "zh": {
+                "title": "上傳檔案到最近的 IT 單",
+                "text": "請使用 Teams 訊息列的附件按鈕，或直接拖曳/貼上圖片到此對話，我會自動附加到最近建立的 IT 單。",
+            },
+            "en": {
+                "title": "Upload Files to Your Latest IT Ticket",
+                "text": "Use the Teams attachment button or paste/drag images into this chat. I'll attach them to your latest IT ticket.",
+            },
+            "ja": {
+                "title": "最新のITチケットへファイルをアップロード",
+                "text": "Teams の添付ボタンを使うか、このチャットに画像を貼り付け/ドラッグしてください。最新のITチケットに自動添付します。",
+            },
+        }
+        t = texts.get(language, texts["zh"])
+
+        card = HeroCard(title=t["title"], text=t["text"]).to_dict()
+        attachment = Attachment(content_type="application/vnd.microsoft.card.hero", content=card)
+        return Activity(type=ActivityTypes.message, attachments=[attachment])
+
+    def build_file_upload_options_card(self, language: str = "zh") -> Activity:
+        """仿 Bot Framework Sample：顯示三種附件選項的 HeroCard（以 im_back 回傳值）"""
+        texts = {
+            "zh": {
+                "text": "您可以上傳圖片，或選擇以下方式之一：",
+                "opt1": "1. 內嵌附件（貼上圖片）",
+                "opt2": "2. 網路附件（提供網址）",
+                "opt3": "3. 已上傳附件（透過 Teams 附件）",
+            },
+            "en": {
+                "text": "You can upload an image or select one of the following choices:",
+                "opt1": "1. Inline Attachment",
+                "opt2": "2. Internet Attachment",
+                "opt3": "3. Uploaded Attachment",
+            },
+            "ja": {
+                "text": "画像をアップロードするか、次のいずれかを選択してください：",
+                "opt1": "1. インライン添付（画像を貼り付け）",
+                "opt2": "2. インターネット添付（URL を提供）",
+                "opt3": "3. アップロード済み添付（Teams の添付機能）",
+            },
+        }
+        t = texts.get(language, texts["zh"])
+
+        card = HeroCard(
+            text=t["text"],
+            buttons=[
+                CardAction(type=ActionTypes.im_back, title=t["opt1"], value="1"),
+                CardAction(type=ActionTypes.im_back, title=t["opt2"], value="2"),
+                CardAction(type=ActionTypes.im_back, title=t["opt3"], value="3"),
+            ],
+        ).to_dict()
+        attachment = Attachment(content_type="application/vnd.microsoft.card.hero", content=card)
+        return Activity(type=ActivityTypes.message, attachments=[attachment])
+
+
 class TodoCardBuilder(BaseCardBuilder):
     """待辦事項卡片建構器"""
 

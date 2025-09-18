@@ -20,6 +20,7 @@ from presentation.cards.card_builders import (
     HelpCardBuilder,
     MeetingCardBuilder,
     ModelSelectionCardBuilder,
+    UploadCardBuilder,
 )
 from shared.utils.helpers import (
     get_user_email,
@@ -53,6 +54,7 @@ class TeamsMessageHandler:
         self.help_card_builder = HelpCardBuilder()
         self.meeting_card_builder = MeetingCardBuilder()
         self.model_card_builder = ModelSelectionCardBuilder()
+        self.upload_card_builder = UploadCardBuilder()
 
     async def handle_message(self, turn_context: TurnContext) -> None:
         """處理 Teams 訊息"""
@@ -142,6 +144,8 @@ class TeamsMessageHandler:
             await self._handle_model_selection(turn_context, user_info)
         elif card_action == "submitIT":
             await self._handle_submit_it_issue(turn_context, user_info)
+        elif card_action == "uploadOption":
+            await self._handle_upload_option(turn_context, user_info)
 
     async def _handle_submit_it_issue(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
@@ -164,6 +168,13 @@ class TeamsMessageHandler:
                 await turn_context.send_activity(
                     Activity(type=ActivityTypes.message, text=result.get("message", "✅ 已建立 IT Issue"))
                 )
+                # Immediately show upload options HeroCard so user can attach files easily
+                try:
+                    language = determine_language(user_info.user_mail)
+                    upload_card = self.upload_card_builder.build_file_upload_options_card(language)
+                    await turn_context.send_activity(upload_card)
+                except Exception:
+                    pass
                 # If the submit action also includes attachments (e.g., pasted images), try to upload immediately
                 if turn_context.activity.attachments:
                     try:
@@ -195,6 +206,7 @@ class TeamsMessageHandler:
             "@addTodo": self._show_add_todo_card,
             "@ls": self._show_todo_list,
             "@it": self._show_it_issue_card,
+            "@upload": self._show_upload_card,
             "@book-room": self._show_room_booking_options,
             "@check-booking": self._show_my_bookings,
             "@cancel-booking": self._show_cancel_booking_options,
@@ -219,11 +231,71 @@ class TeamsMessageHandler:
         card = svc.build_issue_card(language, user_info.user_name or "", user_info.user_mail)
         await turn_context.send_activity(card)
 
+    async def _show_upload_card(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """顯示檔案上傳引導 HeroCard"""
+        language = determine_language(user_info.user_mail)
+        # 顯示含 1/2/3 選項的 HeroCard（im_back）
+        card = self.upload_card_builder.build_file_upload_options_card(language)
+        await turn_context.send_activity(card)
+
+    async def _handle_upload_option(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        opt = str(turn_context.activity.value.get("opt"))
+        language = determine_language(user_info.user_mail)
+        tips = {
+            "zh": {
+                "1": "請直接在此對話視窗貼上圖片（或拖曳圖片）後送出，我會自動附加到最近建立的 IT 單。",
+                "2": "目前不建議以網址上傳，請改用貼上圖片或 Teams 附件按鈕。",
+                "3": "請使用訊息列的附件（迴紋針）按鈕選擇檔案，送出後我會自動附加到最近建立的 IT 單。",
+            },
+            "en": {
+                "1": "Paste or drag the image here and send it; I'll attach it to your latest IT ticket.",
+                "2": "URL uploads are not recommended; please paste image or use the attachment button.",
+                "3": "Use the attachment (paperclip) button to upload; I'll attach it to your latest IT ticket.",
+            },
+            "ja": {
+                "1": "このチャットに画像を貼り付け／ドラッグして送信してください。最新のITチケットに自動添付します。",
+                "2": "URL 経由のアップロードは推奨しません。画像を貼り付けるか、添付ボタンをご利用ください。",
+                "3": "メッセージ欄のクリップアイコンからファイルを添付してください。最新のITチケットに自動添付します。",
+            },
+        }
+        text = tips.get(language, tips["zh"]).get(opt)
+        if text:
+            await turn_context.send_activity(Activity(type=ActivityTypes.message, text=text))
+
     async def _handle_text_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
     ) -> None:
         """處理文字訊息"""
         user_message = user_info.message_text.strip()
+
+        # 上傳選項快捷回覆（HeroCard im_back）
+        if user_message in ["1", "2", "3"]:
+            language = determine_language(user_info.user_mail)
+            tips = {
+                "zh": {
+                    "1": "請直接在此對話視窗貼上圖片（或拖曳圖片）後送出，我會自動附加到最近建立的 IT 單。",
+                    "2": "目前不建議以網址上傳，請改用貼上圖片或 Teams 附件按鈕。",
+                    "3": "請使用訊息列的附件（迴紋針）按鈕選擇檔案，送出後我會自動附加到最近建立的 IT 單。",
+                },
+                "en": {
+                    "1": "Paste or drag the image here and send it; I'll attach it to your latest IT ticket.",
+                    "2": "URL uploads are not recommended; please paste image or use the attachment button.",
+                    "3": "Use the attachment (paperclip) button to upload; I'll attach it to your latest IT ticket.",
+                },
+                "ja": {
+                    "1": "このチャットに画像を貼り付け／ドラッグして送信してください。最新のITチケットに自動添付します。",
+                    "2": "URL 経由のアップロードは推奨しません。画像を貼り付けるか、添付ボタンをご利用ください。",
+                    "3": "メッセージ欄のクリップアイコンからファイルを添付してください。最新のITチケットに自動添付します。",
+                },
+            }
+            t = tips.get(language, tips["zh"]).get(user_message)
+            if t:
+                await turn_context.send_activity(Activity(type=ActivityTypes.message, text=t))
+                return
 
         # 支援 /help 或 help 顯示功能選單（對齊 app_bak 行為）
         if user_message.lower() in ["/help", "help", "@help"]:
@@ -364,7 +436,23 @@ class TeamsMessageHandler:
                     content = getattr(a, "content", None) or {}
                     url = content.get("downloadUrl") if isinstance(content, dict) else None
                 # Only accept images (by content-type or file extension)
-                is_image = ctype.startswith("image/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"))
+                is_image = ctype.startswith("image/") or name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".heic"))
+                if not is_image:
+                    continue
+                if url and str(url).startswith("data:"):
+                    # Handle data URL (e.g., Bot Emulator inline data)
+                    try:
+                        header, b64data = str(url).split(",", 1)
+                        # e.g., data:image/png;base64,....
+                        import base64
+                        mime = "image/jpeg"
+                        if ":" in header and ";" in header:
+                            mime = header.split(":", 1)[1].split(";", 1)[0] or mime
+                        data_bytes = base64.b64decode(b64data)
+                        images.append({"data": data_bytes, "name": name or "image.jpg", "ctype": mime})
+                        continue
+                    except Exception:
+                        pass
                 if is_image and url:
                     images.append({"url": url, "name": name or "image.jpg", "ctype": ctype if ctype.startswith("image/") else "image/jpeg"})
             if not images:
@@ -384,10 +472,13 @@ class TeamsMessageHandler:
             # Try attach each image by URL
             ok = 0
             for a in images:
-                url = a["url"]
                 name = a.get("name") or "image.jpg"
                 ctype = a.get("ctype") or "image/jpeg"
-                result = await svc.attach_image_from_url(user_info.user_mail, url, name, ctype)
+                if "data" in a:
+                    result = await svc.attach_image_bytes(user_info.user_mail, a["data"], name, ctype)
+                else:
+                    url = a["url"]
+                    result = await svc.attach_image_from_url(user_info.user_mail, url, name, ctype)
                 if result.get("success"):
                     ok += 1
                 else:
