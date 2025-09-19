@@ -379,6 +379,31 @@ class ITSupportService:
         if not gid:
             return {"success": False, "error": "找不到最近建立的 IT 單可供附檔，請先使用 @it 建立。"}
         try:
+            # If filename looks generic, synthesize a better one from mime
+            generic = (not filename) or (filename.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in filename)
+            if generic:
+                ext_map = {
+                    "image/png": "png",
+                    "image/jpeg": "jpg",
+                    "image/jpg": "jpg",
+                    "image/gif": "gif",
+                    "image/webp": "webp",
+                    "image/bmp": "bmp",
+                    "image/heic": "heic",
+                    "application/pdf": "pdf",
+                    "application/zip": "zip",
+                    "text/plain": "txt",
+                    "application/msword": "doc",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+                    "application/vnd.ms-excel": "xls",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+                    "application/vnd.ms-powerpoint": "ppt",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+                }
+                ext = ext_map.get((mime_type or "").lower(), "bin")
+                from datetime import datetime
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"upload_{ts}.{ext}"
             result = await self.asana.upload_attachment(gid, filename, content, mime_type)
             return {"success": True, "message": "✅ 已上傳圖片至 IT 單", "data": result}
         except Exception as e:

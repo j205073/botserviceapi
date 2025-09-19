@@ -442,7 +442,9 @@ class TeamsMessageHandler:
                         ft = content.get("fileType")
                         generic = (not name) or (name.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in name)
                         if generic and ft:
-                            name = f"upload.{ft}"
+                            from datetime import datetime
+                            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            name = f"upload_{ts}.{ft}"
                 # Skip card attachments
                 if ctype.startswith("application/vnd.microsoft.card"):
                     continue
@@ -476,7 +478,9 @@ class TeamsMessageHandler:
                                 "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
                             }
                             ext = ext_map.get(mime, "bin")
-                            name = f"upload.{ext}"
+                            from datetime import datetime
+                            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            name = f"screenshot_{ts}.{ext}"
                         data_bytes = base64.b64decode(b64data)
                         files.append({"data": data_bytes, "name": name or "file.bin", "ctype": mime})
                         continue
@@ -494,6 +498,31 @@ class TeamsMessageHandler:
                                 name = unquote(base)
                         except Exception:
                             pass
+                    # If still generic after URL parse, synthesize from content-type
+                    generic2 = (not name) or (name.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in name)
+                    if generic2:
+                        ext_map = {
+                            "image/png": "png",
+                            "image/jpeg": "jpg",
+                            "image/jpg": "jpg",
+                            "image/gif": "gif",
+                            "image/webp": "webp",
+                            "image/bmp": "bmp",
+                            "image/heic": "heic",
+                            "application/pdf": "pdf",
+                            "application/zip": "zip",
+                            "text/plain": "txt",
+                            "application/msword": "doc",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+                            "application/vnd.ms-excel": "xls",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+                            "application/vnd.ms-powerpoint": "ppt",
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+                        }
+                        ext = ext_map.get(ctype, "bin")
+                        from datetime import datetime
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        name = f"upload_{ts}.{ext}"
                     files.append({"url": url, "name": name or "file.bin", "ctype": ctype or "application/octet-stream"})
             if not files:
                 return False
