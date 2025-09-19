@@ -440,7 +440,8 @@ class TeamsMessageHandler:
                         if not name:
                             name = content.get("name") or name
                         ft = content.get("fileType")
-                        if not name and ft:
+                        generic = (not name) or (name.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in name)
+                        if generic and ft:
                             name = f"upload.{ft}"
                 # Skip card attachments
                 if ctype.startswith("application/vnd.microsoft.card"):
@@ -453,8 +454,9 @@ class TeamsMessageHandler:
                         mime = "application/octet-stream"
                         if ":" in header and ";" in header:
                             mime = header.split(":", 1)[1].split(";", 1)[0] or mime
-                        # Infer extension if name missing
-                        if not name:
+                        # Infer extension if name missing or generic (e.g., 'original')
+                        generic = (not name) or (name.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in name)
+                        if generic:
                             ext_map = {
                                 "image/png": "png",
                                 "image/jpeg": "jpg",
@@ -481,8 +483,9 @@ class TeamsMessageHandler:
                     except Exception:
                         pass
                 if url:
-                    # Derive filename from URL if name missing
-                    if not name:
+                    # Derive filename from URL if name missing or generic
+                    generic = (not name) or (name.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in name)
+                    if generic:
                         try:
                             from urllib.parse import urlparse, unquote
                             path = urlparse(url).path

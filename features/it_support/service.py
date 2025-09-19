@@ -349,7 +349,8 @@ class ITSupportService:
                 # Try extract filename from Content-Disposition if our filename is generic
                 try:
                     cd = resp.headers.get("content-disposition") or resp.headers.get("Content-Disposition")
-                    if cd and (filename in ("file.bin", "image.jpg", "upload.bin")):
+                    generic = (not filename) or (filename.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in filename)
+                    if cd and generic:
                         # naive parse filename= or filename*
                         import re as _re
                         m = _re.search(r'filename\*=UTF-8''([^;\r\n]+)', cd)
