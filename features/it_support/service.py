@@ -370,6 +370,56 @@ class ITSupportService:
                 except Exception:
                     pass
                 content = resp.content
+                # If still generic, try derive extension from Content-Type header or magic
+                try:
+                    generic2 = (not filename) or (filename.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in filename)
+                    if generic2:
+                        ctype = resp.headers.get("content-type") or resp.headers.get("Content-Type") or (mime_type or "")
+                        ctype = (ctype or "").split(";")[0].strip().lower()
+                        ext_map = {
+                            "image/png": "png",
+                            "image/jpeg": "jpg",
+                            "image/jpg": "jpg",
+                            "image/gif": "gif",
+                            "image/webp": "webp",
+                            "image/bmp": "bmp",
+                            "image/heic": "heic",
+                            "application/pdf": "pdf",
+                            "application/zip": "zip",
+                            "text/plain": "txt",
+                            "application/msword": "doc",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+                            "application/vnd.ms-excel": "xls",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+                            "application/vnd.ms-powerpoint": "ppt",
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+                        }
+                        ext = ext_map.get(ctype)
+                        if not ext:
+                            # magic sniff
+                            b = content
+                            if b.startswith(b"\x89PNG\r\n\x1a\n"):
+                                ext = "png"
+                            elif b.startswith(b"\xff\xd8"):
+                                ext = "jpg"
+                            elif b.startswith(b"GIF8"):
+                                ext = "gif"
+                            elif b.startswith(b"RIFF") and b"WEBP" in b[:16]:
+                                ext = "webp"
+                            elif b.startswith(b"%PDF"):
+                                ext = "pdf"
+                            elif b.startswith(b"PK\x03\x04"):
+                                ext = "zip"
+                        if ext:
+                            from datetime import datetime
+                            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            # Preserve 'original' prefix rule earlier; otherwise synthesize
+                            if filename and filename.lower() == "original":
+                                filename = f"original.{ext}"
+                            else:
+                                filename = filename if (filename and "." in filename) else f"upload_{ts}.{ext}"
+                except Exception:
+                    pass
         except Exception as e:
             return {"success": False, "error": f"下載附件失敗：{str(e)}"}
 

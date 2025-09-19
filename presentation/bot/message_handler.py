@@ -456,6 +456,25 @@ class TeamsMessageHandler:
                         mime = "application/octet-stream"
                         if ":" in header and ";" in header:
                             mime = header.split(":", 1)[1].split(";", 1)[0] or mime
+                        # If mime still unknown, try to sniff from bytes
+                        data_bytes = base64.b64decode(b64data)
+                        if not mime or mime == "application/octet-stream":
+                            try:
+                                # Simple magic sniff for common types
+                                if data_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                                    mime = "image/png"
+                                elif data_bytes.startswith(b"\xff\xd8"):
+                                    mime = "image/jpeg"
+                                elif data_bytes.startswith(b"GIF8"):
+                                    mime = "image/gif"
+                                elif data_bytes.startswith(b"RIFF") and b"WEBP" in data_bytes[:16]:
+                                    mime = "image/webp"
+                                elif data_bytes.startswith(b"%PDF"):
+                                    mime = "application/pdf"
+                                elif data_bytes.startswith(b"PK\x03\x04"):
+                                    mime = "application/zip"
+                            except Exception:
+                                pass
                         # Infer extension if name missing or generic (e.g., 'original')
                         generic = (not name) or (name.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in name)
                         if generic:
@@ -481,7 +500,6 @@ class TeamsMessageHandler:
                             from datetime import datetime
                             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                             name = f"screenshot_{ts}.{ext}"
-                        data_bytes = base64.b64decode(b64data)
                         files.append({"data": data_bytes, "name": name or "file.bin", "ctype": mime})
                         continue
                     except Exception:
