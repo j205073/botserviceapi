@@ -336,6 +336,12 @@ class ITSupportService:
 
         import httpx
         headers: dict[str, str] = {}
+        # Normalize filename: if it's exactly 'original', rename to 'original.png'
+        try:
+            if filename and filename.lower() == "original":
+                filename = "original.png"
+        except Exception:
+            pass
         # For Teams/BotFramework protected URLs, try with bot token
         if self._is_botframework_protected_url(url):
             token = await self._get_botframework_token()
@@ -379,6 +385,12 @@ class ITSupportService:
         if not gid:
             return {"success": False, "error": "找不到最近建立的 IT 單可供附檔，請先使用 @it 建立。"}
         try:
+            # Normalize filename: if it's exactly 'original', rename to 'original.png'
+            try:
+                if filename and filename.lower() == "original":
+                    filename = "original.png"
+            except Exception:
+                pass
             # If filename looks generic, synthesize a better one from mime
             generic = (not filename) or (filename.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in filename)
             if generic:
