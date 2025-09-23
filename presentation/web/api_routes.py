@@ -187,10 +187,30 @@ class APIRoutes:
     async def list_audit_files(self):
         """列出稽核文件"""
         try:
-            files = await self.audit_service.list_audit_files()
+            user_mail = request.args.get("user_mail")
+            date_filter = request.args.get("date")
+            include_download_url = (
+                request.args.get("include_download_url", "false").lower() == "true"
+            )
+            expiration = int(request.args.get("expiration", "3600"))
+
+            files = await self.audit_service.list_audit_files(
+                user_mail=user_mail,
+                date_filter=date_filter,
+                include_download_url=include_download_url,
+                expiration=expiration,
+            )
+
             return jsonify({
+                "success": True,
                 "files": files,
-                "total": len(files)
+                "total_files": len(files),
+                "filters": {
+                    "user_mail": user_mail,
+                    "date": date_filter,
+                    "include_download_url": include_download_url,
+                    "url_expiration": expiration if include_download_url else None,
+                },
             })
         except Exception as e:
             return jsonify({
@@ -201,10 +221,12 @@ class APIRoutes:
     async def get_download_url(self, s3_key: str):
         """獲取下載 URL"""
         try:
-            download_url = await self.audit_service.generate_download_url(s3_key)
+            expiration = int(request.args.get("expiration", "3600"))
+            download_url = await self.audit_service.generate_download_url(s3_key, expiration)
             return jsonify({
                 "download_url": download_url,
-                "s3_key": s3_key
+                "s3_key": s3_key,
+                "expires_in": expiration
             })
         except NotFoundError as e:
             return jsonify({
