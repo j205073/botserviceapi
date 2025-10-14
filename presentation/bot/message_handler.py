@@ -27,6 +27,7 @@ from shared.utils.helpers import (
     determine_language,
     get_suggested_replies,
 )
+from shared.exceptions import OpenAIServiceError
 from botbuilder.schema import ActionTypes, CardAction, SuggestedActions
 
 
@@ -389,35 +390,60 @@ class TeamsMessageHandler:
         if not self.config.openai.use_azure:
             try:
                 from app import user_model_preferences
-                model_arg = user_model_preferences.get(user_info.user_mail, self.config.openai.model)
+                model_arg = user_model_preferences.get(
+                    user_info.user_mail, self.config.openai.model
+                )
             except Exception:
                 model_arg = self.config.openai.model
 
-        # 調用對話服務
-        if model_arg:
-            response = await self.conversation_service.get_ai_response(
-                user_info.conversation_id, user_info.user_mail, user_info.message_text, model=model_arg
-            )
-        else:
-            response = await self.conversation_service.get_ai_response(
-                user_info.conversation_id, user_info.user_mail, user_info.message_text
+        try:
+            if model_arg:
+                response = await self.conversation_service.get_ai_response(
+                    user_info.conversation_id,
+                    user_info.user_mail,
+                    user_info.message_text,
+                    model=model_arg,
+                )
+            else:
+                response = await self.conversation_service.get_ai_response(
+                    user_info.conversation_id,
+                    user_info.user_mail,
+                    user_info.message_text,
+                )
+
+            suggested_actions = get_suggested_replies(
+                user_info.message_text, user_info.user_mail
             )
 
-        suggested_actions = get_suggested_replies(
-            user_info.message_text, user_info.user_mail
-        )
-
-        await turn_context.send_activity(
-            Activity(
-                type=ActivityTypes.message,
-                text=response,
-                suggested_actions=(
-                    SuggestedActions(actions=suggested_actions)
-                    if suggested_actions
-                    else None
-                ),
+            await turn_context.send_activity(
+                Activity(
+                    type=ActivityTypes.message,
+                    text=response,
+                    suggested_actions=(
+                        SuggestedActions(actions=suggested_actions)
+                        if suggested_actions
+                        else None
+                    ),
+                )
             )
-        )
+        except OpenAIServiceError as openai_error:
+            error_hint = str(openai_error) or "OpenAI 服務暫時無法回應"
+            fallback_text = (
+                "⚠️ 呼叫 OpenAI 模型時發生問題，暫時無法提供回覆。\n"
+                "請稍後再試，或輸入 @model 改用其他模型。"
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=fallback_text)
+            )
+            print(f"OpenAIServiceError while responding: {error_hint}")
+        except Exception as unexpected_error:
+            await turn_context.send_activity(
+                Activity(
+                    type=ActivityTypes.message,
+                    text="⚠️ 目前無法取得模型回覆，請稍後再試一次。",
+                )
+            )
+            print(f"Unexpected error in _handle_direct_openai_response: {unexpected_error}")
 
     async def _try_attach_images(self, turn_context: TurnContext, user_info: BotInteractionDTO) -> bool:
         """If message has file attachments and user has a recent IT task, upload them to Asana.
