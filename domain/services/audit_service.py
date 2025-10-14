@@ -2,8 +2,9 @@
 稽核日誌業務邏輯服務
 重構自原始 app.py 中的稽核日誌相關功能
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 import os
+import re
 import json
 import logging
 from datetime import datetime, timedelta
@@ -400,6 +401,20 @@ class AuditService:
         if not self.s3_client:
             raise BusinessLogicError("S3 客戶端未初始化，無法上傳稽核日誌")
 
+        results: List[Dict[str, Any]] = []
+        total_files = 0
+        total_success = 0
+        total_failed = 0
+        users_processed: Set[str] = set()
+
+        # 先嘗試上傳本地暫存的稽核檔案
+        local_summary = await self._upload_pending_local_files()
+        results.extend(local_summary["details"])
+        total_files += local_summary["total_files"]
+        total_success += local_summary["success_files"]
+        total_failed += local_summary["failed_files"]
+        users_processed.update(local_summary["users_processed"])
+
         # 收集要上傳的所有使用者及其日誌
         try:
             logs_map = await self.audit_repository.get_logs_for_upload()  # type: ignore[attr-defined]
@@ -411,29 +426,23 @@ class AuditService:
                 if user_log:
                     logs_map[u] = user_log
 
-        results: List[Dict[str, Any]] = []
-        total_files = 0
-        total_success = 0
-        total_failed = 0
-        users_processed: List[str] = []
-
         for user_mail, logs in logs_map.items():
             if not logs:
                 continue
-            users_processed.append(user_mail)
+            users_processed.add(user_mail)
             total_files += 1
             result = await self.upload_user_audit_logs(user_mail)
             if result.get("success"):
                 total_success += 1
             else:
                 total_failed += 1
-            results.append({"user_mail": user_mail, **result})
+            results.append({"user_mail": user_mail, **result, "source": "repository"})
 
         message = f"處理完成，共 {total_files} 個檔案，成功 {total_success}，失敗 {total_failed}"
         return {
             "success": total_failed == 0,
             "message": message,
-            "users_processed": users_processed,
+            "users_processed": sorted(users_processed),
             "total_files": total_files,
             "success_files": total_success,
             "failed_files": total_failed,
@@ -554,6 +563,190 @@ class AuditService:
                 except Exception:
                     continue
         return sorted(files, key=lambda x: x.get("modified", ""), reverse=True)
+
+    async def _upload_pending_local_files(self) -> Dict[str, Any]:
+        """上傳本地暫存的稽核檔案並提供統計摘要。"""
+        summary = {
+            "users_processed": [],
+            "details": [],
+            "total_files": 0,
+            "success_files": 0,
+            "failed_files": 0,
+        }
+
+        log_dir = "./local_audit_logs"
+        if not os.path.exists(log_dir):
+            return summary
+
+        pattern = re.compile(r"^(?P<mail>.+)_(?P<date>\d{4}-\d{2}-\d{2})\.json$")
+        grouped: Dict[str, List[Dict[str, str]]] = {}
+
+        for filename in os.listdir(log_dir):
+            if not filename.endswith(".json"):
+                continue
+            match = pattern.match(filename)
+            if not match:
+                continue
+            user_mail = match.group("mail")
+            file_path = os.path.join(log_dir, filename)
+            grouped.setdefault(user_mail, []).append(
+                {
+                    "path": file_path,
+                    "filename": filename,
+                    "log_date": match.group("date"),
+                }
+            )
+
+        users_seen: Set[str] = set()
+        clear_logs = getattr(self.audit_repository, "clear_uploaded_logs", None)
+
+        for user_mail, file_infos in grouped.items():
+            if not file_infos:
+                continue
+
+            try:
+                file_infos.sort(key=lambda info: os.path.getmtime(info["path"]))
+            except FileNotFoundError:
+                continue
+
+            user_success = 0
+            user_failed = 0
+
+            for info in file_infos:
+                result = await self._upload_local_audit_file(
+                    user_mail,
+                    info["path"],
+                    info["log_date"],
+                )
+
+                summary["details"].append({"user_mail": user_mail, **result})
+                summary["total_files"] += 1
+
+                if result.get("success"):
+                    user_success += 1
+                    summary["success_files"] += 1
+                else:
+                    user_failed += 1
+                    summary["failed_files"] += 1
+
+            if user_success or user_failed:
+                users_seen.add(user_mail)
+
+            if user_success and callable(clear_logs):
+                try:
+                    await clear_logs([user_mail])  # type: ignore[misc]
+                except Exception:
+                    pass
+
+        summary["users_processed"] = list(users_seen)
+        return summary
+
+    async def _upload_local_audit_file(
+        self,
+        user_mail: str,
+        file_path: str,
+        log_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """將單一本地稽核檔案上傳至 S3。"""
+        filename = os.path.basename(file_path)
+        bucket_name = getattr(self.s3_client, "bucket_name", None)
+
+        if not self.s3_client or not bucket_name:
+            return {
+                "success": False,
+                "message": "S3 客戶端未初始化或缺少 bucket 設定",
+                "filename": filename,
+                "local_path": file_path,
+                "source": "local_cache",
+            }
+
+        if not os.path.exists(file_path):
+            return {
+                "success": False,
+                "message": "本地檔案不存在",
+                "filename": filename,
+                "local_path": file_path,
+                "source": "local_cache",
+            }
+
+        try:
+            import pyzipper  # type: ignore
+        except Exception as exc:  # pragma: no cover - 依賴環境
+            return {
+                "success": False,
+                "message": f"zip 模組載入失敗: {exc}",
+                "filename": filename,
+                "local_path": file_path,
+                "source": "local_cache",
+            }
+
+        taiwan_now = get_taiwan_time()
+        timestamp_str = taiwan_now.strftime("%Y%m%d_%H%M%S")
+        date_for_key = (log_date or taiwan_now.strftime("%Y-%m-%d")).strip()
+        base_name_no_ext = os.path.splitext(filename)[0]
+        s3_filename_noext = f"{base_name_no_ext}_{timestamp_str}"
+        s3_key = f"trgpt/{user_mail}/{date_for_key}/{s3_filename_noext}.json.zip"
+        zip_path = f"{file_path}.zip"
+
+        upload_error: Optional[Exception] = None
+        success = False
+
+        try:
+            with pyzipper.AESZipFile(
+                zip_path,
+                "w",
+                compression=pyzipper.ZIP_DEFLATED,
+                encryption=pyzipper.WZ_AES,
+            ) as zf:
+                zf.setpassword(b"rinnai")
+                with open(file_path, "rb") as src:
+                    zf.writestr(filename, src.read())
+
+            loop = __import__("asyncio").get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self.s3_client.client.upload_file(
+                    zip_path,
+                    bucket_name,
+                    s3_key,
+                    ExtraArgs={"ContentType": "application/zip"},
+                ),
+            )
+            success = True
+        except Exception as exc:
+            upload_error = exc
+            self._logger.error(f"上傳本地稽核檔案失敗: {file_path} - {exc}")
+        finally:
+            if os.path.exists(zip_path):
+                try:
+                    os.remove(zip_path)
+                except Exception as exc:
+                    self._logger.warning(f"刪除暫存壓縮檔失敗: {zip_path} - {exc}")
+
+            if success and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as exc:
+                    self._logger.warning(f"刪除已上傳檔案失敗: {file_path} - {exc}")
+
+        if success:
+            return {
+                "success": True,
+                "message": f"成功上傳本地稽核檔案 {filename}",
+                "s3_key": s3_key,
+                "filename": filename,
+                "local_path": file_path,
+                "source": "local_cache",
+            }
+
+        error_message = f"上傳本地稽核檔案失敗: {upload_error}" if upload_error else "上傳本地稽核檔案失敗"
+        return {
+            "success": False,
+            "message": error_message,
+            "filename": filename,
+            "local_path": file_path,
+            "source": "local_cache",
+        }
 
     # 內部：增量寫入本地稽核檔案（每日一檔）
     def _append_local_log_entry(self, user_mail: str, entry: AuditLogEntry) -> None:

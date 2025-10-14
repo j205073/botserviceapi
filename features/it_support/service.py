@@ -1,7 +1,8 @@
 import os
 import json
+from base64 import urlsafe_b64encode
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from datetime import datetime, timezone
 import pytz
 
@@ -336,6 +337,7 @@ class ITSupportService:
 
         import httpx
         headers: dict[str, str] = {}
+        download_headers: Dict[str, Any] = {}
         # Normalize filename: if it's exactly 'original', rename to 'original.png'
         try:
             if filename and filename.lower() == "original":
