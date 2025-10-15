@@ -3,6 +3,7 @@ Teams Bot 訊息處理器
 處理所有來自 Teams 的用戶互動，包括文字訊息和卡片互動
 """
 
+import logging
 from typing import Dict, Any, Optional
 from botbuilder.core import TurnContext
 from botbuilder.schema import Activity, ActivityTypes, SuggestedActions
@@ -56,32 +57,63 @@ class TeamsMessageHandler:
         self.meeting_card_builder = MeetingCardBuilder()
         self.model_card_builder = ModelSelectionCardBuilder()
         self.upload_card_builder = UploadCardBuilder()
+        self.logger = logging.getLogger(__name__)
 
     async def handle_message(self, turn_context: TurnContext) -> None:
         """處理 Teams 訊息"""
         try:
             # 提取用戶信息
             user_info = await self._extract_user_info(turn_context)
+            snippet = (user_info.message_text or "").strip()
+            if len(snippet) > 120:
+                snippet = f"{snippet[:117]}..."
+            self.logger.info(
+                "Teams message received user_mail=%s conversation_id=%s text=\"%s\"",
+                user_info.user_mail,
+                user_info.conversation_id,
+                snippet or "<empty>",
+            )
 
             # 更新用戶會話參考
             await self._update_user_conversation_ref(turn_context, user_info)
 
             # 處理卡片互動
             if turn_context.activity.value:
+                self.logger.info(
+                    "Handling adaptive card interaction user_mail=%s conversation_id=%s",
+                    user_info.user_mail,
+                    user_info.conversation_id,
+                )
                 await self._handle_card_interaction(turn_context, user_info)
                 return
 
             # 若含有附件且最近建立 IT 單，嘗試附加圖片
             if turn_context.activity.attachments:
+                self.logger.info(
+                    "Attempting attachment handling user_mail=%s conversation_id=%s attachment_count=%d",
+                    user_info.user_mail,
+                    user_info.conversation_id,
+                    len(turn_context.activity.attachments or []),
+                )
                 handled = await self._try_attach_images(turn_context, user_info)
                 if handled:
+                    self.logger.info(
+                        "Attachment handling completed user_mail=%s conversation_id=%s",
+                        user_info.user_mail,
+                        user_info.conversation_id,
+                    )
                     return
 
             # 處理文字訊息
             await self._handle_text_message(turn_context, user_info)
 
-        except Exception as e:
-            print(f"處理訊息時發生錯誤: {e}")
+        except Exception:
+            user_info = locals().get("user_info")
+            self.logger.exception(
+                "處理訊息時發生錯誤 user_mail=%s conversation_id=%s",
+                getattr(user_info, "user_mail", "unknown"),
+                getattr(user_info, "conversation_id", "unknown"),
+            )
             await self._send_error_response(turn_context)
 
     async def _extract_user_info(self, turn_context: TurnContext) -> BotInteractionDTO:
@@ -95,7 +127,17 @@ class TeamsMessageHandler:
         if self.config.debug_mode and self.config.debug_account:
             user_mail = self.config.debug_account
 
-        print(f"Current User Info: {user_name} (ID: {user_id}) (Mail: {user_mail})")
+        masked_email = user_mail
+        if "@" in user_mail:
+            local, domain = user_mail.split("@", 1)
+            masked_email = f"{local[:3]}***@{domain}" if len(local) > 3 else f"{local}***@{domain}"
+        self.logger.debug(
+            "User extracted name=%s user_id=%s mail=%s conversation_id=%s",
+            user_name,
+            user_id,
+            masked_email,
+            conversation_id,
+        )
 
         return BotInteractionDTO(
             user_id=user_id,
@@ -377,8 +419,12 @@ class TeamsMessageHandler:
 
                 await self._handle_direct_openai_response(turn_context, user_info)
 
-        except Exception as e:
-            print(f"意圖分析失敗: {e}")
+        except Exception:
+            self.logger.exception(
+                "意圖分析失敗 user_mail=%s conversation_id=%s",
+                user_info.user_mail,
+                user_info.conversation_id,
+            )
             await self._handle_direct_openai_response(turn_context, user_info)
 
     async def _handle_direct_openai_response(
@@ -396,7 +442,18 @@ class TeamsMessageHandler:
             except Exception:
                 model_arg = self.config.openai.model
 
+        prompt_preview = (user_info.message_text or "").strip()
+        if len(prompt_preview) > 120:
+            prompt_preview = f"{prompt_preview[:117]}..."
+
         try:
+            self.logger.info(
+                "OpenAI response start user_mail=%s conversation_id=%s model=%s prompt=\"%s\"",
+                user_info.user_mail,
+                user_info.conversation_id,
+                model_arg or self.config.openai.model,
+                prompt_preview or "<empty>",
+            )
             if model_arg:
                 response = await self.conversation_service.get_ai_response(
                     user_info.conversation_id,
@@ -413,6 +470,17 @@ class TeamsMessageHandler:
 
             suggested_actions = get_suggested_replies(
                 user_info.message_text, user_info.user_mail
+            )
+
+            response_preview = (response or "").strip().replace("\n", " ")
+            if len(response_preview) > 120:
+                response_preview = f"{response_preview[:117]}..."
+            self.logger.info(
+                "OpenAI response success user_mail=%s conversation_id=%s len=%d preview=\"%s\"",
+                user_info.user_mail,
+                user_info.conversation_id,
+                len(response or ""),
+                response_preview or "<empty>",
             )
 
             await turn_context.send_activity(
@@ -435,7 +503,12 @@ class TeamsMessageHandler:
             await turn_context.send_activity(
                 Activity(type=ActivityTypes.message, text=fallback_text)
             )
-            print(f"OpenAIServiceError while responding: {error_hint}")
+            self.logger.warning(
+                "OpenAIServiceError while responding user_mail=%s conversation_id=%s error=%s",
+                user_info.user_mail,
+                user_info.conversation_id,
+                error_hint,
+            )
         except Exception as unexpected_error:
             await turn_context.send_activity(
                 Activity(
@@ -443,7 +516,11 @@ class TeamsMessageHandler:
                     text="⚠️ 目前無法取得模型回覆，請稍後再試一次。",
                 )
             )
-            print(f"Unexpected error in _handle_direct_openai_response: {unexpected_error}")
+            self.logger.exception(
+                "Unexpected error in _handle_direct_openai_response user_mail=%s conversation_id=%s",
+                user_info.user_mail,
+                user_info.conversation_id,
+            )
 
     async def _try_attach_images(self, turn_context: TurnContext, user_info: BotInteractionDTO) -> bool:
         """If message has file attachments and user has a recent IT task, upload them to Asana.

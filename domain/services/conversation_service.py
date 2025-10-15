@@ -3,8 +3,10 @@
 重構自原始 app.py 中的對話相關功能
 """
 
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 from domain.models.conversation import (
     Conversation,
@@ -34,6 +36,7 @@ class ConversationService:
         self.conversation_repository = conversation_repository
         self.audit_service = audit_service
         self.openai_client = openai_client
+        self.logger = logging.getLogger(__name__)
 
     async def start_conversation(
         self, conversation_id: str, user_mail: str
@@ -286,10 +289,37 @@ class ConversationService:
     ) -> str:
         """獲取 AI 回應"""
         try:
+            model_name = kwargs.get("model", self.config.openai.model)
+            request_id = kwargs.get("request_id")
+            if not request_id:
+                request_id = str(uuid4())
+                kwargs["request_id"] = request_id
+            prompt_preview = (message or "").strip()
+            if len(prompt_preview) > 120:
+                prompt_preview = f"{prompt_preview[:117]}..."
+            self.logger.info(
+                "AI response requested user_mail=%s conversation_id=%s model=%s request_id=%s",
+                user_mail,
+                conversation_id,
+                model_name,
+                request_id,
+            )
+            if prompt_preview:
+                self.logger.debug(
+                    "AI request prompt preview request_id=%s conversation_id=%s text=\"%s\"",
+                    request_id,
+                    conversation_id,
+                    prompt_preview,
+                )
             # 確保對話存在（自動創建機制，模擬原始行為）
             conversation = await self.conversation_repository.get_by_id(conversation_id)
             if not conversation:
-                print(f"對話 {conversation_id} 不存在，自動創建新對話")
+                self.logger.info(
+                    "Conversation missing, creating new conversation user_mail=%s conversation_id=%s request_id=%s",
+                    user_mail,
+                    conversation_id,
+                    request_id,
+                )
                 conversation = await self.conversation_repository.create(
                     conversation_id, user_mail
                 )
@@ -304,21 +334,45 @@ class ConversationService:
                 system_prompt = self._get_system_prompt(user_mail)
                 context = [{"role": "system", "content": system_prompt}] + context
             max_tokens = 4000
+            # 記錄上下文資訊（避免記錄完整內容）
+            self.logger.debug(
+                "Prepared OpenAI context user_mail=%s conversation_id=%s messages=%d request_id=%s",
+                user_mail,
+                conversation_id,
+                len(context),
+                request_id,
+            )
             # 調用 OpenAI API
             response = await self.openai_client.chat_completion(
                 messages=context,
-                model=kwargs.get("model", self.config.openai.model),
+                model=model_name,
                 max_tokens=kwargs.get("max_tokens", max_tokens),
                 temperature=kwargs.get("temperature", 1.0),
             )
 
             # 添加AI回應到對話歷史
             await self.add_assistant_message(conversation_id, user_mail, response)
+            response_preview = (response or "").strip()
+            if len(response_preview) > 120:
+                response_preview = f"{response_preview[:117]}..."
+            self.logger.info(
+                "AI response stored user_mail=%s conversation_id=%s len=%d request_id=%s preview=\"%s\"",
+                user_mail,
+                conversation_id,
+                len(response or ""),
+                request_id,
+                response_preview or "<empty>",
+            )
 
             return response
 
         except Exception as e:
-            print(f"❌ 獲取 AI 回應失敗: {str(e)}")
+            self.logger.exception(
+                "獲取 AI 回應失敗 user_mail=%s conversation_id=%s request_id=%s",
+                user_mail,
+                conversation_id,
+                kwargs.get("request_id"),
+            )
             raise OpenAIServiceError(f"AI 回應生成失敗: {str(e)}")
 
     def _get_system_prompt(self, user_mail: str) -> str:
@@ -341,7 +395,9 @@ class ConversationService:
                 "total_messages": total_messages,
             }
         except Exception as e:
-            print(f"Error getting conversation summary: {e}")
+            self.logger.exception(
+                "Error getting conversation summary user_mail=%s", user_mail
+            )
             return {
                 "total_conversations": 0,
                 "active_conversations": 0,

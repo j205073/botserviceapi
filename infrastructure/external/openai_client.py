@@ -3,12 +3,15 @@ OpenAI 客戶端封裝
 """
 
 import asyncio
+import logging
+import time
 from typing import List, Dict, Any, Optional, AsyncGenerator
+from uuid import uuid4
 from openai import AzureOpenAI, OpenAI
 
 from config.settings import AppConfig
 from shared.exceptions import OpenAIServiceError
-from shared.utils.helpers import AsyncRetry, PerformanceTimer
+from shared.utils.helpers import AsyncRetry
 
 
 class OpenAIClient:
@@ -17,6 +20,7 @@ class OpenAIClient:
     def __init__(self, config: AppConfig):
         self.config = config
         self.client = self._create_client()
+        self.logger = logging.getLogger(__name__)
 
     def _create_client(self):
         """創建 OpenAI 客戶端"""
@@ -32,66 +36,69 @@ class OpenAIClient:
     @AsyncRetry(max_attempts=3, delay=1.0, backoff=2.0)
     async def chat_completion(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """聊天完成"""
+        request_id = kwargs.pop("request_id", None) or str(uuid4())
+        model = kwargs.get("model", self.config.openai.model)
+        message_count = len(messages or [])
+        start_time = time.perf_counter()
+        self.logger.info(
+            "OpenAI chat_completion start request_id=%s model=%s messages=%d azure=%s",
+            request_id,
+            model,
+            message_count,
+            self.config.openai.use_azure,
+        )
+
         try:
-            with PerformanceTimer("OpenAI API 調用"): 
-                # 設置默認參數
-                model = kwargs.get("model", self.config.openai.model)
+            use_reasoning_responses = (
+                not self.config.openai.use_azure
+                and (model.startswith("gpt-5") or model.startswith("o1"))
+            )
 
-                # 對 gpt-5 / o1 類推理模型優先使用 Responses API（僅 OpenAI，Azure 仍走 Chat Completions）
-                use_reasoning_responses = (
-                    not self.config.openai.use_azure
-                    and (model.startswith("gpt-5") or model.startswith("o1"))
-                )
+            result_text: Optional[str] = None
 
-                if use_reasoning_responses:
-                    # 將 messages 簡單串接為文字輸入；Responses API 以 input 為主
-                    input_segments = []
-                    for m in messages or []:
-                        role = m.get("role", "user")
-                        content = m.get("content", "")
-                        input_segments.append(f"{role}: {content}")
-                    input_text = "\n".join(input_segments) if input_segments else ""
+            if use_reasoning_responses:
+                input_segments = []
+                for m in messages or []:
+                    role = m.get("role", "user")
+                    content = m.get("content", "")
+                    input_segments.append(f"{role}: {content}")
+                input_text = "\n".join(input_segments) if input_segments else ""
 
-                    # 構建 Responses API 參數
-                    responses_params = {"model": model, "input": input_text}
+                responses_params = {"model": model, "input": input_text}
 
-                    # gpt-5 / o1 使用 max_output_tokens
-                    if "max_completion_tokens" in kwargs:
-                        responses_params["max_output_tokens"] = kwargs[
-                            "max_completion_tokens"
-                        ]
-                    elif "max_tokens" in kwargs:
-                        responses_params["max_output_tokens"] = kwargs["max_tokens"]
-                    else:
-                        responses_params["max_output_tokens"] = min(
-                            self.config.openai.max_tokens, 4000
-                        )
-
-                    # reasoning 努力等級（與既有行為對齊）
-                    effort = None
-                    if model == "gpt-5":
-                        effort = "medium"
-                    elif model == "gpt-5-mini":
-                        effort = "low"
-                    elif model == "gpt-5-nano":
-                        effort = "minimal"
-                    if effort:
-                        responses_params["reasoning"] = {"effort": effort}
-
-                    import json
-                    print(json.dumps({"endpoint": "responses.create", **responses_params}, ensure_ascii=False))
-
-                    # 呼叫 Responses API（同步 SDK 以執行緒池包裝）
-                    response = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: self.client.responses.create(**responses_params)
+                if "max_completion_tokens" in kwargs:
+                    responses_params["max_output_tokens"] = kwargs["max_completion_tokens"]
+                elif "max_tokens" in kwargs:
+                    responses_params["max_output_tokens"] = kwargs["max_tokens"]
+                else:
+                    responses_params["max_output_tokens"] = min(
+                        self.config.openai.max_tokens, 4000
                     )
 
-                    # 優先使用 output_text（SDK 聚合的便捷欄位）
-                    output_text = getattr(response, "output_text", None)
-                    if isinstance(output_text, str) and output_text.strip():
-                        return output_text.strip()
+                effort = None
+                if model == "gpt-5":
+                    effort = "medium"
+                elif model == "gpt-5-mini":
+                    effort = "low"
+                elif model == "gpt-5-nano":
+                    effort = "minimal"
+                if effort:
+                    responses_params["reasoning"] = {"effort": effort}
 
-                    # 回退解析：嘗試從結構化內容中提取文字
+                self.logger.debug(
+                    "OpenAI responses params request_id=%s params=%s",
+                    request_id,
+                    {**responses_params, "endpoint": "responses.create"},
+                )
+
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.client.responses.create(**responses_params)
+                )
+
+                output_text = getattr(response, "output_text", None)
+                if isinstance(output_text, str) and output_text.strip():
+                    result_text = output_text.strip()
+                else:
                     try:
                         outputs = getattr(response, "output", None) or []
                         text_candidate = None
@@ -104,32 +111,29 @@ class OpenAIClient:
                                     ptype = ptype or part.get("type")
                                     ptext = part.get("text")
                                 if ptext and str(ptext).strip():
-                                    # 優先 output_text 類型
                                     if ptype in ("output_text", "text"):
-                                        return str(ptext).strip()
+                                        result_text = str(ptext).strip()
+                                        break
                                     if text_candidate is None:
                                         text_candidate = str(ptext).strip()
-                        if text_candidate:
-                            return text_candidate
+                            if result_text:
+                                break
+                        if not result_text and text_candidate:
+                            result_text = text_candidate
                     except Exception:
                         pass
 
-                    # 若仍無內容，提供一致的回退訊息
-                    return "抱歉，我目前沒有可回應的內容。（模型未提供文本內容）"
+                if not result_text:
+                    result_text = "抱歉，我目前沒有可回應的內容。（模型未提供文本內容）"
 
-                # 構建請求參數
-                # request_params = {
-                #     "model": model,
-                #     "messages": messages,
-                #     "timeout": kwargs.get("timeout", self.config.openai.timeout),
-                # }
-                request_params = {
+            else:
+                request_params: Dict[str, Any] = {
                     "model": model,
                     "messages": messages,
                 }
-                # 根據模型類型添加適當的參數
+
                 if model.startswith("gpt-5"):
-                    extra_params = {}
+                    extra_params: Dict[str, Any] = {}
                     if model == "gpt-5":
                         extra_params = {
                             "reasoning_effort": "medium",
@@ -145,26 +149,24 @@ class OpenAIClient:
                             "reasoning_effort": "minimal",
                             "verbosity": "low",
                         }
-
-                    # 將 extra_params 合併到 request_params
                     request_params.update(extra_params)
 
-                    # chat.completions 仍然使用 max_tokens
                     if "max_tokens" in kwargs:
                         request_params["max_tokens"] = kwargs["max_tokens"]
                     elif "max_completion_tokens" in kwargs:
                         request_params["max_tokens"] = kwargs["max_completion_tokens"]
-                    # 不添加 temperature 參數（推理模型通常忽略）
                 else:
-                    # 其他模型使用 max_tokens 和 temperature
                     if "max_tokens" in kwargs:
                         request_params["max_tokens"] = kwargs["max_tokens"]
                     if "temperature" in kwargs:
                         request_params["temperature"] = kwargs["temperature"]
-                import json
-                print(json.dumps(request_params, ensure_ascii=False))
 
-                # 使用 asyncio 將同步調用轉為異步
+                self.logger.debug(
+                    "OpenAI chat params request_id=%s params=%s",
+                    request_id,
+                    request_params,
+                )
+
                 response = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: self.client.chat.completions.create(**request_params)
                 )
@@ -174,20 +176,16 @@ class OpenAIClient:
 
                 choice = response.choices[0]
                 msg = getattr(choice, "message", None)
-                message_content = None
                 if msg is not None:
                     content_field = getattr(msg, "content", None)
-                    # 常見情況：字串內容
                     if isinstance(content_field, str) and content_field.strip():
-                        message_content = content_field.strip()
-                    # 新版 SDK 可能回傳 content parts 陣列（含 reasoning/output_text 等型別）
+                        result_text = content_field.strip()
                     elif isinstance(content_field, list):
                         preferred_text = None
                         fallback_text = None
                         for part in content_field:
                             p_text = None
                             p_type = None
-                            # 兼容物件或 dict 兩種型態
                             try:
                                 p_text = getattr(part, "text", None)
                                 p_type = getattr(part, "type", None)
@@ -202,33 +200,56 @@ class OpenAIClient:
                                     preferred_text = str(p_text).strip()
                                 elif fallback_text is None:
                                     fallback_text = str(p_text).strip()
-                        message_content = preferred_text or fallback_text
+                        result_text = preferred_text or fallback_text
 
-                    # 可能存在拒絕/安全輸出
-                    if not message_content:
+                    if not result_text:
                         refusal = getattr(msg, "refusal", None)
                         if isinstance(refusal, str) and refusal.strip():
-                            message_content = refusal.strip()
+                            result_text = refusal.strip()
 
-                if not message_content:
-                    # 盡量避免直接拋錯：回傳可讀的fallback以提供較好體驗
+                if not result_text:
                     model_name = request_params.get("model", self.config.openai.model)
                     debug_hint = "（模型未提供文本內容）"
-                    return f"抱歉，我目前沒有可回應的內容。{debug_hint}"
+                    result_text = f"抱歉，我目前沒有可回應的內容。{debug_hint}"
 
-                return message_content
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            preview = (result_text or "").strip().replace("\n", " ")
+            if len(preview) > 120:
+                preview = f"{preview[:117]}..."
+            self.logger.info(
+                "OpenAI chat_completion success request_id=%s model=%s latency_ms=%.1f text_len=%d preview=\"%s\"",
+                request_id,
+                model,
+                duration_ms,
+                len(result_text or ""),
+                preview or "<empty>",
+            )
+            return result_text or ""
 
         except Exception as e:
-            error_msg = f"OpenAI API 調用失敗: {str(e)}"
-            print(f"❌ {error_msg}")
-            raise OpenAIServiceError(error_msg) from e
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            self.logger.exception(
+                "OpenAI chat_completion failed request_id=%s model=%s latency_ms=%.1f error=%s",
+                request_id,
+                model,
+                duration_ms,
+                str(e),
+            )
+            raise OpenAIServiceError(f"OpenAI API 調用失敗: {str(e)}") from e
 
     async def chat_completion_stream(
         self, messages: List[Dict[str, str]], **kwargs
     ) -> AsyncGenerator[str, None]:
         """流式聊天完成"""
         try:
+            request_id = kwargs.pop("request_id", None) or str(uuid4())
             model = kwargs.get("model", self.config.openai.model)
+            self.logger.info(
+                "OpenAI chat_completion_stream start request_id=%s model=%s messages=%d",
+                request_id,
+                model,
+                len(messages or []),
+            )
 
             request_params = {
                 "model": model,
@@ -255,9 +276,20 @@ class OpenAIClient:
                 if chunk.choices[0].delta.content is not None:
                     yield chunk.choices[0].delta.content
 
+            self.logger.info(
+                "OpenAI chat_completion_stream completed request_id=%s model=%s",
+                request_id,
+                model,
+            )
+
         except Exception as e:
             error_msg = f"OpenAI 流式 API 調用失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            self.logger.exception(
+                "OpenAI chat_completion_stream failed request_id=%s model=%s error=%s",
+                locals().get("request_id"),
+                locals().get("model"),
+                str(e),
+            )
             raise OpenAIServiceError(error_msg) from e
 
     async def summarize_text(self, text: str, max_length: int = 200, **kwargs) -> str:
@@ -282,7 +314,9 @@ class OpenAIClient:
 
         except Exception as e:
             error_msg = f"文本摘要失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            self.logger.exception(
+                "OpenAI summarize_text failed error=%s", str(e)
+            )
             raise OpenAIServiceError(error_msg) from e
 
     async def test_connection(self) -> Dict[str, Any]:
