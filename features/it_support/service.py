@@ -2,7 +2,7 @@ import os
 import json
 from base64 import urlsafe_b64encode
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import pytz
 
@@ -337,7 +337,6 @@ class ITSupportService:
 
         import httpx
         headers: dict[str, str] = {}
-        download_headers: Dict[str, Any] = {}
         # Normalize filename: if it's exactly 'original', rename to 'original.png'
         try:
             if filename and filename.lower() == "original":
@@ -351,15 +350,26 @@ class ITSupportService:
                 headers["Authorization"] = f"Bearer {token}"
                 headers["Accept"] = "*/*"
         try:
-            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                resp = await client.get(url, headers=headers)
-                resp.raise_for_status()
-                # Try extract filename from Content-Disposition if our filename is generic
-                try:
-                    cd = resp.headers.get("content-disposition") or resp.headers.get("Content-Disposition")
-                    generic = (not filename) or (filename.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in filename)
-                    if cd and generic:
-                        # naive parse filename= or filename*
+            resp_headers = None
+            content = b""
+            inferred_mime = None
+            if self._is_sharepoint_url(url):
+                content, resp_headers, inferred_name, inferred_mime = await self._download_sharepoint_file(url)
+                if inferred_name and self._is_generic_filename(filename):
+                    filename = inferred_name
+                if inferred_mime:
+                    mime_type = inferred_mime
+            else:
+                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                    resp = await client.get(url, headers=headers)
+                    resp.raise_for_status()
+                    resp_headers = resp.headers
+                    content = resp.content
+            # Try extract filename from Content-Disposition if our filename is generic
+            try:
+                if resp_headers:
+                    cd = resp_headers.get("content-disposition") or resp_headers.get("Content-Disposition")
+                    if cd and self._is_generic_filename(filename):
                         import re as _re
                         m = _re.search(r'filename\*=UTF-8''([^;\r\n]+)', cd)
                         if m:
@@ -369,59 +379,61 @@ class ITSupportService:
                             m = _re.search(r'filename="?([^";\r\n]+)"?', cd)
                             if m:
                                 filename = m.group(1)
-                except Exception:
-                    pass
-                content = resp.content
-                # If still generic, try derive extension from Content-Type header or magic
-                try:
-                    generic2 = (not filename) or (filename.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in filename)
-                    if generic2:
-                        ctype = resp.headers.get("content-type") or resp.headers.get("Content-Type") or (mime_type or "")
-                        ctype = (ctype or "").split(";")[0].strip().lower()
-                        ext_map = {
-                            "image/png": "png",
-                            "image/jpeg": "jpg",
-                            "image/jpg": "jpg",
-                            "image/gif": "gif",
-                            "image/webp": "webp",
-                            "image/bmp": "bmp",
-                            "image/heic": "heic",
-                            "application/pdf": "pdf",
-                            "application/zip": "zip",
-                            "text/plain": "txt",
-                            "application/msword": "doc",
-                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-                            "application/vnd.ms-excel": "xls",
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-                            "application/vnd.ms-powerpoint": "ppt",
-                            "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-                        }
-                        ext = ext_map.get(ctype)
-                        if not ext:
-                            # magic sniff
-                            b = content
-                            if b.startswith(b"\x89PNG\r\n\x1a\n"):
-                                ext = "png"
-                            elif b.startswith(b"\xff\xd8"):
-                                ext = "jpg"
-                            elif b.startswith(b"GIF8"):
-                                ext = "gif"
-                            elif b.startswith(b"RIFF") and b"WEBP" in b[:16]:
-                                ext = "webp"
-                            elif b.startswith(b"%PDF"):
-                                ext = "pdf"
-                            elif b.startswith(b"PK\x03\x04"):
-                                ext = "zip"
-                        if ext:
-                            from datetime import datetime
-                            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            # Preserve 'original' prefix rule earlier; otherwise synthesize
-                            if filename and filename.lower() == "original":
-                                filename = f"original.{ext}"
-                            else:
-                                filename = filename if (filename and "." in filename) else f"upload_{ts}.{ext}"
-                except Exception:
-                    pass
+            except Exception:
+                pass
+
+            # If still generic, try derive extension from Content-Type header or magic
+            try:
+                if self._is_generic_filename(filename):
+                    header_ctype = None
+                    if resp_headers:
+                        header_ctype = resp_headers.get("content-type") or resp_headers.get("Content-Type")
+                    ctype = (header_ctype or inferred_mime or mime_type or "")
+                    ctype = (ctype or "").split(";")[0].strip().lower()
+                    ext_map = {
+                        "image/png": "png",
+                        "image/jpeg": "jpg",
+                        "image/jpg": "jpg",
+                        "image/gif": "gif",
+                        "image/webp": "webp",
+                        "image/bmp": "bmp",
+                        "image/heic": "heic",
+                        "application/pdf": "pdf",
+                        "application/zip": "zip",
+                        "text/plain": "txt",
+                        "application/msword": "doc",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+                        "application/vnd.ms-excel": "xls",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+                        "application/vnd.ms-powerpoint": "ppt",
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+                    }
+                    ext = ext_map.get(ctype)
+                    if not ext:
+                        # magic sniff
+                        b = content
+                        if b.startswith(b"\x89PNG\r\n\x1a\n"):
+                            ext = "png"
+                        elif b.startswith(b"\xff\xd8"):
+                            ext = "jpg"
+                        elif b.startswith(b"GIF8"):
+                            ext = "gif"
+                        elif b.startswith(b"RIFF") and b"WEBP" in b[:16]:
+                            ext = "webp"
+                        elif b.startswith(b"%PDF"):
+                            ext = "pdf"
+                        elif b.startswith(b"PK\x03\x04"):
+                            ext = "zip"
+                    if ext:
+                        from datetime import datetime
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        # Preserve 'original' prefix rule earlier; otherwise synthesize
+                        if filename and filename.lower() == "original":
+                            filename = f"original.{ext}"
+                        else:
+                            filename = filename if (filename and "." in filename) else f"upload_{ts}.{ext}"
+            except Exception:
+                pass
         except Exception as e:
             return {"success": False, "error": f"下載附件失敗：{str(e)}"}
 
@@ -486,6 +498,96 @@ class ITSupportService:
             return any(h in host for h in protected_hosts)
         except Exception:
             return False
+
+    def _is_sharepoint_url(self, url: str) -> bool:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).netloc.lower()
+            return ("sharepoint.com" in host) or host.endswith("1drv.ms")
+        except Exception:
+            return False
+
+    def _is_generic_filename(self, filename: Optional[str]) -> bool:
+        try:
+            if not filename:
+                return True
+            lower = filename.lower()
+            if lower in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin"):
+                return True
+            return "." not in filename
+        except Exception:
+            return True
+
+    def _encode_sharepoint_share_id(self, url: str) -> str:
+        raw_url = (url or "").strip()
+        if not raw_url:
+            raise ValueError("無法轉換 SharePoint URL")
+        encoded = urlsafe_b64encode(raw_url.encode("utf-8")).decode("utf-8").rstrip("=")
+        if not encoded:
+            raise ValueError("無法轉換 SharePoint URL")
+        if encoded.startswith("u!"):
+            return encoded
+        return f"u!{encoded}"
+
+    async def _download_sharepoint_file(self, url: str):
+        """Download SharePoint/OneDrive item via Graph shares API."""
+        import httpx
+        from core.container import get_container
+        from infrastructure.external.token_manager import TokenManager
+
+        container = get_container()
+        try:
+            token_manager: TokenManager = container.get(TokenManager)
+        except Exception as exc:
+            raise RuntimeError("無法取得 Graph Token 管理器，請確認環境設定。") from exc
+
+        token = await token_manager.get_access_token()
+        share_id = self._encode_sharepoint_share_id(url)
+        base_url = f"https://graph.microsoft.com/v1.0/shares/{share_id}/driveItem"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "*/*",
+        }
+
+        metadata = None
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            try:
+                meta_resp = await client.get(base_url, headers=headers, params={"$select": "name,file"})
+            except httpx.HTTPError as err:
+                raise RuntimeError(f"連線 SharePoint 失敗：{err}") from err
+            if meta_resp.status_code == 200:
+                metadata = meta_resp.json()
+            elif meta_resp.status_code == 403:
+                raise RuntimeError("SharePoint 權限不足 (403)，請聯絡系統管理員。")
+            elif meta_resp.status_code == 404:
+                raise RuntimeError("找不到 SharePoint 檔案，請確認連結是否仍有效。")
+            else:
+                try:
+                    meta_resp.raise_for_status()
+                except httpx.HTTPStatusError as err:
+                    raise RuntimeError(f"查詢 SharePoint 檔案資訊失敗：HTTP {err.response.status_code}") from err
+
+            try:
+                download_resp = await client.get(f"{base_url}/$value", headers=headers)
+                download_resp.raise_for_status()
+            except httpx.HTTPStatusError as err:
+                status_code = err.response.status_code
+                if status_code == 403:
+                    raise RuntimeError("SharePoint 下載遭拒 (403)，請確認 BOT 應用程式權限。") from err
+                if status_code == 404:
+                    raise RuntimeError("SharePoint 下載失敗：檔案不存在或連結已過期。") from err
+                raise RuntimeError(f"SharePoint 下載失敗：HTTP {status_code}") from err
+            except httpx.HTTPError as err:
+                raise RuntimeError(f"SharePoint 下載失敗：{err}") from err
+
+            inferred_name = None
+            inferred_mime = None
+            if metadata:
+                inferred_name = metadata.get("name") or None
+                file_info = metadata.get("file") or {}
+                inferred_mime = file_info.get("mimeType") or None
+
+            return download_resp.content, download_resp.headers, inferred_name, inferred_mime
 
     async def _get_botframework_token(self) -> str | None:
         # Cache token briefly to avoid repeated auth
