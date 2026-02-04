@@ -437,6 +437,9 @@ class ITSupportService:
         except Exception as e:
             return {"success": False, "error": f"下載附件失敗：{str(e)}"}
 
+        # 根據檔案內容自動偵測正確的副檔名和 MIME 類型
+        filename, mime_type = self._infer_extension_from_content(content, filename, mime_type)
+
         try:
             result = await self.asana.upload_attachment(gid, filename, content, mime_type)
             return {"success": True, "message": "✅ 已上傳圖片至 IT 單", "data": result}
@@ -449,37 +452,8 @@ class ITSupportService:
         if not gid:
             return {"success": False, "error": "找不到最近建立的 IT 單可供附檔，請先使用 @it 建立。"}
         try:
-            # Normalize filename: if it's exactly 'original', rename to 'original.png'
-            try:
-                if filename and filename.lower() == "original":
-                    filename = "original.png"
-            except Exception:
-                pass
-            # If filename looks generic, synthesize a better one from mime
-            generic = (not filename) or (filename.lower() in ("file", "file.bin", "image", "image.jpg", "original", "upload", "upload.bin")) or ("." not in filename)
-            if generic:
-                ext_map = {
-                    "image/png": "png",
-                    "image/jpeg": "jpg",
-                    "image/jpg": "jpg",
-                    "image/gif": "gif",
-                    "image/webp": "webp",
-                    "image/bmp": "bmp",
-                    "image/heic": "heic",
-                    "application/pdf": "pdf",
-                    "application/zip": "zip",
-                    "text/plain": "txt",
-                    "application/msword": "doc",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-                    "application/vnd.ms-excel": "xls",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-                    "application/vnd.ms-powerpoint": "ppt",
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-                }
-                ext = ext_map.get((mime_type or "").lower(), "bin")
-                from datetime import datetime
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"upload_{ts}.{ext}"
+            # 根據檔案內容自動偵測正確的副檔名和 MIME 類型
+            filename, mime_type = self._infer_extension_from_content(content, filename, mime_type)
             result = await self.asana.upload_attachment(gid, filename, content, mime_type)
             return {"success": True, "message": "✅ 已上傳圖片至 IT 單", "data": result}
         except Exception as e:
@@ -517,6 +491,90 @@ class ITSupportService:
             return "." not in filename
         except Exception:
             return True
+
+    def _infer_extension_from_content(self, content: bytes, filename: Optional[str], mime_type: Optional[str]) -> tuple[str, str]:
+        """根據檔案內容（magic bytes）或 MIME 類型推斷正確的副檔名和 MIME 類型。
+        Returns: (filename, mime_type)
+        """
+        from datetime import datetime
+
+        # Magic bytes 對照表
+        magic_map = [
+            (b"\x89PNG\r\n\x1a\n", "png", "image/png"),
+            (b"\xff\xd8", "jpg", "image/jpeg"),
+            (b"GIF87a", "gif", "image/gif"),
+            (b"GIF89a", "gif", "image/gif"),
+            (b"RIFF", "webp", "image/webp"),  # WEBP 需額外檢查
+            (b"%PDF", "pdf", "application/pdf"),
+            (b"PK\x03\x04", "zip", "application/zip"),
+            (b"BM", "bmp", "image/bmp"),
+        ]
+
+        # MIME 對照表
+        mime_ext_map = {
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "image/jpg": "jpg",
+            "image/gif": "gif",
+            "image/webp": "webp",
+            "image/bmp": "bmp",
+            "image/heic": "heic",
+            "application/pdf": "pdf",
+            "application/zip": "zip",
+            "text/plain": "txt",
+            "application/msword": "doc",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+            "application/vnd.ms-excel": "xls",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+            "application/vnd.ms-powerpoint": "ppt",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+        }
+
+        detected_ext = None
+        detected_mime = None
+
+        # 優先使用 magic bytes 偵測
+        if content:
+            for magic, ext, mime in magic_map:
+                if content.startswith(magic):
+                    # 特殊處理 WEBP（RIFF 開頭但需確認 WEBP 標記）
+                    if ext == "webp" and b"WEBP" not in content[:16]:
+                        continue
+                    detected_ext = ext
+                    detected_mime = mime
+                    break
+
+        # 若 magic bytes 未偵測到，嘗試使用 MIME 類型
+        if not detected_ext and mime_type:
+            clean_mime = (mime_type or "").split(";")[0].strip().lower()
+            detected_ext = mime_ext_map.get(clean_mime)
+            if detected_ext:
+                detected_mime = clean_mime
+
+        # 若仍無法偵測，保留原始副檔名
+        if not detected_ext and filename and "." in filename:
+            original_ext = filename.rsplit(".", 1)[-1].lower()
+            if original_ext and original_ext != "bin":
+                detected_ext = original_ext
+
+        # 預設為 png（無法辨識時）
+        if not detected_ext:
+            detected_ext = "png"
+        if not detected_mime:
+            detected_mime = "image/png"
+
+        # 產生檔名
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if filename and "." in filename:
+            base = filename.rsplit(".", 1)[0]
+            if base:
+                final_filename = f"{base}.{detected_ext}"
+            else:
+                final_filename = f"upload_{ts}.{detected_ext}"
+        else:
+            final_filename = f"upload_{ts}.{detected_ext}"
+
+        return final_filename, detected_mime
 
     def _encode_sharepoint_share_id(self, url: str) -> str:
         raw_url = (url or "").strip()
