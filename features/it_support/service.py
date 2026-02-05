@@ -474,10 +474,29 @@ class ITSupportService:
             return False
 
     def _is_sharepoint_url(self, url: str) -> bool:
+        """判斷是否為 SharePoint 分享連結（需透過 Graph Shares API 下載）。
+        注意：直接下載連結（含 download.aspx、access_token、tempauth 等）不需要經過 Graph API。
+        """
         try:
-            from urllib.parse import urlparse
-            host = urlparse(url).netloc.lower()
-            return ("sharepoint.com" in host) or host.endswith("1drv.ms")
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(url)
+            host = parsed.netloc.lower()
+            path = parsed.path.lower()
+            query = parsed.query.lower()
+            
+            # 不是 SharePoint/OneDrive 網域
+            if not (("sharepoint.com" in host) or host.endswith("1drv.ms")):
+                return False
+            
+            # 已經是直接下載連結，不需要 Graph API
+            # 這些 URL 已經包含授權資訊，可以直接 HTTP GET
+            if any(kw in path for kw in ["download.aspx", "_layouts/15/download", "/_api/"]):
+                return False
+            if any(kw in query for kw in ["access_token", "tempauth", "download=1"]):
+                return False
+            
+            # 是分享連結，需要用 Graph API
+            return True
         except Exception:
             return False
 
@@ -615,6 +634,15 @@ class ITSupportService:
                 raise RuntimeError(f"連線 SharePoint 失敗：{err}") from err
             if meta_resp.status_code == 200:
                 metadata = meta_resp.json()
+            elif meta_resp.status_code == 400:
+                # 400 通常表示分享連結格式不正確或已失效
+                error_detail = ""
+                try:
+                    error_json = meta_resp.json()
+                    error_detail = error_json.get("error", {}).get("message", "")
+                except Exception:
+                    pass
+                raise RuntimeError(f"SharePoint 連結無效或已過期 (400)：{error_detail or '請重新取得分享連結'}")
             elif meta_resp.status_code == 403:
                 raise RuntimeError("SharePoint 權限不足 (403)，請聯絡系統管理員。")
             elif meta_resp.status_code == 404:
@@ -630,6 +658,8 @@ class ITSupportService:
                 download_resp.raise_for_status()
             except httpx.HTTPStatusError as err:
                 status_code = err.response.status_code
+                if status_code == 400:
+                    raise RuntimeError("SharePoint 下載失敗 (400)：連結格式無效或已過期，請重新分享檔案。") from err
                 if status_code == 403:
                     raise RuntimeError("SharePoint 下載遭拒 (403)，請確認 BOT 應用程式權限。") from err
                 if status_code == 404:
