@@ -447,19 +447,36 @@ class ITSupportService:
         if not reporter_email:
             return
 
-        # 1) Teams 通知
-        await self._send_teams_notification(reporter_email, issue_id, task_name, permalink)
-        # 2) Email 通知
+        # 1) 抓取對話評論內容
+        comments_str = ""
+        try:
+            stories_data = await self.asana.get_task_stories(task_gid)
+            stories = stories_data.get("data", [])
+            
+            comment_list = []
+            for s in stories:
+                # 僅紀錄有文字內容的評論(comment)，排除系統自動產生的訊息
+                if s.get("type") == "comment" or s.get("resource_subtype") == "comment_added":
+                    author = s.get("created_by", {}).get("name", "Unknown")
+                    text = s.get("text", "").strip()
+                    if text:
+                        comment_list.append(f"**{author}**: {text}")
+            
+            if comment_list:
+                comments_str = "\n" + "\n".join([f"  - {c}" for c in comment_list])
+        except Exception as e:
+            logger.warning("抓取任務評論失敗: %s", e)
+
+        # 2) Teams 通知
+        await self._send_teams_notification(reporter_email, issue_id, task_name, permalink, comments_str)
+        # 3) Email 通知
         await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink)
 
-        # 3) 處理 IT 知識庫
+        # 4) 處理 IT 知識庫
         if self.knowledge_base:
             try:
-                # 抓取完整對話
-                stories_data = await self.asana.get_task_stories(task_gid)
-                stories = stories_data.get("data", [])
-                
-                entry = self.knowledge_base.create_entry(task, reporter_info, stories)
+                # 使用剛才抓取的 stories (如果有的話)
+                entry = self.knowledge_base.create_entry(task, reporter_info, stories if 'stories' in locals() else None)
                 await self.knowledge_base.save_to_sharepoint(entry)
                 logger.info("IT 知識庫處理完成: %s", issue_id)
             except Exception as kb_err:
@@ -489,7 +506,7 @@ class ITSupportService:
             author_name = target_story.get("created_by", {}).get("name", "").strip()
             logger.info("檢測到留言: [%s] %s...", author_name, comment_text[:20])
 
-            # 獲取提單人資訊
+            # 獲取提單人資訊 (優先從緩存拿，拿不到才解析 notes)
             reporter_info = self._task_to_reporter.get(task_gid)
             if not reporter_info:
                 task_data = await self.asana.get_task(task_gid)
@@ -497,9 +514,11 @@ class ITSupportService:
                 reporter_info = self._parse_reporter_from_notes(task.get("notes", ""))
             
             if not reporter_info:
+                logger.warning("無法從任務 %s 獲取提單人資訊，跳過通知", task_gid)
                 return
 
             reporter_email = reporter_info.get("email", "")
+            # ... 其餘邏輯保持不變 ...
             reporter_name = (reporter_info.get("reporter_name") or "").strip()
             
             # 避免迴圈通知：如果留言者就是提單人，則不通知
@@ -548,15 +567,22 @@ class ITSupportService:
         return result if result.get("email") else None
 
     async def _send_teams_notification(
-        self, reporter_email: str, issue_id: str, task_name: str, permalink: str
+        self, reporter_email: str, issue_id: str, task_name: str, permalink: str, comments: str = ""
     ) -> bool:
         """透過 Bot Framework 推播任務完成通知。"""
-        link_text = f"\n🔗 [查看任務]({permalink})" if permalink else ""
+        link_text = f"\n🔗 [查看任務詳情]({permalink})" if permalink else ""
+        
+        detail_section = ""
+        if comments:
+            detail_section = f"\n\n💬 **溝通評論：**\n{comments}"
+
         message = (
-            f"🎉 您的 IT 單已處理完成！\n\n"
-            f"📋 單號：{issue_id}\n"
-            f"📝 任務：{task_name}"
-            # f"{link_text}"
+            f"🎉 **您的 IT 支援單已處理完成！**\n\n"
+            f"📋 **單號：** {issue_id}\n"
+            f"📝 **摘要：** {task_name}"
+            f"{detail_section}"
+            f"\n\n---"
+            f"{link_text}"
         )
         return await self._send_teams_push(reporter_email, message)
 

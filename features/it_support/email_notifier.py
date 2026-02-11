@@ -51,7 +51,7 @@ class EmailNotifier:
             text_body += f"  連結：{permalink_url}\n"
         text_body += (
             f"\n如有其他問題，請在 Teams 中使用 @it 再次提單。\n\n"
-            f"台灣林內 IT 服務台"
+            f"台灣林內-資訊課"
         )
 
         # HTML 版本
@@ -71,8 +71,8 @@ class EmailNotifier:
   <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; 
               box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
     <!-- Header -->
-    <div style="background-color: #0052CC; padding: 32px 24px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px;">✅ IT 單已處理完成</h1>
+    <div style="background: linear-gradient(135deg, #0052CC, #0747A6); padding: 32px 24px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 2px;">✅ IT 單已處理完成</h1>
     </div>
     
     <!-- Content -->
@@ -106,7 +106,7 @@ class EmailNotifier:
     <!-- Footer -->
     <div style="background-color: #F4F5F7; padding: 24px; text-align: center; border-top: 1px solid #DFE1E6;">
       <p style="color: #6B778C; font-size: 12px; margin: 0;">此為系統自動發送郵件，請勿直接回覆。</p>
-      <p style="color: #6B778C; font-size: 12px; margin: 8px 0 0;">台灣林內 IT 服務台</p>
+      <p style="color: #6B778C; font-size: 12px; margin: 8px 0 0;">台灣林內-資訊課</p>
     </div>
   </div>
 </body>
@@ -198,7 +198,7 @@ class EmailNotifier:
         text_body += (
             f"\n如需補充資訊或附件，請在 Teams 中直接傳送檔案給 Bot。\n"
             f"處理完成後，系統會再次通知您。\n\n"
-            f"台灣林內 IT 服務台\n"
+            f"台灣林內-資訊課\n"
             f"services@rinnai.com.tw"
         )
 
@@ -219,9 +219,10 @@ class EmailNotifier:
   <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; 
               box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
     <!-- Header -->
-    <div style="background: linear-gradient(135deg, #0052CC, #0747A6); padding: 32px 24px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px;">📋 IT 支援單已受理</h1>
-      <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px;">您的需求已進入處理流程</p>
+    <div style="background: linear-gradient(135deg, #0052CC, #0747A6); padding: 40px 24px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 2px;">📋 IT 支援單已受理</h1>
+      <div style="margin-top: 12px; height: 1px; background: rgba(255,255,255,0.2); width: 60%; margin-left: auto; margin-right: auto;"></div>
+      <p style="color: rgba(255,255,255,0.9); margin: 12px 0 0; font-size: 14px; font-weight: 500; letter-spacing: 5px; text-indent: 5px;">您的需求已進入處理流程</p>
     </div>
 
     <!-- Body -->
@@ -268,7 +269,7 @@ class EmailNotifier:
 
     <!-- Footer -->
     <div style="background-color: #F4F5F7; padding: 24px; text-align: center; border-top: 1px solid #DFE1E6;">
-      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內 IT 服務台 · services@rinnai.com.tw</p>
+      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內-資訊課 · services@rinnai.com.tw</p>
     </div>
   </div>
 </body>
@@ -348,7 +349,7 @@ class EmailNotifier:
 
     <!-- Footer -->
     <div style="background-color: #F4F5F7; padding: 20px; text-align: center; border-top: 1px solid #DFE1E6;">
-      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內 IT 服務台 · 智慧助理系統</p>
+      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內-資訊課 · 智慧助理系統</p>
     </div>
   </div>
 </body>
