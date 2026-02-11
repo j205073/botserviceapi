@@ -590,3 +590,45 @@ class GraphAPIClient:
             }
         except Exception as e:
             return {"success": False, "error": str(e), "message": "Graph API 連接失敗"}
+
+    # ── SharePoint 檔案上傳 ──────────────────────────────────────
+    _site_id_cache: Dict[str, str] = {}
+
+    async def _get_site_id(self, site_hostname: str, site_path: str) -> str:
+        """根據 Hostname 與 Path 取得 SharePoint Site ID 並快取。"""
+        cache_key = f"{site_hostname}:{site_path}"
+        if cache_key in self._site_id_cache:
+            return self._site_id_cache[cache_key]
+
+        endpoint = f"sites/{site_hostname}:{site_path}"
+        site_data = await self._make_request("GET", endpoint)
+        site_id = site_data.get("id")
+        if not site_id:
+            raise GraphAPIError(f"無法取得 SharePoint Site ID: {site_hostname}:{site_path}")
+        
+        self._site_id_cache[cache_key] = site_id
+        return site_id
+
+    async def upload_to_sharepoint(
+        self,
+        site_hostname: str,
+        site_path: str,
+        file_path_in_drive: str,
+        content: bytes,
+        content_type: str = "application/json",
+    ) -> Dict[str, Any]:
+        """上傳檔案到 SharePoint Document Library。"""
+        site_id = await self._get_site_id(site_hostname, site_path)
+        endpoint = f"sites/{site_id}/drive/root:/{file_path_in_drive.lstrip('/')}:/content"
+        
+        await self._ensure_session()
+        headers = await self._get_headers()
+        headers["Content-Type"] = content_type
+        
+        url = f"{self.base_url}/{endpoint}"
+        async with self.session.put(url, headers=headers, data=content) as resp:
+            resp_text = await resp.text()
+            if resp.status >= 400:
+                raise GraphAPIError(f"SharePoint 檔案上傳失敗: {resp.status} - {resp_text}")
+            return json.loads(resp_text) if resp_text else {}
+

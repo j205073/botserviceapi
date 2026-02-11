@@ -11,6 +11,7 @@ from .asana_client import AsanaClient
 from .intent_classifier import ITIntentClassifier
 from .cards import build_it_issue_card
 from .email_notifier import EmailNotifier
+from .knowledge_base import ITKnowledgeBase
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,16 @@ class ITSupportService:
         }
         # Fallback: a single tag to always apply regardless of priority when mapping not set
         self.default_priority_tag_gid: str = os.getenv("ASANA_PRIORITY_TAG_GID", "").strip()
+
+        # Initialize Knowledge Base
+        try:
+            from core.container import get_container
+            from infrastructure.external.graph_api_client import GraphAPIClient
+            graph_client = get_container().get(GraphAPIClient)
+            self.knowledge_base = ITKnowledgeBase(graph_client)
+        except Exception as e:
+            logger.error("初始化 IT 知識庫失敗: %s", e)
+            self.knowledge_base = None
 
     def build_issue_card(self, language: str, reporter_name: str, reporter_email: str):
         return build_it_issue_card(language, self._taxonomy, reporter_name, reporter_email)
@@ -438,6 +449,22 @@ class ITSupportService:
                     "已通知 %s: 單號 %s 完成 (Teams=%s, Email=%s)",
                     reporter_email, issue_id, teams_ok, email_ok,
                 )
+
+                # 3) 處理 IT 知識庫 (JSON 儲存 + SharePoint 上傳)
+                if self.knowledge_base:
+                    try:
+                        # 補充 category_label 與 priority 供知識庫使用
+                        # 雖然 reporter_info 可能已有，但確保完整性
+                        kb_reporter_info = reporter_info.copy()
+                        # 如果 task_data 含有更多細節，建立更完整的條目
+                        entry = self.knowledge_base.create_entry(task, kb_reporter_info)
+                        
+                        # 上傳 SharePoint
+                        await self.knowledge_base.save_to_sharepoint(entry)
+                        
+                        logger.info("IT 知識庫處理完成: %s", issue_id)
+                    except Exception as kb_err:
+                        logger.error("處理 IT 知識庫失敗: %s", kb_err)
 
         return {"processed": processed, "notified": notified}
 
