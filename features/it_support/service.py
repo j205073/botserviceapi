@@ -477,13 +477,17 @@ class ITSupportService:
                 logger.warning("無法獲取 Story 細節: %s", story_gid)
                 return
 
-            if target_story.get("type") != "comment":
-                logger.info("忽略非評論類型事件: %s", target_story.get("type"))
+            # 更寬鬆的評論判定：支援 type 為 comment 或 resource_subtype 為 comment_added
+            is_comment = target_story.get("type") == "comment" or target_story.get("resource_subtype") == "comment_added"
+            
+            if not is_comment:
+                logger.info("忽略非評論類型事件 (Type=%s, Subtype=%s)", 
+                            target_story.get("type"), target_story.get("resource_subtype"))
                 return
 
             comment_text = target_story.get("text", "")
             author_name = target_story.get("created_by", {}).get("name", "").strip()
-            logger.info("留言者: %s, 內容摘要: %s...", author_name, comment_text[:20])
+            logger.info("檢測到留言: [%s] %s...", author_name, comment_text[:20])
 
             # 獲取提單人資訊
             reporter_info = self._task_to_reporter.get(task_gid)
@@ -499,8 +503,8 @@ class ITSupportService:
             reporter_name = (reporter_info.get("reporter_name") or "").strip()
             
             # 避免迴圈通知：如果留言者就是提單人，則不通知
-            # 採用經度較高的字串比對
             if author_name.lower() == reporter_name.lower() and reporter_name:
+                logger.info("留言者為提單人本人 (%s)，跳過通知", author_name)
                 return
 
             issue_id = reporter_info.get("issue_id", "UNKNOWN")
