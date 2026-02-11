@@ -55,41 +55,58 @@ class EmailNotifier:
         )
 
         # HTML 版本
-        link_html = ""
+        link_button = ""
         if permalink_url:
-            link_html = (
-                f'<tr><td style="padding:6px 12px;color:#555;">Asana 連結</td>'
-                f'<td style="padding:6px 12px;"><a href="{permalink_url}" '
-                f'style="color:#4573D2;">查看任務</a></td></tr>'
+            link_button = (
+                f'<div style="text-align: center; margin: 32px 0;">'
+                f'<a href="{permalink_url}" style="background-color: #0052CC; color: #ffffff; '
+                f'padding: 12px 24px; text-decoration: none; border-radius: 6px; '
+                f'font-weight: 600; display: inline-block;">查看任務詳情</a>'
+                f'</div>'
             )
+        
         html_body = f"""\
 <html>
-<body style="font-family:'Segoe UI',Arial,sans-serif;background:#f5f5f5;padding:20px;">
-  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:8px;
-              box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
-    <div style="background:linear-gradient(135deg,#4573D2,#2ecc71);padding:24px;text-align:center;">
-      <h2 style="color:#fff;margin:0;font-size:20px;">✅ IT 單已處理完成</h2>
+<body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; 
+              box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
+    <!-- Header -->
+    <div style="background-color: #0052CC; padding: 32px 24px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px;">✅ IT 單已處理完成</h1>
     </div>
-    <div style="padding:24px;">
-      <p style="color:#333;font-size:14px;">您好，</p>
-      <p style="color:#333;font-size:14px;">您提交的 IT 支援單已由 IT 人員處理完成：</p>
-      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-        <tr style="background:#f9f9f9;">
-          <td style="padding:6px 12px;color:#555;font-weight:600;width:100px;">單號</td>
-          <td style="padding:6px 12px;color:#333;">{issue_id}</td>
-        </tr>
-        <tr>
-          <td style="padding:6px 12px;color:#555;font-weight:600;">任務</td>
-          <td style="padding:6px 12px;color:#333;">{task_name}</td>
-        </tr>
-        {link_html}
-      </table>
-      <p style="color:#888;font-size:13px;margin-top:20px;">
-        如有其他問題，請在 Teams 中使用 <code>@it</code> 再次提單。
-      </p>
+    
+    <!-- Content -->
+    <div style="padding: 40px 32px;">
+      <p style="color: #172B4D; font-size: 16px; line-height: 1.6; margin-top: 0;">您好，</p>
+      <p style="color: #42526E; font-size: 16px; line-height: 1.6;">您提交的 IT 支援需求已由服務台工程師處理完成：</p>
+      
+      <div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 24px; margin: 32px 0;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600; width: 100px;">支援單號</td>
+            <td style="padding: 8px 0; color: #172B4D; font-size: 15px; font-weight: 600;">{issue_id}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;">需求摘要</td>
+            <td style="padding: 8px 0; color: #172B4D; font-size: 15px;">{task_name}</td>
+          </tr>
+        </table>
+      </div>
+
+      {link_button}
+
+      <div style="padding: 24px; background-color: #EBF5FB; border-left: 4px solid #0052CC; border-radius: 4px; margin-top: 32px;">
+        <p style="color: #0747A6; font-size: 14px; margin: 0; line-height: 1.5;">
+          <strong>需要進一步協助？</strong><br>
+          如問題尚未解決或有後續需求，請在 Teams 中使用 <code>@it</code> 重新提單。
+        </p>
+      </div>
     </div>
-    <div style="background:#f9f9f9;padding:12px 24px;text-align:center;">
-      <p style="color:#aaa;font-size:12px;margin:0;">台灣林內 IT 服務台</p>
+
+    <!-- Footer -->
+    <div style="background-color: #F4F5F7; padding: 24px; text-align: center; border-top: 1px solid #DFE1E6;">
+      <p style="color: #6B778C; font-size: 12px; margin: 0;">此為系統自動發送郵件，請勿直接回覆。</p>
+      <p style="color: #6B778C; font-size: 12px; margin: 8px 0 0;">台灣林內 IT 服務台</p>
     </div>
   </div>
 </body>
@@ -186,75 +203,72 @@ class EmailNotifier:
         )
 
         # HTML 版本
-        link_row = ""
+        link_button = ""
         if permalink_url:
-            link_row = (
-                f'<tr style="background:#f9f9f9;">'
-                f'<td style="padding:10px 16px;color:#666;font-weight:600;">🔗 Asana</td>'
-                f'<td style="padding:10px 16px;"><a href="{permalink_url}" '
-                f'style="color:#4573D2;text-decoration:none;">查看任務詳情</a></td></tr>'
+            link_button = (
+                f'<div style="text-align: center; margin: 32px 0;">'
+                f'<a href="{permalink_url}" style="background-color: #0052CC; color: #ffffff; '
+                f'padding: 12px 24px; text-decoration: none; border-radius: 6px; '
+                f'font-weight: 600; display: inline-block;">進入任務中心</a>'
+                f'</div>'
             )
 
         html_body = f"""\
 <html>
-<body style="font-family:'Segoe UI','Microsoft JhengHei',Arial,sans-serif;background:#f0f2f5;padding:20px;margin:0;">
-  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;
-              box-shadow:0 4px 12px rgba(0,0,0,0.1);overflow:hidden;">
+<body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; 
+              box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
     <!-- Header -->
-    <div style="background:linear-gradient(135deg,#4573D2,#6C5CE7);padding:28px 24px;text-align:center;">
-      <h2 style="color:#fff;margin:0;font-size:22px;letter-spacing:0.5px;">📋 IT 支援單已受理</h2>
-      <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">您的需求已進入處理流程</p>
+    <div style="background: linear-gradient(135deg, #0052CC, #0747A6); padding: 32px 24px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.5px;">📋 IT 支援單已受理</h1>
+      <p style="color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 14px;">您的需求已進入處理流程</p>
     </div>
 
     <!-- Body -->
-    <div style="padding:28px 24px;">
-      <p style="color:#333;font-size:15px;margin:0 0 16px;">
-        <strong>{display_name}</strong> 您好，
+    <div style="padding: 40px 32px;">
+      <p style="color: #172B4D; font-size: 16px; font-weight: 600; margin: 0 0 16px;">
+        {display_name} 您好，
       </p>
-      <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 20px;">
-        您的 IT 支援需求已成功提交，IT 團隊將儘速為您處理。以下是您的需求資訊：
+      <p style="color: #42526E; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
+        您的 IT 支援需求已成功提交，IT 團隊將儘速為您處理。以下是您的需求摘要：
       </p>
 
-      <!-- Info Table -->
-      <table style="width:100%;border-collapse:collapse;margin:0 0 20px;border:1px solid #e8e8e8;border-radius:8px;">
-        <tr style="background:#f8f9fa;">
-          <td style="padding:10px 16px;color:#666;font-weight:600;width:110px;border-bottom:1px solid #e8e8e8;">📋 單號</td>
-          <td style="padding:10px 16px;color:#333;font-weight:700;font-size:15px;border-bottom:1px solid #e8e8e8;">{issue_id}</td>
-        </tr>
-        <tr>
-          <td style="padding:10px 16px;color:#666;font-weight:600;border-bottom:1px solid #e8e8e8;">📝 需求摘要</td>
-          <td style="padding:10px 16px;color:#333;border-bottom:1px solid #e8e8e8;">{summary}</td>
-        </tr>
-        <tr style="background:#f8f9fa;">
-          <td style="padding:10px 16px;color:#666;font-weight:600;border-bottom:1px solid #e8e8e8;">🏷️ 分類</td>
-          <td style="padding:10px 16px;color:#333;border-bottom:1px solid #e8e8e8;">{category}</td>
-        </tr>
-        <tr>
-          <td style="padding:10px 16px;color:#666;font-weight:600;border-bottom:1px solid #e8e8e8;">🔺 優先順序</td>
-          <td style="padding:10px 16px;color:#333;border-bottom:1px solid #e8e8e8;">{priority}</td>
-        </tr>
-        <tr style="background:#f8f9fa;">
-          <td style="padding:10px 16px;color:#666;font-weight:600;border-bottom:1px solid #e8e8e8;">🕐 提交時間</td>
-          <td style="padding:10px 16px;color:#333;border-bottom:1px solid #e8e8e8;">{created_at}</td>
-        </tr>
-        {link_row}
-      </table>
-
-      <!-- Tip Box -->
-      <div style="background:#EBF5FB;border-left:4px solid #4573D2;padding:12px 16px;border-radius:0 6px 6px 0;margin:0 0 16px;">
-        <p style="color:#2C3E50;font-size:13px;margin:0;line-height:1.5;">
-          💡 <strong>小提示：</strong>如需補充資訊或附件，請在 Teams 中直接傳送檔案給 Bot 即可自動附加至此工單。
-        </p>
+      <!-- Info Card -->
+      <div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 24px 0;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 10px 24px; color: #6B778C; font-size: 14px; font-weight: 600; width: 100px;">單號</td>
+            <td style="padding: 10px 24px; color: #172B4D; font-size: 15px; font-weight: 700;">{issue_id}</td>
+          </tr>
+          <tr style="background-color: #ffffff;">
+            <td style="padding: 10px 24px; color: #6B778C; font-size: 14px; font-weight: 600;">需求摘要</td>
+            <td style="padding: 10px 24px; color: #172B4D; font-size: 15px;">{summary}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px 24px; color: #6B778C; font-size: 14px; font-weight: 600;">分類</td>
+            <td style="padding: 10px 24px; color: #172B4D; font-size: 15px;">{category}</td>
+          </tr>
+          <tr style="background-color: #ffffff;">
+            <td style="padding: 10px 24px; color: #6B778C; font-size: 14px; font-weight: 600;">優先順序</td>
+            <td style="padding: 10px 24px; color: #172B4D; font-size: 15px;">
+              <span style="color: {'#DE350B' if priority == 'P1' else '#172B4D'}; font-weight: 600;">{priority}</span>
+            </td>
+          </tr>
+        </table>
       </div>
 
-      <p style="color:#888;font-size:13px;margin:0;line-height:1.5;">
-        處理完成後，系統會再次通知您。感謝您的耐心等候！
-      </p>
+      {link_button}
+
+      <div style="background-color: #EBF5FB; border-left: 4px solid #0052CC; padding: 20px; border-radius: 4px; margin-top: 32px;">
+        <p style="color: #0747A6; font-size: 14px; margin: 0; line-height: 1.6;">
+          <strong>小提示：</strong> 如需補充資訊或附加檔案，可直接在 Teams 中將檔案傳送給 IT Bot，系統將自動為您關聯至此支援單。
+        </p>
+      </div>
     </div>
 
     <!-- Footer -->
-    <div style="background:#f8f9fa;padding:16px 24px;text-align:center;border-top:1px solid #e8e8e8;">
-      <p style="color:#aaa;font-size:12px;margin:0;">台灣林內 IT 服務台 · services@rinnai.com.tw</p>
+    <div style="background-color: #F4F5F7; padding: 24px; text-align: center; border-top: 1px solid #DFE1E6;">
+      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內 IT 服務台 · services@rinnai.com.tw</p>
     </div>
   </div>
 </body>
@@ -307,11 +321,41 @@ class EmailNotifier:
             return False
 
         try:
-            msg = MIMEMultipart()
+            msg = MIMEMultipart("alternative")
             msg["From"] = self.smtp_user
             msg["To"] = to_email
             msg["Subject"] = subject
+            
+            # 轉換 body_text 中的換行為 HTML br (如果需要)
+            html_content = body_text.replace("\n", "<br>")
+            
+            html_body = f"""\
+<html>
+<body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; 
+              box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
+    <!-- Header -->
+    <div style="background-color: #0052CC; padding: 24px; text-align: left; border-bottom: 1px solid #DFE1E6;">
+      <span style="color: #0052CC; font-size: 18px; font-weight: 700;">IT Notification</span>
+    </div>
+    
+    <!-- Content -->
+    <div style="padding: 32px;">
+      <div style="color: #172B4D; font-size: 16px; line-height: 1.6;">
+        {html_content}
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="background-color: #F4F5F7; padding: 20px; text-align: center; border-top: 1px solid #DFE1E6;">
+      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內 IT 服務台 · 智慧助理系統</p>
+    </div>
+  </div>
+</body>
+</html>"""
+            
             msg.attach(MIMEText(body_text, "plain", "utf-8"))
+            msg.attach(MIMEText(html_body, "html", "utf-8"))
 
             import asyncio
             loop = asyncio.get_event_loop()
