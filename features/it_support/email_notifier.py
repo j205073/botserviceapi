@@ -295,3 +295,28 @@ class EmailNotifier:
         except Exception as e:
             logger.error("提單確認 Email 發送失敗: %s", e)
             return False
+
+    async def send_custom_notification(
+        self,
+        to_email: str,
+        subject: str,
+        body_text: str,
+    ) -> bool:
+        """發送自訂內容的通知郵件。"""
+        if not self.smtp_user or not self.smtp_password:
+            return False
+
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = self.smtp_user
+            msg["To"] = to_email
+            msg["Subject"] = subject
+            msg.attach(MIMEText(body_text, "plain", "utf-8"))
+
+            import asyncio
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self._send_smtp, msg, to_email)
+            return True
+        except Exception as e:
+            logger.error("自訂 Email 通知發送失敗: %s", e)
+            return False

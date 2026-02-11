@@ -54,6 +54,19 @@ class AsanaClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def get_story(self, story_gid: str) -> Dict[str, Any]:
+        """獲取特定 Story (評論/紀錄) 細節。"""
+        if not story_gid:
+            raise ValueError("無效的 Story ID")
+        url = f"{self.base_url}/stories/{story_gid}"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                url, headers=self._headers(),
+                params={"opt_fields": "text,type,created_at,created_by.name,resource_subtype"}
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def get_task_stories(self, task_gid: str) -> Dict[str, Any]:
         """獲取任務的 Stories (含評論與紀錄)。"""
         if not task_gid:

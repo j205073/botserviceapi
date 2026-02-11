@@ -467,24 +467,19 @@ class ITSupportService:
     async def _handle_story_added_event(self, task_gid: str, story_gid: str):
         """監聽評論，若是 IT 人員留言則通知提單人。"""
         try:
-            # 這裡我們需要 story 的詳細內容來判斷是誰留言
-            # 因為 Asana Webhook Payload 沒帶 Story Text
-            # 由於 AsanaClient 沒 get_story，暫用 get_task_stories 並比對 gid 或直接呼叫 API
-            # 這裡簡化處理：抓取該任務所有 stories 並找出最新的那則
-            stories_data = await self.asana.get_task_stories(task_gid)
-            stories = stories_data.get("data", [])
+            # 直接獲取觸發 Webhook 的 Story
+            story_data = await self.asana.get_story(story_gid)
+            target_story = story_data.get("data", {})
             
-            target_story = next((s for s in stories if s.get("gid") == story_gid), None)
             if not target_story or target_story.get("type") != "comment":
                 return
 
             comment_text = target_story.get("text", "")
-            author_name = target_story.get("created_by", {}).get("name", "")
+            author_name = target_story.get("created_by", {}).get("name", "").strip()
 
             # 獲取提單人資訊
             reporter_info = self._task_to_reporter.get(task_gid)
             if not reporter_info:
-                # 嘗試從 task notes 抓，因為 webhook 可能沒 context
                 task_data = await self.asana.get_task(task_gid)
                 task = task_data.get("data", {})
                 reporter_info = self._parse_reporter_from_notes(task.get("notes", ""))
@@ -493,21 +488,29 @@ class ITSupportService:
                 return
 
             reporter_email = reporter_info.get("email", "")
+            reporter_name = (reporter_info.get("reporter_name") or "").strip()
+            
             # 避免迴圈通知：如果留言者就是提單人，則不通知
-            if author_name == reporter_info.get("reporter_name"):
+            # 採用經度較高的字串比對
+            if author_name.lower() == reporter_name.lower() and reporter_name:
                 return
 
             issue_id = reporter_info.get("issue_id", "UNKNOWN")
             task_name = reporter_info.get("task_name") or "IT Support Task"
+            permalink = reporter_info.get("permalink_url") or ""
             
-            # 發送通知通知使用者有人回覆
-            msg = f"🔔 **IT 人員已回覆您的提單** (單號: {issue_id})\n\n**{author_name}**: {comment_text}"
-            await self.email_notifier.send_custom_notification(
-                reporter_email, 
-                f"【IT 通知】單號 {issue_id} 有新回覆", 
-                msg
-            )
-            logger.info("已發送評論通知給提單人 %s", reporter_email)
+            # 發送多管道通知
+            title = f"【IT 通知】單號 {issue_id} 有新回覆"
+            link_text = f"\n\n🔗 [查看 Asana 任務]({permalink})" if permalink else ""
+            msg_content = f"🔔 **IT 人員已回覆您的提單** (單號: {issue_id})\n\n**{author_name}**: {comment_text}{link_text}"
+            
+            # 1) Email 通知
+            await self.email_notifier.send_custom_notification(reporter_email, title, msg_content)
+            
+            # 2) Teams 推播
+            await self._send_teams_push(reporter_email, msg_content)
+            
+            logger.info("已發送評論通知給提單人 %s (By: %s)", reporter_email, author_name)
 
         except Exception as e:
             logger.error("處理評論 Webhook 失敗: %s", e)
@@ -535,7 +538,18 @@ class ITSupportService:
     async def _send_teams_notification(
         self, reporter_email: str, issue_id: str, task_name: str, permalink: str
     ) -> bool:
-        """透過 Bot Framework continue_conversation 推播 Teams 訊息。"""
+        """透過 Bot Framework 推播任務完成通知。"""
+        link_text = f"\n🔗 [查看任務]({permalink})" if permalink else ""
+        message = (
+            f"🎉 您的 IT 單已處理完成！\n\n"
+            f"📋 單號：{issue_id}\n"
+            f"📝 任務：{task_name}"
+            f"{link_text}"
+        )
+        return await self._send_teams_push(reporter_email, message)
+
+    async def _send_teams_push(self, reporter_email: str, message: str) -> bool:
+        """通用的 Teams 推播邏輯。"""
         try:
             from app import user_conversation_refs
             from botbuilder.schema import Activity, ActivityTypes
@@ -548,14 +562,6 @@ class ITSupportService:
             from core.container import get_container
             from infrastructure.bot.bot_adapter import CustomBotAdapter
             adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
-
-            link_text = f"\n🔗 [查看任務]({permalink})" if permalink else ""
-            message = (
-                f"🎉 您的 IT 單已處理完成！\n\n"
-                f"📋 單號：{issue_id}\n"
-                f"📝 任務：{task_name}"
-                f"{link_text}"
-            )
 
             async def send_callback(turn_context):
                 await turn_context.send_activity(
