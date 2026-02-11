@@ -400,6 +400,7 @@ class ITSupportService:
             action = event.get("action")
             resource = event.get("resource", {})
             resource_type = resource.get("resource_type")
+            logger.info("收到網鉤事件: Action=%s, Type=%s", action, resource_type)
 
             # 情況 A: 任務狀態變更 (例如: 完成)
             if action == "changed" and resource_type == "task":
@@ -466,16 +467,23 @@ class ITSupportService:
 
     async def _handle_story_added_event(self, task_gid: str, story_gid: str):
         """監聽評論，若是 IT 人員留言則通知提單人。"""
+        logger.info("檢測到新評論故事: Task=%s, Story=%s", task_gid, story_gid)
         try:
             # 直接獲取觸發 Webhook 的 Story
             story_data = await self.asana.get_story(story_gid)
             target_story = story_data.get("data", {})
             
-            if not target_story or target_story.get("type") != "comment":
+            if not target_story:
+                logger.warning("無法獲取 Story 細節: %s", story_gid)
+                return
+
+            if target_story.get("type") != "comment":
+                logger.info("忽略非評論類型事件: %s", target_story.get("type"))
                 return
 
             comment_text = target_story.get("text", "")
             author_name = target_story.get("created_by", {}).get("name", "").strip()
+            logger.info("留言者: %s, 內容摘要: %s...", author_name, comment_text[:20])
 
             # 獲取提單人資訊
             reporter_info = self._task_to_reporter.get(task_gid)
