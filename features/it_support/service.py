@@ -556,7 +556,7 @@ class ITSupportService:
             f"🎉 您的 IT 單已處理完成！\n\n"
             f"📋 單號：{issue_id}\n"
             f"📝 任務：{task_name}"
-            f"{link_text}"
+            # f"{link_text}"
         )
         return await self._send_teams_push(reporter_email, message)
 
