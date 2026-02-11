@@ -1,16 +1,171 @@
 {
   "version": "1.0",
   "categories": [
-    {"code": "account_access", "label": "帳號/登入問題", "keywords": ["無法登入", "密碼", "帳號鎖定", "AD", "SSO", "login", "account", "password"]},
-    {"code": "permission", "label": "權限/申請", "keywords": ["權限", "存取", "無權限", "資料夾", "申請", "access", "permission", "share"]},
-    {"code": "software", "label": "軟體安裝/異常", "keywords": ["軟體", "安裝", "更新", "crash", "error", "excel", "office", "teams", "outlook", "軟體異常"]},
-    {"code": "hardware", "label": "硬體/設備", "keywords": ["電腦", "筆電", "螢幕", "鍵盤", "滑鼠", "硬體", "主機", "設備", "故障"]},
-    {"code": "network", "label": "網路/連線", "keywords": ["網路", "斷線", "連不上", "wifi", "switch", "ip", "ping", "dns", "latency"]},
-    {"code": "vpn_remote", "label": "VPN/遠端連線", "keywords": ["vpn", "遠端桌面", "rdp", "forticlient", "globalprotect", "remote", "外出"]},
-    {"code": "printer", "label": "印表機/列印", "keywords": ["印表機", "列印", "卡紙", "墨水", "印不出來", "printer"]},
-    {"code": "email_teams", "label": "Email/Teams", "keywords": ["email", "郵件", "收不到", "寄不出", "teams", "會議", "通話", "聊天"]},
-    {"code": "data_request", "label": "資料/報表需求", "keywords": ["報表", "匯出", "資料", "data", "excel 報表", "SQL", "BI"]},
-    {"code": "system_incident", "label": "系統異常", "keywords": ["系統異常", "系統錯誤", "服務異常", "服務中斷", "中斷", "不可用", "維護", "發生錯誤", "exception", "error", "500", "故障", "當機", "outage", "incident", "timeout", "超時"]},
-    {"code": "other", "label": "其他", "keywords": []}
+    {
+      "code": "account_access",
+      "label": "帳號/登入問題",
+      "keywords": [
+        "無法登入",
+        "密碼",
+        "帳號鎖定",
+        "AD",
+        "SSO",
+        "login",
+        "account",
+        "password"
+      ]
+    },
+    {
+      "code": "permission",
+      "label": "權限/申請",
+      "keywords": [
+        "權限",
+        "存取",
+        "無權限",
+        "資料夾",
+        "申請",
+        "access",
+        "permission",
+        "share"
+      ]
+    },
+    {
+      "code": "software",
+      "label": "軟體安裝/異常",
+      "keywords": [
+        "軟體",
+        "安裝",
+        "更新",
+        "crash",
+        "error",
+        "excel",
+        "office",
+        "teams",
+        "outlook",
+        "軟體異常"
+      ]
+    },
+    {
+      "code": "hardware",
+      "label": "硬體/設備",
+      "keywords": [
+        "電腦",
+        "筆電",
+        "螢幕",
+        "鍵盤",
+        "滑鼠",
+        "硬體",
+        "主機",
+        "設備",
+        "故障"
+      ]
+    },
+    {
+      "code": "network",
+      "label": "網路/連線",
+      "keywords": [
+        "網路",
+        "斷線",
+        "連不上",
+        "wifi",
+        "switch",
+        "ip",
+        "ping",
+        "dns",
+        "latency"
+      ]
+    },
+    {
+      "code": "vpn_remote",
+      "label": "VPN/遠端連線",
+      "keywords": [
+        "vpn",
+        "遠端桌面",
+        "rdp",
+        "forticlient",
+        "globalprotect",
+        "remote",
+        "外出"
+      ]
+    },
+    {
+      "code": "printer",
+      "label": "印表機/列印",
+      "keywords": [
+        "印表機",
+        "列印",
+        "卡紙",
+        "墨水",
+        "印不出來",
+        "printer"
+      ]
+    },
+    {
+      "code": "email_teams",
+      "label": "Email/Teams",
+      "keywords": [
+        "email",
+        "郵件",
+        "收不到",
+        "寄不出",
+        "teams",
+        "會議",
+        "通話",
+        "聊天"
+      ]
+    },
+    {
+      "code": "data_request",
+      "label": "資料/報表需求",
+      "keywords": [
+        "報表",
+        "匯出",
+        "資料",
+        "data",
+        "excel 報表",
+        "SQL",
+        "BI"
+      ]
+    },
+    {
+      "code": "system_incident",
+      "label": "系統異常",
+      "keywords": [
+        "系統異常",
+        "系統錯誤",
+        "服務異常",
+        "服務中斷",
+        "中斷",
+        "不可用",
+        "維護",
+        "發生錯誤",
+        "exception",
+        "error",
+        "500",
+        "故障",
+        "當機",
+        "outage",
+        "incident",
+        "timeout",
+        "超時"
+      ]
+    },
+    {
+      "code": "onboarding",
+      "label": "報到開通",
+      "keywords": [
+        "報到",
+        "開通",
+        "人員資訊申請書",
+        "帳號設定",
+        "新進人員",
+        "onboarding"
+      ]
+    },
+    {
+      "code": "other",
+      "label": "其他",
+      "keywords": []
+    }
   ]
 }

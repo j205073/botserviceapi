@@ -51,7 +51,7 @@ class EmailNotifier:
             text_body += f"  連結：{permalink_url}\n"
         text_body += (
             f"\n如有其他問題，請在 Teams 中使用 @it 再次提單。\n\n"
-            f"台灣林內-資訊課"
+            f"台灣林內-TR GPT"
         )
 
         # HTML 版本
@@ -106,7 +106,7 @@ class EmailNotifier:
     <!-- Footer -->
     <div style="background-color: #F4F5F7; padding: 24px; text-align: center; border-top: 1px solid #DFE1E6;">
       <p style="color: #6B778C; font-size: 12px; margin: 0;">此為系統自動發送郵件，請勿直接回覆。</p>
-      <p style="color: #6B778C; font-size: 12px; margin: 8px 0 0;">台灣林內-資訊課</p>
+      <p style="color: #6B778C; font-size: 12px; margin: 8px 0 0;">台灣林內-TR GPT</p>
     </div>
   </div>
 </body>
@@ -198,7 +198,7 @@ class EmailNotifier:
         text_body += (
             f"\n如需補充資訊或附件，請在 Teams 中直接傳送檔案給 Bot。\n"
             f"處理完成後，系統會再次通知您。\n\n"
-            f"台灣林內-資訊課\n"
+            f"台灣林內-TR GPT\n"
             f"services@rinnai.com.tw"
         )
 
@@ -349,7 +349,7 @@ class EmailNotifier:
 
     <!-- Footer -->
     <div style="background-color: #F4F5F7; padding: 20px; text-align: center; border-top: 1px solid #DFE1E6;">
-      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內-資訊課 · 智慧助理系統</p>
+      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內-TR GPT · 智慧助理系統</p>
     </div>
   </div>
 </body>
