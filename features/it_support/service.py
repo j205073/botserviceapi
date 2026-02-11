@@ -32,6 +32,8 @@ class ITSupportService:
         self._bf_token_cache: dict[str, Any] = {}
         # Webhook handshake secret (stored after Asana sends it)
         self._webhook_secret: Optional[str] = None
+        # AI 分析開關（設 True 啟用 AI 分析建議，False 關閉以節省 token 或等待串接知識庫）
+        self.enable_ai_analysis: bool = os.getenv("ENABLE_IT_AI_ANALYSIS", "false").strip().lower() == "true"
         # Dedicated model for IT issue analysis (per-call override; does not affect global model)
         self.analysis_model: str = os.getenv("IT_ANALYSIS_MODEL", "gpt-5-nano").strip()
 
@@ -81,8 +83,12 @@ class ITSupportService:
         # Localize created time to Taiwan time
         taipei = pytz.timezone("Asia/Taipei")
         created_at = datetime.now(taipei).strftime("%Y-%m-%d %H:%M 台北時間")
-        # Try AI analysis for triage
-        analysis_text = await self._try_analyze_issue(description, category_label, priority)
+        # Try AI analysis for triage（受 enable_ai_analysis 開關控制）
+        analysis_text = ""
+        if self.enable_ai_analysis:
+            analysis_text = await self._try_analyze_issue(description, category_label, priority)
+        else:
+            print("ℹ️ AI 分析已關閉 (ENABLE_IT_AI_ANALYSIS=false)")
 
         notes = (
             f"單號: {issue_id}\n"
@@ -137,7 +143,10 @@ class ITSupportService:
                 }
             # ── 提單確認 Email（測試階段僅通知指定用戶）──
             _test_emails = {"juncheng.liu@rinnai.com.tw"}
+            print(f"📧 Email 檢查: reporter={reporter_email.lower()}, 白名單={_test_emails}")
             if reporter_email.lower() in _test_emails:
+                print(f"📧 準備發送提單確認 Email 至 {reporter_email}")
+                print(f"📧 SMTP 設定: {self.email_notifier.smtp_host}:{self.email_notifier.smtp_port}, user={self.email_notifier.smtp_user}")
                 try:
                     email_ok = await self.email_notifier.send_submission_notification(
                         to_email=reporter_email,
@@ -149,9 +158,13 @@ class ITSupportService:
                         permalink_url=link or "",
                         reporter_name=reporter_name,
                     )
-                    print(f"📧 提單確認 Email → {reporter_email}: {'成功' if email_ok else '失敗'}")
+                    print(f"📧 提單確認 Email → {reporter_email}: {'✅ 成功' if email_ok else '❌ 失敗'}")
                 except Exception as mail_err:
+                    import traceback
                     print(f"❌ 提單確認 Email 發送例外: {mail_err}")
+                    traceback.print_exc()
+            else:
+                print(f"📧 跳過 Email 通知（{reporter_email} 不在測試白名單中）")
             return {
                 "success": True,
                 "task_gid": gid,

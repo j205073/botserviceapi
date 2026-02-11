@@ -127,12 +127,23 @@ class EmailNotifier:
 
     def _send_smtp(self, msg: MIMEMultipart, to_email: str) -> None:
         """同步 SMTP 發送（在 executor 中執行）"""
-        with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(self.smtp_user, self.smtp_password)
-            server.sendmail(self.smtp_user, [to_email], msg.as_string())
+        print(f"📧 SMTP 連線中: {self.smtp_host}:{self.smtp_port}")
+        try:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
+                server.set_debuglevel(0)
+                print("📧 SMTP EHLO...")
+                server.ehlo()
+                print("📧 SMTP STARTTLS...")
+                server.starttls()
+                server.ehlo()
+                print(f"📧 SMTP LOGIN: {self.smtp_user}")
+                server.login(self.smtp_user, self.smtp_password)
+                print(f"📧 SMTP SEND: {self.smtp_user} → {to_email}")
+                server.sendmail(self.smtp_user, [to_email], msg.as_string())
+                print("📧 SMTP 發送完成")
+        except Exception as e:
+            print(f"❌ SMTP 錯誤: {type(e).__name__}: {e}")
+            raise
 
     # ── 提單確認通知 ──────────────────────────────────────────────
 
