@@ -155,7 +155,7 @@ class ITSupportService:
                         category=category_label,
                         priority=priority,
                         created_at=created_at,
-                        permalink_url=link or "",
+                        permalink_url="",
                         reporter_name=reporter_name,
                     )
                     print(f"📧 提單確認 Email → {reporter_email}: {'✅ 成功' if email_ok else '❌ 失敗'}")
