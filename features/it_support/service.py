@@ -1,14 +1,18 @@
 import os
 import json
+import logging
 from base64 import urlsafe_b64encode
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 import pytz
 
 from .asana_client import AsanaClient
 from .intent_classifier import ITIntentClassifier
 from .cards import build_it_issue_card
+from .email_notifier import EmailNotifier
+
+logger = logging.getLogger(__name__)
 
 
 class ITSupportService:
@@ -19,10 +23,15 @@ class ITSupportService:
     def __init__(self):
         self.asana = AsanaClient()
         self.classifier = ITIntentClassifier()
+        self.email_notifier = EmailNotifier()
         # load taxonomy for cards
         self._taxonomy = self.classifier.categories
         self._recent_task_by_user: dict[str, dict] = {}
+        # Reverse mapping: task_gid -> {email, issue_id, reporter_name}
+        self._task_to_reporter: dict[str, dict] = {}
         self._bf_token_cache: dict[str, Any] = {}
+        # Webhook handshake secret (stored after Asana sends it)
+        self._webhook_secret: Optional[str] = None
         # Dedicated model for IT issue analysis (per-call override; does not affect global model)
         self.analysis_model: str = os.getenv("IT_ANALYSIS_MODEL", "gpt-5-nano").strip()
 
@@ -118,6 +127,30 @@ class ITSupportService:
             # remember for quick attachment
             if gid:
                 self._recent_task_by_user[reporter_email] = {"gid": gid, "ts": datetime.now(timezone.utc)}
+                # 儲存反向映射供 webhook 回呼使用
+                self._task_to_reporter[gid] = {
+                    "email": reporter_email,
+                    "issue_id": issue_id,
+                    "reporter_name": reporter_name,
+                    "task_name": name,
+                    "permalink_url": link or "",
+                }
+            # ── 提單確認 Email（測試階段僅通知指定用戶）──
+            _test_emails = {"juncheng.liu@rinnai.com.tw"}
+            if reporter_email.lower() in _test_emails:
+                import asyncio
+                asyncio.create_task(
+                    self.email_notifier.send_submission_notification(
+                        to_email=reporter_email,
+                        issue_id=issue_id,
+                        summary=description,
+                        category=category_label,
+                        priority=priority,
+                        created_at=created_at,
+                        permalink_url=link or "",
+                        reporter_name=reporter_name,
+                    )
+                )
             return {
                 "success": True,
                 "task_gid": gid,
@@ -328,6 +361,142 @@ class ITSupportService:
         if not item:
             return None
         return item.get("gid")
+
+    # ── Webhook 處理 ──────────────────────────────────────────────
+
+    async def handle_webhook_event(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """處理 Asana Webhook 事件。
+        當偵測到任務完成時，透過 Teams 推播與 Email 通知提單人。
+        """
+        processed = 0
+        notified = 0
+
+        for event in events:
+            action = event.get("action")
+            resource = event.get("resource", {})
+            resource_type = resource.get("resource_type")
+            task_gid = resource.get("gid")
+
+            if action != "changed" or resource_type != "task" or not task_gid:
+                continue
+
+            processed += 1
+
+            # 查詢 Asana 任務確認是否已完成
+            try:
+                task_data = await self.asana.get_task(task_gid)
+                task = task_data.get("data", {})
+                if not task.get("completed"):
+                    continue
+            except Exception as e:
+                logger.warning("查詢 Asana 任務 %s 失敗: %s", task_gid, e)
+                continue
+
+            # 從反向映射找到提單人，若無映射則嘗試從 notes 解析
+            reporter_info = self._task_to_reporter.get(task_gid)
+            if not reporter_info:
+                reporter_info = self._parse_reporter_from_notes(task.get("notes", ""))
+            if not reporter_info:
+                logger.info("任務 %s 已完成但找不到提單人資訊，跳過通知", task_gid)
+                continue
+
+            reporter_email = reporter_info.get("email", "")
+            issue_id = reporter_info.get("issue_id", "")
+            task_name = reporter_info.get("task_name") or task.get("name", "")
+            permalink = reporter_info.get("permalink_url") or task.get("permalink_url", "")
+
+            if not reporter_email:
+                continue
+
+            # 1) Teams 主動推播
+            teams_ok = await self._send_teams_notification(
+                reporter_email, issue_id, task_name, permalink
+            )
+
+            # 2) Email 通知
+            email_ok = await self.email_notifier.send_completion_notification(
+                reporter_email, issue_id, task_name, permalink
+            )
+
+            if teams_ok or email_ok:
+                notified += 1
+                logger.info(
+                    "已通知 %s: 單號 %s 完成 (Teams=%s, Email=%s)",
+                    reporter_email, issue_id, teams_ok, email_ok,
+                )
+
+        return {"processed": processed, "notified": notified}
+
+    def _parse_reporter_from_notes(self, notes: str) -> Optional[Dict[str, str]]:
+        """從 Asana task notes 中解析提單人 email 與單號。
+        Notes 格式: '單號: ITxxx\n提出人: Name <email>\n...'
+        """
+        import re
+        result: Dict[str, str] = {}
+        try:
+            m_id = re.search(r"單號:\s*(IT\S+)", notes)
+            if m_id:
+                result["issue_id"] = m_id.group(1)
+            m_email = re.search(r"提出人:.*?<([^>]+)>", notes)
+            if m_email:
+                result["email"] = m_email.group(1)
+            m_name = re.search(r"提出人:\s*(.+?)\s*<", notes)
+            if m_name:
+                result["reporter_name"] = m_name.group(1).strip()
+        except Exception:
+            pass
+        return result if result.get("email") else None
+
+    async def _send_teams_notification(
+        self, reporter_email: str, issue_id: str, task_name: str, permalink: str
+    ) -> bool:
+        """透過 Bot Framework continue_conversation 推播 Teams 訊息。"""
+        try:
+            from app import user_conversation_refs
+            from botbuilder.schema import Activity, ActivityTypes
+
+            conv_ref = user_conversation_refs.get(reporter_email)
+            if not conv_ref:
+                logger.info("找不到 %s 的 conversation_reference，跳過 Teams 推播", reporter_email)
+                return False
+
+            from core.container import get_container
+            from infrastructure.bot.bot_adapter import CustomBotAdapter
+            adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+
+            link_text = f"\n🔗 [查看任務]({permalink})" if permalink else ""
+            message = (
+                f"🎉 您的 IT 單已處理完成！\n\n"
+                f"📋 單號：{issue_id}\n"
+                f"📝 任務：{task_name}"
+                f"{link_text}"
+            )
+
+            async def send_callback(turn_context):
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=message)
+                )
+
+            bot_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID") or ""
+            await adapter.adapter.continue_conversation(
+                conv_ref, send_callback, bot_id
+            )
+            return True
+        except Exception as e:
+            logger.error("Teams 推播失敗 (%s): %s", reporter_email, e)
+            return False
+
+    async def setup_webhook(self, target_url: str) -> Dict[str, Any]:
+        """建立 Project 層級 Webhook 訂閱。"""
+        if not self.project_gid:
+            return {"success": False, "error": "ASANA_PROJECT_GID 未設定"}
+        try:
+            result = await self.asana.create_webhook(self.project_gid, target_url)
+            logger.info("Asana Webhook 已建立: %s", result)
+            return {"success": True, "data": result}
+        except Exception as e:
+            logger.error("建立 Asana Webhook 失敗: %s", e)
+            return {"success": False, "error": str(e)}
 
     async def attach_image_from_url(self, user_email: str, url: str, filename: str, mime_type: str) -> Dict[str, Any]:
         """Download image by URL and upload to recent task for user."""

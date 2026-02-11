@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 from quart import Blueprint, request, jsonify, make_response
 from datetime import datetime
 import json
+import logging
 
 from domain.services.audit_service import AuditService
 from domain.services.conversation_service import ConversationService
@@ -63,6 +64,10 @@ class APIRoutes:
         
         # Bot 訊息端點
         api_bp.route("/messages", methods=["POST"])(self.messages)
+
+        # Asana Webhook 端點
+        api_bp.route("/asana/webhook", methods=["POST"])(self.asana_webhook)
+        api_bp.route("/asana/webhook/setup", methods=["POST"])(self.asana_webhook_setup)
     
     async def ping(self):
         """健康檢查端點"""
@@ -116,7 +121,9 @@ class APIRoutes:
             {"path": "/api/audit/bucket-info", "method": "GET", "description": "獲取 S3 儲存桶資訊"},
             {"path": "/api/audit/local-files", "method": "GET", "description": "獲取本地稽核文件"},
             {"path": "/api/memory/clear", "method": "GET", "description": "清除用戶記憶體"},
-            {"path": "/api/messages", "method": "POST", "description": "Bot 訊息處理"}
+            {"path": "/api/messages", "method": "POST", "description": "Bot 訊息處理"},
+            {"path": "/api/asana/webhook", "method": "POST", "description": "Asana Webhook 回呼"},
+            {"path": "/api/asana/webhook/setup", "method": "POST", "description": "建立 Asana Webhook 訂閱"},
         ]
         
         return jsonify({
@@ -318,6 +325,73 @@ class APIRoutes:
         except Exception as e:
             print(f"❌ Error processing message: {str(e)}")
             return {"status": 500}
+
+    async def asana_webhook(self):
+        """Asana Webhook 回呼端點（含 handshake 驗證）"""
+        logger = logging.getLogger(__name__)
+
+        # Handshake: Asana 建立 webhook 時會發送 X-Hook-Secret
+        hook_secret = request.headers.get("X-Hook-Secret")
+        if hook_secret:
+            logger.info("Asana Webhook handshake 收到 X-Hook-Secret")
+            resp = await make_response("", 200)
+            resp.headers["X-Hook-Secret"] = hook_secret
+            # 儲存 secret 供後續驗證
+            try:
+                from core.container import get_container
+                from features.it_support.service import ITSupportService
+                svc: ITSupportService = get_container().get(ITSupportService)
+                svc._webhook_secret = hook_secret
+            except Exception:
+                pass
+            return resp
+
+        # 正常事件處理
+        try:
+            body = await request.get_json()
+            events = body.get("events", [])
+            if not events:
+                return jsonify({"ok": True})
+
+            logger.info("Asana Webhook 收到 %d 個事件", len(events))
+
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+            result = await svc.handle_webhook_event(events)
+
+            logger.info("Webhook 處理結果: %s", result)
+            return jsonify({"ok": True, **result})
+        except Exception as e:
+            logger.error("Asana Webhook 處理失敗: %s", e)
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    async def asana_webhook_setup(self):
+        """手動建立 Asana Webhook 訂閱"""
+        try:
+            body = await request.get_json() or {}
+            # target_url 可從 body 取得，或自動推導
+            target_url = body.get("target_url", "").strip()
+            if not target_url:
+                # 嘗試從 Host header 推導
+                host = request.headers.get("Host", "")
+                scheme = request.headers.get("X-Forwarded-Proto", "https")
+                if host:
+                    target_url = f"{scheme}://{host}/api/asana/webhook"
+
+            if not target_url:
+                return jsonify({
+                    "success": False,
+                    "error": "請提供 target_url 或確認 Host header"
+                }), 400
+
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+            result = await svc.setup_webhook(target_url)
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
 
 
 def create_api_routes(
