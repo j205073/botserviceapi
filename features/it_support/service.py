@@ -400,73 +400,117 @@ class ITSupportService:
             action = event.get("action")
             resource = event.get("resource", {})
             resource_type = resource.get("resource_type")
-            task_gid = resource.get("gid")
 
-            if action != "changed" or resource_type != "task" or not task_gid:
-                continue
-
-            processed += 1
-
-            # 查詢 Asana 任務確認是否已完成
-            try:
-                task_data = await self.asana.get_task(task_gid)
-                task = task_data.get("data", {})
-                if not task.get("completed"):
+            # 情況 A: 任務狀態變更 (例如: 完成)
+            if action == "changed" and resource_type == "task":
+                task_gid = resource.get("gid")
+                if not task_gid:
                     continue
-            except Exception as e:
-                logger.warning("查詢 Asana 任務 %s 失敗: %s", task_gid, e)
-                continue
+                processed += 1
+                await self._handle_task_completed_event(task_gid)
+                notified += 1 # 這裡簡化處理，具體在子函數內執行
 
-            # 從反向映射找到提單人，若無映射則嘗試從 notes 解析
-            reporter_info = self._task_to_reporter.get(task_gid)
-            if not reporter_info:
-                reporter_info = self._parse_reporter_from_notes(task.get("notes", ""))
-            if not reporter_info:
-                logger.info("任務 %s 已完成但找不到提單人資訊，跳過通知", task_gid)
-                continue
-
-            reporter_email = reporter_info.get("email", "")
-            issue_id = reporter_info.get("issue_id", "")
-            task_name = reporter_info.get("task_name") or task.get("name", "")
-            permalink = reporter_info.get("permalink_url") or task.get("permalink_url", "")
-
-            if not reporter_email:
-                continue
-
-            # 1) Teams 主動推播
-            teams_ok = await self._send_teams_notification(
-                reporter_email, issue_id, task_name, permalink
-            )
-
-            # 2) Email 通知
-            email_ok = await self.email_notifier.send_completion_notification(
-                reporter_email, issue_id, task_name, permalink
-            )
-
-            if teams_ok or email_ok:
-                notified += 1
-                logger.info(
-                    "已通知 %s: 單號 %s 完成 (Teams=%s, Email=%s)",
-                    reporter_email, issue_id, teams_ok, email_ok,
-                )
-
-                # 3) 處理 IT 知識庫 (JSON 儲存 + SharePoint 上傳)
-                if self.knowledge_base:
-                    try:
-                        # 補充 category_label 與 priority 供知識庫使用
-                        # 雖然 reporter_info 可能已有，但確保完整性
-                        kb_reporter_info = reporter_info.copy()
-                        # 如果 task_data 含有更多細節，建立更完整的條目
-                        entry = self.knowledge_base.create_entry(task, kb_reporter_info)
-                        
-                        # 上傳 SharePoint
-                        await self.knowledge_base.save_to_sharepoint(entry)
-                        
-                        logger.info("IT 知識庫處理完成: %s", issue_id)
-                    except Exception as kb_err:
-                        logger.error("處理 IT 知識庫失敗: %s", kb_err)
+            # 情況 B: 新增評論 (Story)
+            elif action == "added" and resource_type == "story":
+                parent = event.get("parent", {})
+                if parent.get("resource_type") == "task":
+                    task_gid = parent.get("gid")
+                    story_gid = resource.get("gid")
+                    await self._handle_story_added_event(task_gid, story_gid)
 
         return {"processed": processed, "notified": notified}
+
+    async def _handle_task_completed_event(self, task_gid: str):
+        """處理任務完成後的通知與知識庫存檔。"""
+        try:
+            task_data = await self.asana.get_task(task_gid)
+            task = task_data.get("data", {})
+            if not task.get("completed"):
+                return
+        except Exception as e:
+            logger.warning("查詢 Asana 任務 %s 失敗: %s", task_gid, e)
+            return
+
+        # 獲取提單人資訊
+        reporter_info = self._task_to_reporter.get(task_gid)
+        if not reporter_info:
+            reporter_info = self._parse_reporter_from_notes(task.get("notes", ""))
+        if not reporter_info:
+            return
+
+        reporter_email = reporter_info.get("email", "")
+        issue_id = reporter_info.get("issue_id", "")
+        task_name = reporter_info.get("task_name") or task.get("name", "")
+        permalink = reporter_info.get("permalink_url") or task.get("permalink_url", "")
+
+        if not reporter_email:
+            return
+
+        # 1) Teams 通知
+        await self._send_teams_notification(reporter_email, issue_id, task_name, permalink)
+        # 2) Email 通知
+        await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink)
+
+        # 3) 處理 IT 知識庫
+        if self.knowledge_base:
+            try:
+                # 抓取完整對話
+                stories_data = await self.asana.get_task_stories(task_gid)
+                stories = stories_data.get("data", [])
+                
+                entry = self.knowledge_base.create_entry(task, reporter_info, stories)
+                await self.knowledge_base.save_to_sharepoint(entry)
+                logger.info("IT 知識庫處理完成: %s", issue_id)
+            except Exception as kb_err:
+                logger.error("處理 IT 知識庫失敗: %s", kb_err)
+
+    async def _handle_story_added_event(self, task_gid: str, story_gid: str):
+        """監聽評論，若是 IT 人員留言則通知提單人。"""
+        try:
+            # 這裡我們需要 story 的詳細內容來判斷是誰留言
+            # 因為 Asana Webhook Payload 沒帶 Story Text
+            # 由於 AsanaClient 沒 get_story，暫用 get_task_stories 並比對 gid 或直接呼叫 API
+            # 這裡簡化處理：抓取該任務所有 stories 並找出最新的那則
+            stories_data = await self.asana.get_task_stories(task_gid)
+            stories = stories_data.get("data", [])
+            
+            target_story = next((s for s in stories if s.get("gid") == story_gid), None)
+            if not target_story or target_story.get("type") != "comment":
+                return
+
+            comment_text = target_story.get("text", "")
+            author_name = target_story.get("created_by", {}).get("name", "")
+
+            # 獲取提單人資訊
+            reporter_info = self._task_to_reporter.get(task_gid)
+            if not reporter_info:
+                # 嘗試從 task notes 抓，因為 webhook 可能沒 context
+                task_data = await self.asana.get_task(task_gid)
+                task = task_data.get("data", {})
+                reporter_info = self._parse_reporter_from_notes(task.get("notes", ""))
+            
+            if not reporter_info:
+                return
+
+            reporter_email = reporter_info.get("email", "")
+            # 避免迴圈通知：如果留言者就是提單人，則不通知
+            if author_name == reporter_info.get("reporter_name"):
+                return
+
+            issue_id = reporter_info.get("issue_id", "UNKNOWN")
+            task_name = reporter_info.get("task_name") or "IT Support Task"
+            
+            # 發送通知通知使用者有人回覆
+            msg = f"🔔 **IT 人員已回覆您的提單** (單號: {issue_id})\n\n**{author_name}**: {comment_text}"
+            await self.email_notifier.send_custom_notification(
+                reporter_email, 
+                f"【IT 通知】單號 {issue_id} 有新回覆", 
+                msg
+            )
+            logger.info("已發送評論通知給提單人 %s", reporter_email)
+
+        except Exception as e:
+            logger.error("處理評論 Webhook 失敗: %s", e)
 
     def _parse_reporter_from_notes(self, notes: str) -> Optional[Dict[str, str]]:
         """從 Asana task notes 中解析提單人 email 與單號。

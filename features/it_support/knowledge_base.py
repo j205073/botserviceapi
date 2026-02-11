@@ -21,32 +21,44 @@ class ITKnowledgeBase:
         self.site_path = os.getenv("SHAREPOINT_SITE_PATH", "/sites/IT")
         self.root_path = os.getenv("SHAREPOINT_ROOT_PATH", "IT/Knowledge_Base")
 
-    def create_entry(self, task: Dict[str, Any], reporter_info: Dict[str, str]) -> Dict[str, Any]:
-        """
-        從 Asana 任務資料建立 JSON 知識條目。
-        """
+    def create_entry(self, task: Dict[str, Any], reporter_info: Dict[str, str], stories: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """從 Asana 任務資料建立 AI-Ready 的 JSON 知識條目。"""
         taipei = pytz.timezone("Asia/Taipei")
         now = datetime.now(taipei)
 
-        # 嘗試從 notes 解析或是 reporter_info 獲取
         issue_id = reporter_info.get("issue_id", "UNKNOWN")
-        
-        # 處理結果建議儲存在 Asana 的某個地方，這裡假設從任務 description 或是特定的 notes 區塊獲取
-        # 如果 Asana 有 Custom Fields，可以從 task.get("custom_fields") 抓取
         resolution = self._extract_resolution(task)
+        
+        # 建立對話紀錄 (Dialogue)
+        dialogue = []
+        if stories:
+            for s in stories:
+                # 僅紀錄有文字內容的評論(comment)
+                if s.get("type") == "comment" or s.get("resource_subtype") == "comment_added":
+                    dialogue.append({
+                        "role": s.get("created_by", {}).get("name", "Unknown"),
+                        "text": s.get("text", ""),
+                        "time": s.get("created_at")
+                    })
 
         entry = {
-            "entry_id": issue_id,
-            "category": reporter_info.get("category_label", "其他"),
-            "problem": task.get("name", ""),
-            "resolution": resolution,
-            "priority": reporter_info.get("priority", "P3"),
-            "reporter": reporter_info.get("reporter_name", ""),
-            "reporter_email": reporter_info.get("email", ""),
-            "created_at": task.get("created_at"),
-            "resolved_at": now.isoformat(),
-            "asana_task_gid": task.get("gid"),
-            "keywords": self._generate_keywords(task.get("name", ""), resolution),
+            "metadata": {
+                "entry_id": issue_id,
+                "asana_task_gid": task.get("gid"),
+                "created_at": task.get("created_at"),
+                "resolved_at": now.isoformat(),
+                "priority": reporter_info.get("priority", "P3"),
+                "reporter": reporter_info.get("reporter_name", ""),
+                "reporter_email": reporter_info.get("email", ""),
+                "category": reporter_info.get("category_label", "其他")
+            },
+            "content": {
+                "title": task.get("name", ""),
+                "description": task.get("notes", ""),
+                "resolution": resolution,
+                "dialogue": dialogue,
+                "keywords": self._generate_keywords(task.get("name", ""), resolution)
+            }
         }
         return entry
 

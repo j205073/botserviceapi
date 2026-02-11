@@ -54,6 +54,19 @@ class AsanaClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def get_task_stories(self, task_gid: str) -> Dict[str, Any]:
+        """獲取任務的 Stories (含評論與紀錄)。"""
+        if not task_gid:
+            raise ValueError("無效的任務 ID")
+        url = f"{self.base_url}/tasks/{task_gid}/stories"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                url, headers=self._headers(),
+                params={"opt_fields": "text,type,created_at,created_by.name,resource_subtype"}
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def create_webhook(self, resource_gid: str, target_url: str) -> Dict[str, Any]:
         """Create a webhook subscription on a resource (project or task).
         Asana will send a handshake request to target_url first.
@@ -64,8 +77,8 @@ class AsanaClient:
                 "resource": resource_gid,
                 "target": target_url,
                 "filters": [
-                    {"resource_type": "task", "action": "changed",
-                     "fields": ["completed"]}
+                    {"resource_type": "task", "action": "changed", "fields": ["completed"]},
+                    {"resource_type": "story", "action": "added"}
                 ]
             }
         }
