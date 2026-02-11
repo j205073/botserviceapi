@@ -138,9 +138,8 @@ class ITSupportService:
             # ── 提單確認 Email（測試階段僅通知指定用戶）──
             _test_emails = {"juncheng.liu@rinnai.com.tw"}
             if reporter_email.lower() in _test_emails:
-                import asyncio
-                asyncio.create_task(
-                    self.email_notifier.send_submission_notification(
+                try:
+                    email_ok = await self.email_notifier.send_submission_notification(
                         to_email=reporter_email,
                         issue_id=issue_id,
                         summary=description,
@@ -150,7 +149,9 @@ class ITSupportService:
                         permalink_url=link or "",
                         reporter_name=reporter_name,
                     )
-                )
+                    print(f"📧 提單確認 Email → {reporter_email}: {'成功' if email_ok else '失敗'}")
+                except Exception as mail_err:
+                    print(f"❌ 提單確認 Email 發送例外: {mail_err}")
             return {
                 "success": True,
                 "task_gid": gid,
