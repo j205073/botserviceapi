@@ -432,7 +432,7 @@ class ITSupportService:
             logger.warning("查詢 Asana 任務 %s 失敗: %s", task_gid, e)
             return
 
-        # 獲取提單人資訊
+        # 獲取提單人資訊 TR
         reporter_info = self._task_to_reporter.get(task_gid)
         if not reporter_info:
             reporter_info = self._parse_reporter_from_notes(task.get("notes", ""))
