@@ -553,18 +553,31 @@ class ITSupportService:
         import re
         result: Dict[str, str] = {}
         try:
-            m_id = re.search(r"單號:\s*(IT\S+)", notes)
+            # 修改正則表達式以適應更多可能的空格或格式
+            m_id = re.search(r"單號[:：]\s*(IT[A-Za-z0-9]+)", notes)
             if m_id:
                 result["issue_id"] = m_id.group(1)
-            m_email = re.search(r"提出人:.*?<([^>]+)>", notes)
+            
+            m_email = re.search(r"提出人[:：].*?<([^>]+)>", notes)
             if m_email:
                 result["email"] = m_email.group(1)
-            m_name = re.search(r"提出人:\s*(.+?)\s*<", notes)
+            
+            m_name = re.search(r"提出人[:：]\s*(.+?)\s*<", notes)
             if m_name:
                 result["reporter_name"] = m_name.group(1).strip()
-        except Exception:
-            pass
-        return result if result.get("email") else None
+            
+            # 從內容中嘗試抓取分類 (如果在 notes 中有寫)
+            m_cat = re.search(r"分類[:：]\s*(.+?)\s*\(", notes)
+            if m_cat:
+                result["category_label"] = m_cat.group(1).strip()
+                
+            m_priority = re.search(r"優先順序[:：]\s*(\S+)", notes)
+            if m_priority:
+                result["priority"] = m_priority.group(1).strip()
+
+        except Exception as e:
+            logger.debug("解析 notes 失敗: %s", e)
+        return result if result.get("email") or result.get("issue_id") else None
 
     async def _send_teams_notification(
         self, reporter_email: str, issue_id: str, task_name: str, permalink: str, comments: str = ""

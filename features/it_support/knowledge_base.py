@@ -66,7 +66,7 @@ class ITKnowledgeBase:
         """
         將知識條目上傳至 SharePoint。
         """
-        issue_id = entry.get("entry_id", "UNKNOWN")
+        issue_id = entry.get("metadata", {}).get("entry_id", "UNKNOWN")
         taipei = pytz.timezone("Asia/Taipei")
         now = datetime.now(taipei)
         
