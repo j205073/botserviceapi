@@ -918,7 +918,9 @@ class ITSupportService:
         return f"u!{encoded}"
 
     async def _download_sharepoint_file(self, url: str):
-        """Download SharePoint/OneDrive item via Graph shares API."""
+        """Download SharePoint/OneDrive item via Graph shares API.
+        Attempts to use @microsoft.graph.downloadUrl first for better reliability.
+        """
         import httpx
         from core.container import get_container
         from infrastructure.external.token_manager import TokenManager
@@ -940,51 +942,65 @@ class ITSupportService:
         metadata = None
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
             try:
-                meta_resp = await client.get(base_url, headers=headers, params={"$select": "name,file"})
+                # 取得元資料，不限制 $select 欄位以確保拿到 @microsoft.graph.downloadUrl
+                meta_resp = await client.get(base_url, headers=headers)
             except httpx.HTTPError as err:
                 raise RuntimeError(f"連線 SharePoint 失敗：{err}") from err
+            
             if meta_resp.status_code == 200:
                 metadata = meta_resp.json()
-            elif meta_resp.status_code == 400:
-                # 400 通常表示分享連結格式不正確或已失效
+            else:
                 error_detail = ""
                 try:
                     error_json = meta_resp.json()
                     error_detail = error_json.get("error", {}).get("message", "")
                 except Exception:
                     pass
-                raise RuntimeError(f"SharePoint 連結無效或已過期 (400)：{error_detail or '請重新取得分享連結'}")
-            elif meta_resp.status_code == 403:
-                raise RuntimeError("SharePoint 權限不足 (403)，請聯絡系統管理員。")
-            elif meta_resp.status_code == 404:
-                raise RuntimeError("找不到 SharePoint 檔案，請確認連結是否仍有效。")
-            else:
-                try:
-                    meta_resp.raise_for_status()
-                except httpx.HTTPStatusError as err:
-                    raise RuntimeError(f"查詢 SharePoint 檔案資訊失敗：HTTP {err.response.status_code}") from err
+                
+                if meta_resp.status_code == 400:
+                    raise RuntimeError(f"SharePoint 連結無效或已過期 (400)：{error_detail or '請重新取得分享連結'}")
+                elif meta_resp.status_code == 403:
+                    raise RuntimeError("SharePoint 權限不足 (403)，請聯絡系統管理員。")
+                elif meta_resp.status_code == 404:
+                    raise RuntimeError("找不到 SharePoint 檔案，請確認連結是否仍有效。")
+                else:
+                    raise RuntimeError(f"查詢 SharePoint 檔案資訊失敗：HTTP {meta_resp.status_code} - {error_detail}")
 
+            # 優先使用 @microsoft.graph.downloadUrl (已簽署的直接連結，穩定性最高)
+            download_url = metadata.get("@microsoft.graph.downloadUrl")
+            fallback_used = False
+            
             try:
-                download_resp = await client.get(f"{base_url}/$value", headers=headers)
+                if download_url:
+                    # 使用預簽署連結下載時可能不需要 Authorization Header，但帶上通常無礙
+                    # 有些連結若帶 Authorization 反而會 401，這裡採用無 Header 下載
+                    download_resp = await client.get(download_url)
+                else:
+                    # 備援：原有的 /$value 方式
+                    fallback_used = True
+                    download_resp = await client.get(f"{base_url}/$value", headers=headers)
+                
                 download_resp.raise_for_status()
             except httpx.HTTPStatusError as err:
                 status_code = err.response.status_code
+                try:
+                    err_json = err.response.json()
+                    err_msg = err_json.get("error", {}).get("message", "")
+                except Exception:
+                    err_msg = ""
+                
+                method = "Fallback (/$value)" if fallback_used else "Direct (downloadUrl)"
                 if status_code == 400:
-                    raise RuntimeError("SharePoint 下載失敗 (400)：連結格式無效或已過期，請重新分享檔案。") from err
+                    raise RuntimeError(f"SharePoint 下載失敗 (400, {method})：連結無效或已過期。{err_msg}") from err
                 if status_code == 403:
-                    raise RuntimeError("SharePoint 下載遭拒 (403)，請確認 BOT 應用程式權限。") from err
-                if status_code == 404:
-                    raise RuntimeError("SharePoint 下載失敗：檔案不存在或連結已過期。") from err
-                raise RuntimeError(f"SharePoint 下載失敗：HTTP {status_code}") from err
+                    raise RuntimeError(f"SharePoint 下載遭拒 (403, {method})，請確認權限。{err_msg}") from err
+                raise RuntimeError(f"SharePoint 下載失敗：HTTP {status_code} ({method}). {err_msg}") from err
             except httpx.HTTPError as err:
-                raise RuntimeError(f"SharePoint 下載失敗：{err}") from err
+                raise RuntimeError(f"SharePoint 下載連線失敗：{err}") from err
 
-            inferred_name = None
-            inferred_mime = None
-            if metadata:
-                inferred_name = metadata.get("name") or None
-                file_info = metadata.get("file") or {}
-                inferred_mime = file_info.get("mimeType") or None
+            inferred_name = metadata.get("name")
+            file_info = metadata.get("file") or {}
+            inferred_mime = file_info.get("mimeType")
 
             return download_resp.content, download_resp.headers, inferred_name, inferred_mime
 
