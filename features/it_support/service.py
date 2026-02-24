@@ -152,12 +152,14 @@ class ITSupportService:
                     "task_name": name,
                     "permalink_url": link or "",
                 }
-            # ── 提單確認 Email（測試階段僅通知指定用戶）──
+            # ── 提單確認 Email ──
+            # EMAIL_TEST_MODE=true 時僅通知白名單用戶；false（預設）則通知所有提單人
+            _email_test_mode = os.getenv("EMAIL_TEST_MODE", "false").strip().lower() == "true"
             _test_emails = {"juncheng.liu@rinnai.com.tw"}
-            print(f"📧 Email 檢查: reporter={reporter_email.lower()}, 白名單={_test_emails}")
-            if reporter_email.lower() in _test_emails:
+            should_send = (not _email_test_mode) or (reporter_email.lower() in _test_emails)
+            print(f"📧 Email 檢查: reporter={reporter_email.lower()}, test_mode={_email_test_mode}, should_send={should_send}")
+            if should_send:
                 print(f"📧 準備發送提單確認 Email 至 {reporter_email}")
-                print(f"📧 SMTP 設定: {self.email_notifier.smtp_host}:{self.email_notifier.smtp_port}, user={self.email_notifier.smtp_user}")
                 try:
                     email_ok = await self.email_notifier.send_submission_notification(
                         to_email=reporter_email,
@@ -175,7 +177,7 @@ class ITSupportService:
                     print(f"❌ 提單確認 Email 發送例外: {mail_err}")
                     traceback.print_exc()
             else:
-                print(f"📧 跳過 Email 通知（{reporter_email} 不在測試白名單中）")
+                print(f"📧 跳過 Email 通知（測試模式，{reporter_email} 不在白名單中）")
             return {
                 "success": True,
                 "task_gid": gid,
