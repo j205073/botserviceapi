@@ -41,6 +41,32 @@ class AsanaClient:
                 raise httpx.HTTPStatusError(f"Asana API error {resp.status_code}: {detail}", request=e.request, response=e.response)
             return resp.json()
 
+    async def get_user_gid_by_email(self, email: str) -> Optional[str]:
+        """透過 email 查詢 Asana 使用者 GID，結果會快取避免重複呼叫。"""
+        if not email:
+            return None
+        # 快取
+        if not hasattr(self, "_user_gid_cache"):
+            self._user_gid_cache: Dict[str, Optional[str]] = {}
+        if email in self._user_gid_cache:
+            return self._user_gid_cache[email]
+
+        url = f"{self.base_url}/users/{email}"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    url, headers=self._headers(),
+                    params={"opt_fields": "gid,name,email"}
+                )
+                resp.raise_for_status()
+                data = resp.json().get("data", {})
+                gid = data.get("gid")
+                self._user_gid_cache[email] = gid
+                return gid
+        except Exception:
+            self._user_gid_cache[email] = None
+            return None
+
     async def get_task(self, task_gid: str) -> Dict[str, Any]:
         """Get task details by GID. Returns the task data dict."""
         if not task_gid:

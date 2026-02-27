@@ -45,6 +45,9 @@ class ITSupportService:
         self.assignee_gid = os.getenv("ASANA_ASSIGNEE_GID", "1208683560453534")
         self.assignee_section_gid = os.getenv("ASANA_ASSIGNEE_SECTION_GID", "1211277485675681")
 
+        # 報到開通分類指派的負責人 Email（可透過環境變數切換）
+        self.onboarding_assignee_email: str = os.getenv("ASANA_ONBOARDING_ASSIGNEE_EMAIL", "").strip()
+
         # Optional: map priority to Asana Tag GIDs for label display in Asana
         # Configure via env: ASANA_TAG_P1, ASANA_TAG_P2, ASANA_TAG_P3, ASANA_TAG_P4
         self.priority_tag_map: dict[str, str] = {
@@ -112,6 +115,19 @@ class ITSupportService:
             + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
         )
 
+        # 決定 assignee：報到開通指派給指定人員
+        assignee = self.assignee_gid
+        if category_code == "onboarding" and self.onboarding_assignee_email:
+            try:
+                onboarding_gid = await self.asana.get_user_gid_by_email(self.onboarding_assignee_email)
+                if onboarding_gid:
+                    assignee = onboarding_gid
+                    logger.info("報到開通案件 → 指派給 %s (GID: %s)", self.onboarding_assignee_email, assignee)
+                else:
+                    logger.warning("查無報到開通負責人 %s 的 Asana 帳號，使用預設指派", self.onboarding_assignee_email)
+            except Exception as e:
+                logger.warning("查詢報到開通負責人失敗，使用預設指派: %s", e)
+
         # build payload following Postman spec
         data = {
             "data": {
@@ -119,7 +135,7 @@ class ITSupportService:
                 "resource_subtype": "default_task",
                 "completed": False,
                 "notes": notes,
-                "assignee": self.assignee_gid,
+                "assignee": assignee,
                 "workspace": self.workspace_gid,
             }
         }
