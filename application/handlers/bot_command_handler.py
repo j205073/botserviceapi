@@ -44,6 +44,7 @@ class BotCommandHandler:
             "new-chat": self._handle_new_chat_command,
             "model": self._handle_model_command,
             "it": self._handle_it_command,
+            "itt": self._handle_itt_command,
         }
     
     async def handle_command(self, turn_context: TurnContext, user_info: BotInteractionDTO) -> None:
@@ -442,7 +443,30 @@ class BotCommandHandler:
                     text=f"❌ 無法顯示 IT 提單：{str(e)}",
                 )
             )
-    
+
+    async def _handle_itt_command(
+        self,
+        turn_context: TurnContext,
+        user_info: BotInteractionDTO,
+        command_dto: CommandExecutionDTO,
+    ) -> None:
+        """處理 @itt 命令：顯示 IT 代提單卡片（含提出人 Email 欄位）"""
+        try:
+            language = determine_language(user_info.user_mail)
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+
+            card = svc.build_itt_issue_card(language, user_info.user_name or "", user_info.user_mail)
+            await turn_context.send_activity(card)
+        except Exception as e:
+            await turn_context.send_activity(
+                Activity(
+                    type=ActivityTypes.message,
+                    text=f"❌ 無法顯示 IT 代提單：{str(e)}",
+                )
+            )
+
     async def _handle_unknown_command(
         self, 
         turn_context: TurnContext, 

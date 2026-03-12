@@ -9,7 +9,7 @@ import pytz
 
 from .asana_client import AsanaClient
 from .intent_classifier import ITIntentClassifier
-from .cards import build_it_issue_card
+from .cards import build_it_issue_card, build_itt_issue_card
 from .email_notifier import EmailNotifier
 from .knowledge_base import ITKnowledgeBase
 
@@ -72,7 +72,11 @@ class ITSupportService:
     def build_issue_card(self, language: str, reporter_name: str, reporter_email: str):
         return build_it_issue_card(language, self._taxonomy, reporter_name, reporter_email)
 
-    async def submit_issue(self, form: Dict[str, Any], reporter_name: str, reporter_email: str) -> Dict[str, Any]:
+    def build_itt_issue_card(self, language: str, reporter_name: str, reporter_email: str):
+        """Build the IT Team proxy card (with requester email input)."""
+        return build_itt_issue_card(language, self._taxonomy, reporter_name, reporter_email)
+
+    async def submit_issue(self, form: Dict[str, Any], reporter_name: str, reporter_email: str, requester_email: str = "") -> Dict[str, Any]:
         """
         Create Asana task from submitted form. Auto-classify if no category selected.
         Returns a dict with success, task info, and message.
@@ -104,16 +108,31 @@ class ITSupportService:
         else:
             print("ℹ️ AI 分析已關閉 (ENABLE_IT_AI_ANALYSIS=false)")
 
-        notes = (
-            f"單號: {issue_id}\n"
-            f"提出人: {reporter_name} <{reporter_email}>\n"
-            f"分類: {category_label} ({category_code})\n"
-            f"優先順序: {priority}\n"
-            f"建立來源: TR GPT bot\n"
-            f"建立時間: {created_at}\n\n"
-            f"【需求/問題說明】\n{description}\n"
-            + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
-        )
+        # 代提單模式：區分代理人與提出人
+        if requester_email:
+            requester_email = requester_email.strip()
+            notes = (
+                f"單號: {issue_id}\n"
+                f"提出人: {requester_email}\n"
+                f"代理提報人: {reporter_name} <{reporter_email}>\n"
+                f"分類: {category_label} ({category_code})\n"
+                f"優先順序: {priority}\n"
+                f"建立來源: TR GPT bot（代提單 @itt）\n"
+                f"建立時間: {created_at}\n\n"
+                f"【需求/問題說明】\n{description}\n"
+                + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
+            )
+        else:
+            notes = (
+                f"單號: {issue_id}\n"
+                f"提出人: {reporter_name} <{reporter_email}>\n"
+                f"分類: {category_label} ({category_code})\n"
+                f"優先順序: {priority}\n"
+                f"建立來源: TR GPT bot\n"
+                f"建立時間: {created_at}\n\n"
+                f"【需求/問題說明】\n{description}\n"
+                + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
+            )
 
         # 決定 assignee：報到開通指派給指定人員
         assignee = self.assignee_gid
@@ -161,10 +180,13 @@ class ITSupportService:
             if gid:
                 self._recent_task_by_user[reporter_email] = {"gid": gid, "ts": datetime.now(timezone.utc)}
                 # 儲存反向映射供 webhook 回呼使用
+                # 代提單模式：webhook 通知對象改為提出人
+                notify_email = requester_email if requester_email else reporter_email
+                notify_name = requester_email if requester_email else reporter_name
                 self._task_to_reporter[gid] = {
-                    "email": reporter_email,
+                    "email": notify_email,
                     "issue_id": issue_id,
-                    "reporter_name": reporter_name,
+                    "reporter_name": notify_name,
                     "task_name": name,
                     "permalink_url": link or "",
                 }
@@ -175,6 +197,7 @@ class ITSupportService:
             should_send = (not _email_test_mode) or (reporter_email.lower() in _test_emails)
             print(f"📧 Email 檢查: reporter={reporter_email.lower()}, test_mode={_email_test_mode}, should_send={should_send}")
             if should_send:
+                # 發送給代理提報人
                 print(f"📧 準備發送提單確認 Email 至 {reporter_email}")
                 try:
                     email_ok = await self.email_notifier.send_submission_notification(
@@ -192,6 +215,22 @@ class ITSupportService:
                     import traceback
                     print(f"❌ 提單確認 Email 發送例外: {mail_err}")
                     traceback.print_exc()
+                # 代提單模式：同時通知提出人
+                if requester_email and requester_email.lower() != reporter_email.lower():
+                    try:
+                        req_ok = await self.email_notifier.send_submission_notification(
+                            to_email=requester_email,
+                            issue_id=issue_id,
+                            summary=description,
+                            category=category_label,
+                            priority=priority,
+                            created_at=created_at,
+                            permalink_url="",
+                            reporter_name=requester_email,
+                        )
+                        print(f"📧 提單確認 Email（提出人）→ {requester_email}: {'✅ 成功' if req_ok else '❌ 失敗'}")
+                    except Exception as mail_err:
+                        print(f"❌ 提出人 Email 發送例外: {mail_err}")
             else:
                 print(f"📧 跳過 Email 通知（測試模式，{reporter_email} 不在白名單中）")
             return {

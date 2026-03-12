@@ -378,6 +378,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "desc": "建立 IT 需求/問題單",
                     },
                     {
+                        "title": "🛠️ IT代提單",
+                        "value": "@itt",
+                        "desc": "幫其他同仁提交 IT 單",
+                    },
+                    {
                         "title": "🏢 預約會議室",
                         "value": "@book-room",
                         "desc": "預約會議室",
@@ -422,6 +427,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "desc": "Create an IT issue/request",
                     },
                     {
+                        "title": "🛠️ IT Proxy",
+                        "value": "@itt",
+                        "desc": "Submit IT ticket on behalf of others",
+                    },
+                    {
                         "title": "🏢 Book Room",
                         "value": "@book-room",
                         "desc": "Book meeting room",
@@ -464,6 +474,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "title": "🛠️ IT 申請",
                         "value": "@it",
                         "desc": "IT 問い合わせ/リクエストを作成",
+                    },
+                    {
+                        "title": "🛠️ IT代理申請",
+                        "value": "@itt",
+                        "desc": "他の人のためにIT申請を代理",
                     },
                     {
                         "title": "🏢 会議室予約",

@@ -187,6 +187,8 @@ class TeamsMessageHandler:
             await self._handle_model_selection(turn_context, user_info)
         elif card_action == "submitIT":
             await self._handle_submit_it_issue(turn_context, user_info)
+        elif card_action == "submitITT":
+            await self._handle_submit_itt_issue(turn_context, user_info)
         elif card_action == "uploadOption":
             await self._handle_upload_option(turn_context, user_info)
 
@@ -236,6 +238,59 @@ class TeamsMessageHandler:
                 Activity(type=ActivityTypes.message, text=f"❌ 提交 IT 提單時發生錯誤：{str(e)}")
             )
 
+    async def _handle_submit_itt_issue(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """提交 IT 代提單並建立 Asana 任務（含提出人 Email）"""
+        try:
+            requester_email = (turn_context.activity.value.get("requesterEmail") or "").strip()
+            if not requester_email:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 請填寫提出人 Email")
+                )
+                return
+
+            form = {
+                "summary": turn_context.activity.value.get("summary"),
+                "description": turn_context.activity.value.get("description"),
+                "category": turn_context.activity.value.get("category"),
+                "priority": turn_context.activity.value.get("priority"),
+            }
+
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+            result = await svc.submit_issue(
+                form,
+                user_info.user_name or "",
+                user_info.user_mail,
+                requester_email=requester_email,
+            )
+
+            if result.get("success"):
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=result.get("message", "✅ 已建立 IT Issue（代提單）"))
+                )
+                try:
+                    language = determine_language(user_info.user_mail)
+                    upload_card = self.upload_card_builder.build_file_upload_options_card(language)
+                    await turn_context.send_activity(upload_card)
+                except Exception:
+                    pass
+                if turn_context.activity.attachments:
+                    try:
+                        await self._try_attach_images(turn_context, user_info)
+                    except Exception:
+                        pass
+            else:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=f"❌ {result.get('error', '提交失敗')}")
+                )
+        except Exception as e:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 提交 IT 代提單時發生錯誤：{str(e)}")
+            )
+
     async def _handle_function_selection(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
     ) -> None:
@@ -249,6 +304,7 @@ class TeamsMessageHandler:
             "@addTodo": self._show_add_todo_card,
             "@ls": self._show_todo_list,
             "@it": self._show_it_issue_card,
+            "@itt": self._show_itt_issue_card,
             "@upload": self._show_upload_card,
             "@book-room": self._show_room_booking_options,
             "@check-booking": self._show_my_bookings,
@@ -272,6 +328,18 @@ class TeamsMessageHandler:
         language = determine_language(user_info.user_mail)
         svc: ITSupportService = get_container().get(ITSupportService)
         card = svc.build_issue_card(language, user_info.user_name or "", user_info.user_mail)
+        await turn_context.send_activity(card)
+
+    async def _show_itt_issue_card(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """顯示 IT 代提單卡片（含提出人 Email 欄位）"""
+        from core.container import get_container
+        from features.it_support.service import ITSupportService
+
+        language = determine_language(user_info.user_mail)
+        svc: ITSupportService = get_container().get(ITSupportService)
+        card = svc.build_itt_issue_card(language, user_info.user_name or "", user_info.user_mail)
         await turn_context.send_activity(card)
 
     async def _show_upload_card(
