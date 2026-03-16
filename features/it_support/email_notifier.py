@@ -142,7 +142,7 @@ class EmailNotifier:
             logger.error("Email 通知發送失敗: %s", e)
             return False
 
-    def _send_smtp(self, msg: MIMEMultipart, to_email: str) -> None:
+    def _send_smtp(self, msg: MIMEMultipart, to_email: str, cc_emails: Optional[list] = None) -> None:
         """同步 SMTP 發送（在 executor 中執行）"""
         print(f"📧 SMTP 連線中: {self.smtp_host}:{self.smtp_port}")
         try:
@@ -155,8 +155,12 @@ class EmailNotifier:
                 server.ehlo()
                 print(f"📧 SMTP LOGIN: {self.smtp_user}")
                 server.login(self.smtp_user, self.smtp_password)
-                print(f"📧 SMTP SEND: {self.smtp_user} → {to_email}")
-                server.sendmail(self.smtp_user, [to_email], msg.as_string())
+                # 收件人 = To + CC
+                recipients = [to_email]
+                if cc_emails:
+                    recipients.extend(cc_emails)
+                print(f"📧 SMTP SEND: {self.smtp_user} → {to_email} (CC: {cc_emails or '無'})")
+                server.sendmail(self.smtp_user, recipients, msg.as_string())
                 print("📧 SMTP 發送完成")
         except Exception as e:
             print(f"❌ SMTP 錯誤: {type(e).__name__}: {e}")
@@ -289,8 +293,9 @@ class EmailNotifier:
         created_at: str = "",
         permalink_url: str = "",
         reporter_name: str = "",
+        cc_email: str = "",
     ) -> bool:
-        """發送提單確認通知郵件。回傳 True 表示成功。"""
+        """發送提單確認通知郵件。可選 cc_email 用於 @itt 代提單時 CC 給提出人。回傳 True 表示成功。"""
         if not self.smtp_user or not self.smtp_password:
             logger.warning("SMTP 未設定，跳過提單確認 Email")
             return False
@@ -301,11 +306,18 @@ class EmailNotifier:
                 created_at, permalink_url, reporter_name,
             )
 
+            # 若有 CC 收件人，加入 Cc header
+            cc_list = []
+            if cc_email and cc_email.lower() != to_email.lower():
+                msg["Cc"] = cc_email
+                cc_list = [cc_email]
+
             import asyncio
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._send_smtp, msg, to_email)
+            await loop.run_in_executor(None, self._send_smtp, msg, to_email, cc_list)
 
-            logger.info("提單確認 Email 已發送至 %s (單號: %s)", to_email, issue_id)
+            cc_log = f" (CC: {cc_email})" if cc_email else ""
+            logger.info("提單確認 Email 已發送至 %s%s (單號: %s)", to_email, cc_log, issue_id)
             return True
         except Exception as e:
             logger.error("提單確認 Email 發送失敗: %s", e)

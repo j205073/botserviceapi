@@ -197,8 +197,11 @@ class ITSupportService:
             should_send = (not _email_test_mode) or (reporter_email.lower() in _test_emails)
             print(f"📧 Email 檢查: reporter={reporter_email.lower()}, test_mode={_email_test_mode}, should_send={should_send}")
             if should_send:
-                # 發送給代理提報人
-                print(f"📧 準備發送提單確認 Email 至 {reporter_email}")
+                # 發送提單確認 Email（代提單時 CC 給提出人）
+                cc_target = ""
+                if requester_email and requester_email.lower() != reporter_email.lower():
+                    cc_target = requester_email
+                print(f"📧 準備發送提單確認 Email 至 {reporter_email}" + (f" (CC: {cc_target})" if cc_target else ""))
                 try:
                     email_ok = await self.email_notifier.send_submission_notification(
                         to_email=reporter_email,
@@ -209,28 +212,13 @@ class ITSupportService:
                         created_at=created_at,
                         permalink_url="",
                         reporter_name=reporter_name,
+                        cc_email=cc_target,
                     )
                     print(f"📧 提單確認 Email → {reporter_email}: {'✅ 成功' if email_ok else '❌ 失敗'}")
                 except Exception as mail_err:
                     import traceback
                     print(f"❌ 提單確認 Email 發送例外: {mail_err}")
                     traceback.print_exc()
-                # 代提單模式：同時通知提出人
-                if requester_email and requester_email.lower() != reporter_email.lower():
-                    try:
-                        req_ok = await self.email_notifier.send_submission_notification(
-                            to_email=requester_email,
-                            issue_id=issue_id,
-                            summary=description,
-                            category=category_label,
-                            priority=priority,
-                            created_at=created_at,
-                            permalink_url="",
-                            reporter_name=requester_email,
-                        )
-                        print(f"📧 提單確認 Email（提出人）→ {requester_email}: {'✅ 成功' if req_ok else '❌ 失敗'}")
-                    except Exception as mail_err:
-                        print(f"❌ 提出人 Email 發送例外: {mail_err}")
             else:
                 print(f"📧 跳過 Email 通知（測試模式，{reporter_email} 不在白名單中）")
             return {
