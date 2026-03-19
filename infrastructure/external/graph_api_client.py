@@ -45,8 +45,8 @@ class GraphAPIClient:
         }
 
     async def _ensure_session(self) -> None:
-        """確保 aiohttp session 已初始化（允許非 async with 也可使用）。"""
-        if self.session is None:
+        """確保 aiohttp session 已初始化且未關閉。"""
+        if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
 
     @AsyncRetry(max_attempts=3, delay=1.0, backoff=2.0)
