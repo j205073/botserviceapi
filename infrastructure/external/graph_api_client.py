@@ -632,3 +632,46 @@ class GraphAPIClient:
                 raise GraphAPIError(f"SharePoint 檔案上傳失敗: {resp.status} - {resp_text}")
             return json.loads(resp_text) if resp_text else {}
 
+    async def list_drive_children(
+        self,
+        site_hostname: str,
+        site_path: str,
+        folder_path: str
+    ) -> List[Dict[str, Any]]:
+        """列出 SharePoint Drive 資料夾下的所有子項目。"""
+        site_id = await self._get_site_id(site_hostname, site_path)
+        endpoint = f"sites/{site_id}/drive/root:/{folder_path.lstrip('/')}:/children"
+        
+        try:
+            result = await self._make_request("GET", endpoint, params={"$top": "1000"})
+            return result.get("value", [])
+        except GraphAPIError as e:
+            # 處理 404 等錯誤，若資料夾不存在回傳空列表
+            if "404" in str(e):
+                return []
+            raise e
+
+    async def download_drive_file(
+        self,
+        site_hostname: str,
+        site_path: str,
+        file_path: str
+    ) -> Optional[Dict[str, Any]]:
+        """從 SharePoint 下載 JSON 檔案並回傳 dict。"""
+        site_id = await self._get_site_id(site_hostname, site_path)
+        endpoint = f"sites/{site_id}/drive/root:/{file_path.lstrip('/')}:/content"
+        
+        await self._ensure_session()
+        headers = await self._get_headers()
+        url = f"{self.base_url}/{endpoint}"
+        
+        async with self.session.get(url, headers=headers, allow_redirects=True) as resp:
+            if resp.status >= 400:
+                return None
+            
+            text = await resp.text()
+            try:
+                return json.loads(text)
+            except Exception:
+                return {"_raw": text}
+

@@ -113,3 +113,77 @@ class ITKnowledgeBase:
         # 這裡可以實作更複雜的斷詞，目前簡單過濾長度 > 1 的詞
         words = re.findall(r"[\u4e00-\u9fa5]{2,}|[a-zA-Z]{3,}", all_text)
         return list(set(words))[:10]
+
+    async def list_entries(self, year: Optional[str] = None, month: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        列出 SharePoint 上的知識庫 JSON 條目。
+        可透過 year 和 month 篩選。
+        """
+        all_entries = []
+
+        if year and month:
+            folder = f"{self.root_path}/{year}/{month}"
+            files = await self.graph_client.list_drive_children(self.site_hostname, self.site_path, folder)
+            for f in files:
+                if f.get("name", "").endswith(".json"):
+                    content = await self.graph_client.download_drive_file(self.site_hostname, self.site_path, f"{folder}/{f['name']}")
+                    if content:
+                        all_entries.append(content)
+        elif year:
+            year_folder = f"{self.root_path}/{year}"
+            months = await self.graph_client.list_drive_children(self.site_hostname, self.site_path, year_folder)
+            for m in months:
+                if m.get("folder"):
+                    month_path = f"{year_folder}/{m['name']}"
+                    files = await self.graph_client.list_drive_children(self.site_hostname, self.site_path, month_path)
+                    for f in files:
+                        if f.get("name", "").endswith(".json"):
+                            content = await self.graph_client.download_drive_file(self.site_hostname, self.site_path, f"{month_path}/{f['name']}")
+                            if content:
+                                all_entries.append(content)
+        else:
+            years = await self.graph_client.list_drive_children(self.site_hostname, self.site_path, self.root_path)
+            for y in years:
+                if y.get("folder"):
+                    year_path = f"{self.root_path}/{y['name']}"
+                    months = await self.graph_client.list_drive_children(self.site_hostname, self.site_path, year_path)
+                    for m in months:
+                        if m.get("folder"):
+                            month_path = f"{year_path}/{m['name']}"
+                            files = await self.graph_client.list_drive_children(self.site_hostname, self.site_path, month_path)
+                            for f in files:
+                                if f.get("name", "").endswith(".json"):
+                                    content = await self.graph_client.download_drive_file(self.site_hostname, self.site_path, f"{month_path}/{f['name']}")
+                                    if content:
+                                        all_entries.append(content)
+
+        return all_entries
+
+    async def get_entry(self, issue_id: str) -> Optional[Dict[str, Any]]:
+        """
+        取得單筆知識庫條目。
+        嘗試從 issue_id 解析年月定址，失敗則暴力搜尋。
+        """
+        if issue_id.startswith("IT") and len(issue_id) >= 8:
+            year = issue_id[2:6]
+            month = issue_id[6:8]
+            file_path = f"{self.root_path}/{year}/{month}/{issue_id}.json"
+            content = await self.graph_client.download_drive_file(self.site_hostname, self.site_path, file_path)
+            if content:
+                return content
+
+        years = await self.graph_client.list_drive_children(self.site_hostname, self.site_path, self.root_path)
+        for y in years:
+            if not y.get("folder"):
+                continue
+            year_path = f"{self.root_path}/{y['name']}"
+            months = await self.graph_client.list_drive_children(self.site_hostname, self.site_path, year_path)
+            for m in months:
+                if not m.get("folder"):
+                    continue
+                file_path = f"{year_path}/{m['name']}/{issue_id}.json"
+                content = await self.graph_client.download_drive_file(self.site_hostname, self.site_path, file_path)
+                if content:
+                    return content
+
+        return None

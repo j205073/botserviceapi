@@ -151,6 +151,69 @@ def build_it_issue_card(
     return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
 
 
+def build_broadcast_card(language: str) -> Activity:
+    """Build an Adaptive Card for sending broadcast messages."""
+
+    texts = {
+        "zh": {
+            "title": "發送廣播推播",
+            "target": "收件人 Email (全發送請輸入 `all`，多筆請用分號分隔)",
+            "target_placeholder": "例如：all 或 a@rinnai.com.tw;b@rinnai.com.tw",
+            "message": "推播訊息",
+            "message_placeholder": "請輸入要發送給大家的訊息",
+            "submit": "發送推播",
+        },
+        "en": {
+            "title": "Send Broadcast Message",
+            "target": "Target Email (Enter `all` to broadcast, or use semicolons for multiple)",
+            "target_placeholder": "e.g., all or a@rinnai.com.tw;b@rinnai.com.tw",
+            "message": "Broadcast Message",
+            "message_placeholder": "Enter the message to broadcast",
+            "submit": "Send",
+        },
+        "ja": {
+            "title": "ブロードキャスト送信",
+            "target": "宛先 Email (全員送信は `all`、複数はセミコロンで区切る)",
+            "target_placeholder": "例：all または a@rinnai.com.tw;b@rinnai.com.tw",
+            "message": "メッセージ",
+            "message_placeholder": "送信するメッセージを入力してください",
+            "submit": "送信",
+        },
+    }
+
+    t = texts.get(language, texts["zh"])
+
+    card_content: Dict[str, Any] = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+            {"type": "TextBlock", "text": f"📢 {t['title']}", "weight": "Bolder", "size": "Medium"},
+            {
+                "type": "Input.Text",
+                "id": "targetEmails",
+                "label": t["target"],
+                "placeholder": t["target_placeholder"],
+                "value": "all",
+                "maxLength": 1000,
+            },
+            {
+                "type": "Input.Text",
+                "id": "broadcastMessage",
+                "label": t["message"],
+                "isMultiline": True,
+                "maxLength": 2000,
+                "placeholder": t["message_placeholder"],
+                "height": "stretch",
+            },
+        ],
+        "actions": [
+            {"type": "Action.Submit", "title": f"🚀 {t['submit']}", "data": {"action": "submitBroadcast"}}
+        ],
+    }
+
+    return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
+
 def build_itt_issue_card(
     language: str,
     categories: List[Dict[str, str]],
@@ -287,6 +350,70 @@ def build_itt_issue_card(
         ],
         "actions": [
             {"type": "Action.Submit", "title": f"✅ {t['submit']}", "data": {"action": "submitITT"}}
+        ],
+    }
+
+    return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
+
+
+def build_broadcast_card(language: str) -> Activity:
+    """Build an Adaptive Card for sending broadcast messages."""
+
+    texts = {
+        "zh": {
+            "title": "發送廣播推播",
+            "target": "收件人 Email (全發送請輸入 `all`，多筆請用分號分隔)",
+            "target_placeholder": "例如：all 或 a@rinnai.com.tw;b@rinnai.com.tw",
+            "message": "推播訊息",
+            "message_placeholder": "請輸入要發送給大家的訊息",
+            "submit": "發送推播",
+        },
+        "en": {
+            "title": "Send Broadcast Message",
+            "target": "Target Email (Enter `all` to broadcast, or use semicolons for multiple)",
+            "target_placeholder": "e.g., all or a@rinnai.com.tw;b@rinnai.com.tw",
+            "message": "Broadcast Message",
+            "message_placeholder": "Enter the message to broadcast",
+            "submit": "Send",
+        },
+        "ja": {
+            "title": "ブロードキャスト送信",
+            "target": "宛先 Email (全員送信は `all`、複数はセミコロンで区切る)",
+            "target_placeholder": "例：all または a@rinnai.com.tw;b@rinnai.com.tw",
+            "message": "メッセージ",
+            "message_placeholder": "送信するメッセージを入力してください",
+            "submit": "送信",
+        },
+    }
+
+    t = texts.get(language, texts["zh"])
+
+    card_content: Dict[str, Any] = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+            {"type": "TextBlock", "text": f"📢 {t['title']}", "weight": "Bolder", "size": "Medium"},
+            {
+                "type": "Input.Text",
+                "id": "targetEmails",
+                "label": t["target"],
+                "placeholder": t["target_placeholder"],
+                "value": "all",
+                "maxLength": 1000,
+            },
+            {
+                "type": "Input.Text",
+                "id": "broadcastMessage",
+                "label": t["message"],
+                "isMultiline": True,
+                "maxLength": 2000,
+                "placeholder": t["message_placeholder"],
+                "height": "stretch",
+            },
+        ],
+        "actions": [
+            {"type": "Action.Submit", "title": f"🚀 {t['submit']}", "data": {"action": "submitBroadcast"}}
         ],
     }
 

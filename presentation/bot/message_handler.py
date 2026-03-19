@@ -191,6 +191,8 @@ class TeamsMessageHandler:
             await self._handle_submit_itt_issue(turn_context, user_info)
         elif card_action == "uploadOption":
             await self._handle_upload_option(turn_context, user_info)
+        elif card_action == "submitBroadcast":
+            await self._handle_submit_broadcast(turn_context, user_info)
 
     async def _handle_submit_it_issue(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
@@ -312,6 +314,7 @@ class TeamsMessageHandler:
             "@info": self._show_user_info,
             "@you": self._show_bot_intro,
             "@model": self._show_model_selection,
+            "@send": self._show_broadcast_card,
         }
 
         handler = function_handlers.get(selected_function)
@@ -341,6 +344,114 @@ class TeamsMessageHandler:
         svc: ITSupportService = get_container().get(ITSupportService)
         card = svc.build_itt_issue_card(language, user_info.user_name or "", user_info.user_mail)
         await turn_context.send_activity(card)
+
+    async def _show_broadcast_card(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """顯示廣播推播卡片"""
+        from features.it_support.cards import build_broadcast_card
+        language = determine_language(user_info.user_mail)
+        card = build_broadcast_card(language)
+        await turn_context.send_activity(card)
+
+    async def _handle_submit_broadcast(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """處理廣播推播表單提交"""
+        try:
+            target_emails_raw = (turn_context.activity.value.get("targetEmails") or "").strip()
+            message_text = (turn_context.activity.value.get("broadcastMessage") or "").strip()
+
+            if not message_text:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 廣播失敗：推播訊息不能為空")
+                )
+                return
+
+            if not target_emails_raw:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 廣播失敗：收件人不能為空 (若要全發送請輸入 all)")
+                )
+                return
+
+            # 從依賴取得 bot_adapter 以及 user_repo
+            from core.container import get_container
+            from domain.repositories.user_repository import UserRepository
+            from presentation.web.api_routes import create_api_routes
+            
+            container = get_container()
+            try:
+                user_repo: UserRepository = container.get(UserRepository)
+            except Exception as e:
+                await turn_context.send_activity(Activity(type=ActivityTypes.message, text=f"❌ 無法獲取用戶庫: {str(e)}"))
+                return
+            
+            # 這裡透過 container.get("bot_adapter") 取出原本注冊好的 Adapter 才能發起 continue_conversation
+            # app.py 有註冊 providers.Object(adapter)
+            try:
+                bot_adapter = container.get("bot_adapter")
+            except Exception:
+                bot_adapter = None
+                
+            if not bot_adapter:
+                await turn_context.send_activity(Activity(type=ActivityTypes.message, text="❌ 廣播失敗：無法取得 Bot Adapter。"))
+                return
+                
+            bot_app_id = self.config.bot.app_id
+
+            # Parse targets
+            target_all = (target_emails_raw.lower() == "all")
+            target_list = []
+            if not target_all:
+                target_list = [t.strip().lower() for t in target_emails_raw.split(";") if t.strip()]
+
+            success_count = 0
+            fail_count = 0
+            skipped_count = 0
+            
+            # Send message to targets
+            for email, session in user_repo._sessions.items():
+                email_lower = email.lower()
+                
+                # Check if this user is in the target list
+                if not target_all and email_lower not in target_list:
+                    continue
+                    
+                ref = session.conversation_reference
+                if not ref:
+                    skipped_count += 1
+                    continue
+                    
+                try:
+                    async def send_proactive_message(turn_context):
+                        from botbuilder.schema import Activity
+                        activity = Activity(
+                            type="message",
+                            text=message_text
+                        )
+                        await turn_context.send_activity(activity)
+
+                    await bot_adapter.adapter.continue_conversation(
+                        ref,
+                        send_proactive_message,
+                        bot_app_id
+                    )
+                    success_count += 1
+                except Exception as e:
+                    self.logger.error(f"Failed to send proactive message to {email}: {str(e)}")
+                    fail_count += 1
+
+            # Report back
+            result_msg = f"✅ 推播完成！\n成功發送：{success_count} 筆\n發送失敗：{fail_count} 筆\n無有效連線略過：{skipped_count} 筆"
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=result_msg)
+            )
+
+        except Exception as e:
+            self.logger.error(f"Broadcast submission failed: {str(e)}")
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 處理廣播時發生例外：{str(e)}")
+            )
 
     async def _show_upload_card(
         self, turn_context: TurnContext, user_info: BotInteractionDTO

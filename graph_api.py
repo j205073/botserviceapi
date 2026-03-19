@@ -1,15 +1,14 @@
 import aiohttp
-from datetime import datetime, timedelta
-import json
-import os
-import pytz
+from datetime import datetime
 from typing import Optional, Dict, Any
 from token_manager import TokenManager
 import sys
 import io
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')  # type: ignore
+else:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")  # type: ignore
 
 class GraphAPI:
     def __init__(self, token_manager: TokenManager):
@@ -18,7 +17,7 @@ class GraphAPI:
 
     async def get_user_calendar(
         self, user_mail: str, start_time: datetime, end_time: datetime
-    ) -> Dict:
+    ) -> Optional[Dict]:
         """
         獲取使用者的行事曆資訊
 
@@ -121,7 +120,7 @@ class GraphAPI:
         subject: str,
         start_time: datetime,
         end_time: datetime,
-        attendees: list = None,
+        attendees: Optional[list] = None,
     ) -> Dict[str, Any]:
         """建立會議"""
         endpoint = f"{self.base_url}/users/{organizer_email}/calendar/events"

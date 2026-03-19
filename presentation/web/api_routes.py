@@ -68,6 +68,121 @@ class APIRoutes:
         # Asana Webhook 端點
         api_bp.route("/asana/webhook", methods=["POST"])(self.asana_webhook)
         api_bp.route("/asana/webhook/setup", methods=["POST"])(self.asana_webhook_setup)
+
+        # SharePoint KB 知識庫查詢端點
+        api_bp.route("/kb", methods=["GET"])(self.list_knowledge_base)
+        api_bp.route("/kb/<issue_id>", methods=["GET"])(self.get_knowledge_entry)
+
+    async def list_knowledge_base(self):
+        """列出知識庫 JSON。"""
+        try:
+            year = request.args.get("year")
+            month = request.args.get("month")
+            
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+            
+            if not svc.knowledge_base:
+                return jsonify({"success": False, "error": "知識庫模組尚未初始化"}), 500
+                
+            entries = await svc.knowledge_base.list_entries(year, month)
+            return jsonify({
+                "success": True,
+                "count": len(entries),
+                "data": entries,
+            })
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    async def get_knowledge_entry(self, issue_id: str):
+        """取得單筆知識庫條目。"""
+        try:
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+            
+            if not svc.knowledge_base:
+                return jsonify({"success": False, "error": "知識庫模組尚未初始化"}), 500
+                
+            entry = await svc.knowledge_base.get_entry(issue_id)
+            if entry:
+                return jsonify({"success": True, "data": entry})
+            else:
+                return jsonify({"success": False, "error": f"找不到 {issue_id}"}), 404
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    async def broadcast_message(self):
+        """主動推播訊息給所有註冊過的用戶端點"""
+        try:
+            # 檢查Content-Type
+            if not request.is_json:
+                return jsonify({"success": False, "error": "Content-Type 必須是 application/json"}), 415
+            
+            body = await request.get_json()
+            message_text = body.get("message")
+            if not message_text:
+                return jsonify({"success": False, "error": "缺少 'message' 欄位"}), 400
+            
+            # 從容器中提取依賴
+            from core.container import get_container
+            from domain.repositories.user_repository import UserRepository
+            
+            container = get_container()
+            try:
+                user_repo: UserRepository = container.get(UserRepository)
+            except Exception as e:
+                return jsonify({"success": False, "error": f"無法獲取 UserRepository: {str(e)}"}), 500
+
+            if not self.bot_adapter:
+                return jsonify({"success": False, "error": "Bot適配器未初始化"}), 500
+
+            bot_app_id = self.config.bot.app_id
+            
+            success_count = 0
+            fail_count = 0
+            
+            # 遍歷所有已知的使用者會話並發送推播
+            # 注意: 此處直接存取內部變數 _sessions 是一種簡便作法
+            for email, session in user_repo._sessions.items():
+                ref = session.conversation_reference
+                if not ref:
+                    continue
+                    
+                try:
+                    # 使用 Bot Framework Adapter 的 continue_conversation 發送推播
+                    async def send_proactive_message(turn_context):
+                        from botbuilder.schema import Activity
+                        activity = Activity(
+                            type="message",
+                            text=message_text
+                        )
+                        await turn_context.send_activity(activity)
+
+                    await self.bot_adapter.adapter.continue_conversation(
+                        ref,
+                        send_proactive_message,
+                        bot_app_id
+                    )
+                    success_count += 1
+                except Exception as e:
+                    print(f"推播給 {email} 失敗: {str(e)}")
+                    fail_count += 1
+
+            return jsonify({
+                "success": True, 
+                "message": f"推播完成：成功 {success_count} 筆，失敗 {fail_count} 筆",
+                "stats": {
+                    "success": success_count,
+                    "fail": fail_count,
+                    "total_users": len(user_repo._sessions)
+                }
+            })
+
+        except Exception as e:
+            print(f"❌ 廣播訊息失敗: {str(e)}")
+            return jsonify({"success": False, "error": str(e)}), 500
     
     async def ping(self):
         """健康檢查端點"""
