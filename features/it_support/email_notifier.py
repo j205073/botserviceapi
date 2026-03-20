@@ -3,6 +3,7 @@ Email 通知模組
 透過 SMTP 發送 IT 單完成通知郵件
 """
 import os
+import re
 import logging
 import smtplib
 from email.mime.text import MIMEText
@@ -33,6 +34,7 @@ class EmailNotifier:
         issue_id: str,
         task_name: str,
         permalink_url: str = "",
+        comments: str = "",
     ) -> MIMEMultipart:
         """建立任務完成通知郵件"""
         msg = MIMEMultipart("alternative")
@@ -43,10 +45,12 @@ class EmailNotifier:
         # 純文字版本
         text_body = (
             f"您好，\n\n"
-            f"您提交的 IT 支援單已處理完成：\n\n"
+            f"您提交的 IT 支援需求已由服務台工程師處理完成：\n\n"
             f"  單號：{issue_id}\n"
-            f"  任務：{task_name}\n"
+            f"  摘要：{task_name}\n"
         )
+        if comments:
+            text_body += f"\n溝通評論：\n{comments}\n"
         if permalink_url:
             text_body += f"  連結：{permalink_url}\n"
         text_body += (
@@ -64,22 +68,49 @@ class EmailNotifier:
                 f'font-weight: 600; display: inline-block;">查看任務詳情</a>'
                 f'</div>'
             )
-        
+
+        # 溝通評論區塊
+        comments_section = ""
+        if comments:
+            # comments 格式為 "  - **Author**: text" 每行一則，轉為 HTML
+            comment_items = ""
+            for line in comments.strip().split("\n"):
+                line = line.strip()
+                if line.startswith("- "):
+                    line = line[2:]
+                # 將 **text** 轉為 <strong>text</strong>
+                line = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)
+                if line:
+                    comment_items += (
+                        f'<div style="padding: 10px 16px; border-bottom: 1px solid #EBECF0;">'
+                        f'<span style="color: #172B4D; font-size: 14px; line-height: 1.5;">{line}</span>'
+                        f'</div>'
+                    )
+            if comment_items:
+                comments_section = (
+                    f'<div style="margin: 24px 0;">'
+                    f'<p style="color: #172B4D; font-size: 15px; font-weight: 600; margin: 0 0 12px;">💬 溝通評論</p>'
+                    f'<div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; overflow: hidden;">'
+                    f'{comment_items}'
+                    f'</div>'
+                    f'</div>'
+                )
+
         html_body = f"""\
 <html>
 <body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;">
-  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; 
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px;
               box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
     <!-- Header -->
     <div style="background: linear-gradient(135deg, #0052CC, #0747A6); padding: 32px 24px; text-align: center;">
       <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 2px;">✅ IT 單已處理完成</h1>
     </div>
-    
+
     <!-- Content -->
     <div style="padding: 40px 32px;">
       <p style="color: #172B4D; font-size: 16px; line-height: 1.6; margin-top: 0;">您好，</p>
       <p style="color: #42526E; font-size: 16px; line-height: 1.6;">您提交的 IT 支援需求已由服務台工程師處理完成：</p>
-      
+
       <div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 24px; margin: 32px 0;">
         <table style="width: 100%; border-collapse: collapse;">
           <tr>
@@ -92,6 +123,8 @@ class EmailNotifier:
           </tr>
         </table>
       </div>
+
+      {comments_section}
 
       {link_button}
 
@@ -122,6 +155,7 @@ class EmailNotifier:
         issue_id: str,
         task_name: str,
         permalink_url: str = "",
+        comments: str = "",
     ) -> bool:
         """發送任務完成通知郵件。回傳 True 表示成功。"""
         if not self.smtp_user or not self.smtp_password:
@@ -129,7 +163,7 @@ class EmailNotifier:
             return False
 
         try:
-            msg = self._build_completion_email(to_email, issue_id, task_name, permalink_url)
+            msg = self._build_completion_email(to_email, issue_id, task_name, permalink_url, comments)
 
             # 使用 STARTTLS 連線（Office 365 port 25/587）
             import asyncio

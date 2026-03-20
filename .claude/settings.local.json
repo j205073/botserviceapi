@@ -11,7 +11,8 @@
       "Bash(sed:*)",
       "Bash(venv/Scripts/python.exe test_intent_analysis.py:*)",
       "Bash(venv/Scripts/python.exe:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(xxd .env)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [

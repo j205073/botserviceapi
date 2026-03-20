@@ -12,6 +12,7 @@ from .intent_classifier import ITIntentClassifier
 from .cards import build_it_issue_card, build_itt_issue_card
 from .email_notifier import EmailNotifier
 from .knowledge_base import ITKnowledgeBase
+from .kb_client import KBVectorClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class ITSupportService:
         self.asana = AsanaClient()
         self.classifier = ITIntentClassifier()
         self.email_notifier = EmailNotifier()
+        self.kb_client = KBVectorClient()
         # load taxonomy for cards
         self._taxonomy = self.classifier.categories
         self._recent_task_by_user: dict[str, dict] = {}
@@ -108,6 +110,24 @@ class ITSupportService:
         else:
             print("ℹ️ AI 分析已關閉 (ENABLE_IT_AI_ANALYSIS=false)")
 
+        # 查詢知識庫（KB-Vector-Service），取得相關歷史工單與建議
+        kb_section = ""
+        kb_result = await self.kb_client.ask_safe(description, role="it")
+        kb_answer = (kb_result.get("answer") or "").strip()
+        kb_sources = kb_result.get("sources") or []
+        if kb_answer and kb_answer != "No relevant knowledge base articles found.":
+            parts = [f"- AI 建議：{kb_answer}"]
+            for src in kb_sources:
+                title = src.get("title", "")
+                score = src.get("score")
+                preview = src.get("contentPreview", "")
+                score_str = f"（相似度: {score:.0%}）" if score is not None else ""
+                line = f"  - {title}{score_str}"
+                if preview:
+                    line += f"\n    {preview[:120]}"
+                parts.append(line)
+            kb_section = "\n".join(parts)
+
         # 代提單模式：區分代理人與提出人
         if requester_email:
             requester_email = requester_email.strip()
@@ -121,6 +141,7 @@ class ITSupportService:
                 f"建立時間: {created_at}\n\n"
                 f"【需求/問題說明】\n{description}\n"
                 + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
+                + ("\n【知識庫參考（KB-Vector-Service）】\n\n" + kb_section + "\n" if kb_section else "")
             )
         else:
             notes = (
@@ -132,6 +153,7 @@ class ITSupportService:
                 f"建立時間: {created_at}\n\n"
                 f"【需求/問題說明】\n{description}\n"
                 + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
+                + ("\n【知識庫參考（KB-Vector-Service）】\n\n" + kb_section + "\n" if kb_section else "")
             )
 
         # 決定 assignee：報到開通指派給指定人員
@@ -515,7 +537,7 @@ class ITSupportService:
         # 2) Teams 通知
         await self._send_teams_notification(reporter_email, issue_id, task_name, permalink, comments_str)
         # 3) Email 通知
-        await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink)
+        await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink, comments_str)
 
         # 4) 處理 IT 知識庫
         if self.knowledge_base:
