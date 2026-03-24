@@ -197,7 +197,7 @@ class TeamsMessageHandler:
     async def _handle_submit_it_issue(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
     ) -> None:
-        """提交 IT 提單並建立 Asana 任務"""
+        """提交 IT 提單並建立 Asana 任務（背景處理，避免 Teams 逾時）"""
         try:
             form = {
                 "summary": turn_context.activity.value.get("summary"),
@@ -206,44 +206,103 @@ class TeamsMessageHandler:
                 "priority": turn_context.activity.value.get("priority"),
             }
 
-            from core.container import get_container
-            from features.it_support.service import ITSupportService
-            svc: ITSupportService = get_container().get(ITSupportService)
-            result = await svc.submit_issue(form, user_info.user_name or "", user_info.user_mail)
-
-            if result.get("success"):
+            if not (form.get("description") or "").strip():
                 await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=result.get("message", "✅ 已建立 IT Issue"))
+                    Activity(type=ActivityTypes.message, text="❌ 需求/問題說明不得為空")
                 )
-                # Immediately show upload options HeroCard so user can attach files easily
-                try:
-                    language = determine_language(user_info.user_mail)
-                    upload_card = self.upload_card_builder.build_file_upload_options_card(language)
-                    await turn_context.send_activity(upload_card)
-                except Exception:
-                    pass
-                # If the submit action also includes attachments (e.g., pasted images), try to upload immediately
-                if turn_context.activity.attachments:
-                    try:
-                        handled = await self._try_attach_images(turn_context, user_info)
-                        # If handled, no extra message needed beyond what _try_attach_images sends
-                    except Exception:
-                        pass
+                return
 
-                # No URL-based uploads anymore; users can paste/attach images directly
-            else:
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=f"❌ {result.get('error', '提交失敗')}")
+            # 立即回應使用者，避免 Teams 15 秒逾時
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="⏳ 正在處理您的需求，請稍候...")
+            )
+
+            # 取得 conversation reference 供背景推播使用
+            conversation_ref = TurnContext.get_conversation_reference(turn_context.activity)
+
+            # 背景執行提單流程
+            import asyncio
+            asyncio.create_task(
+                self._submit_it_issue_background(
+                    form, user_info, conversation_ref
                 )
+            )
         except Exception as e:
+            self.logger.exception("啟動 IT 提單背景任務失敗")
             await turn_context.send_activity(
                 Activity(type=ActivityTypes.message, text=f"❌ 提交 IT 提單時發生錯誤：{str(e)}")
             )
 
+    async def _submit_it_issue_background(
+        self, form: dict, user_info: BotInteractionDTO,
+        conversation_ref,
+    ) -> None:
+        """背景執行 IT 提單流程，完成後透過 proactive message 通知使用者"""
+        try:
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            import os
+
+            svc: ITSupportService = get_container().get(ITSupportService)
+            result = await svc.submit_issue(form, user_info.user_name or "", user_info.user_mail)
+
+            from infrastructure.bot.bot_adapter import CustomBotAdapter
+            bot_adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+            bot_app_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID") or ""
+
+            if result.get("success"):
+                msg_text = result.get("message", "✅ 已建立 IT Issue")
+
+                async def send_result(turn_context):
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=msg_text)
+                    )
+                    try:
+                        language = determine_language(user_info.user_mail)
+                        upload_card = self.upload_card_builder.build_file_upload_options_card(language)
+                        await turn_context.send_activity(upload_card)
+                    except Exception:
+                        pass
+
+                await bot_adapter.adapter.continue_conversation(
+                    conversation_ref, send_result, bot_app_id
+                )
+            else:
+                error_text = f"❌ {result.get('error', '提交失敗')}"
+
+                async def send_error(turn_context):
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=error_text)
+                    )
+
+                await bot_adapter.adapter.continue_conversation(
+                    conversation_ref, send_error, bot_app_id
+                )
+        except Exception as e:
+            self.logger.exception("IT 提單背景處理失敗: %s", e)
+            try:
+                from core.container import get_container
+                from infrastructure.bot.bot_adapter import CustomBotAdapter
+                import os
+                bot_adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+                bot_app_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID") or ""
+                err_msg = f"❌ 提交 IT 提單時發生錯誤：{str(e)}"
+
+                async def send_exc(turn_context):
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=err_msg)
+                    )
+
+                await bot_adapter.adapter.continue_conversation(
+                    conversation_ref, send_exc, bot_app_id
+                )
+            except Exception:
+                self.logger.exception("IT 提單背景處理：推播錯誤訊息也失敗")
+
     async def _handle_submit_itt_issue(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
     ) -> None:
-        """提交 IT 代提單並建立 Asana 任務（含提出人 Email）"""
+        """提交 IT 代提單並建立 Asana 任務（背景處理，避免 Teams 逾時）"""
         try:
             requester_email = (turn_context.activity.value.get("requesterEmail") or "").strip()
             if not requester_email:
@@ -259,8 +318,41 @@ class TeamsMessageHandler:
                 "priority": turn_context.activity.value.get("priority"),
             }
 
+            if not (form.get("description") or "").strip():
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 需求/問題說明不得為空")
+                )
+                return
+
+            # 立即回應使用者，避免 Teams 15 秒逾時
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="⏳ 正在處理您的需求，請稍候...")
+            )
+
+            conversation_ref = TurnContext.get_conversation_reference(turn_context.activity)
+
+            import asyncio
+            asyncio.create_task(
+                self._submit_itt_issue_background(
+                    form, user_info, conversation_ref, requester_email
+                )
+            )
+        except Exception as e:
+            self.logger.exception("啟動 IT 代提單背景任務失敗")
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 提交 IT 代提單時發生錯誤：{str(e)}")
+            )
+
+    async def _submit_itt_issue_background(
+        self, form: dict, user_info: BotInteractionDTO,
+        conversation_ref, requester_email: str,
+    ) -> None:
+        """背景執行 IT 代提單流程，完成後透過 proactive message 通知使用者"""
+        try:
             from core.container import get_container
             from features.it_support.service import ITSupportService
+            import os
+
             svc: ITSupportService = get_container().get(ITSupportService)
             result = await svc.submit_issue(
                 form,
@@ -269,29 +361,58 @@ class TeamsMessageHandler:
                 requester_email=requester_email,
             )
 
+            from infrastructure.bot.bot_adapter import CustomBotAdapter
+            bot_adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+            bot_app_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID") or ""
+
             if result.get("success"):
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=result.get("message", "✅ 已建立 IT Issue（代提單）"))
-                )
-                try:
-                    language = determine_language(user_info.user_mail)
-                    upload_card = self.upload_card_builder.build_file_upload_options_card(language)
-                    await turn_context.send_activity(upload_card)
-                except Exception:
-                    pass
-                if turn_context.activity.attachments:
+                msg_text = result.get("message", "✅ 已建立 IT Issue（代提單）")
+
+                async def send_result(turn_context):
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=msg_text)
+                    )
                     try:
-                        await self._try_attach_images(turn_context, user_info)
+                        language = determine_language(user_info.user_mail)
+                        upload_card = self.upload_card_builder.build_file_upload_options_card(language)
+                        await turn_context.send_activity(upload_card)
                     except Exception:
                         pass
+
+                await bot_adapter.adapter.continue_conversation(
+                    conversation_ref, send_result, bot_app_id
+                )
             else:
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=f"❌ {result.get('error', '提交失敗')}")
+                error_text = f"❌ {result.get('error', '提交失敗')}"
+
+                async def send_error(turn_context):
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=error_text)
+                    )
+
+                await bot_adapter.adapter.continue_conversation(
+                    conversation_ref, send_error, bot_app_id
                 )
         except Exception as e:
-            await turn_context.send_activity(
-                Activity(type=ActivityTypes.message, text=f"❌ 提交 IT 代提單時發生錯誤：{str(e)}")
-            )
+            self.logger.exception("IT 代提單背景處理失敗: %s", e)
+            try:
+                from core.container import get_container
+                from infrastructure.bot.bot_adapter import CustomBotAdapter
+                import os
+                bot_adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+                bot_app_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID") or ""
+                err_msg = f"❌ 提交 IT 代提單時發生錯誤：{str(e)}"
+
+                async def send_exc(turn_context):
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=err_msg)
+                    )
+
+                await bot_adapter.adapter.continue_conversation(
+                    conversation_ref, send_exc, bot_app_id
+                )
+            except Exception:
+                self.logger.exception("IT 代提單背景處理：推播錯誤訊息也失敗")
 
     async def _handle_function_selection(
         self, turn_context: TurnContext, user_info: BotInteractionDTO

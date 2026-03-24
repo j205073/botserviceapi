@@ -1,8 +1,18 @@
 # KB-Vector-Service — Ask API 串接文件
 
-> 供 Teams Bot 或其他服務串接 `/api/v1/ask` 使用
+> 供 Teams Bot 或其他服務串接 `/api/v1/{kb}/ask` 使用
 
 ## API 端點
+
+### 多知識庫版本（推薦）
+
+```
+GET  {{kbApiUrl}}/api/v1/kbs                              → 列出有權存取的知識庫
+POST {{kbApiUrl}}/api/v1/{kb}/sync                        → 同步指定知識庫
+POST {{kbApiUrl}}/api/v1/{kb}/ask?question={問題}&role={user|it}  → 問答指定知識庫
+```
+
+### 向後相容版本（使用預設知識庫）
 
 ```
 POST {{kbApiUrl}}/api/v1/ask?question={問題}&role={user|it}
@@ -10,9 +20,10 @@ POST {{kbApiUrl}}/api/v1/ask?question={問題}&role={user|it}
 
 | 項目 | 說明 |
 |------|------|
-| URL | `{{kbApiUrl}}/api/v1/ask` |
+| URL | `{{kbApiUrl}}/api/v1/{kb}/ask` |
 | Method | `POST` |
-| 參數 | `question` (query string，必填) |
+| 參數 | `kb` (URL path，知識庫 slug，如 `it-kb`) |
+| | `question` (query string，必填) |
 | | `role` (query string，選填，預設 `user`) |
 | 認證 | Azure AD Bearer Token |
 | 回應格式 | JSON |
@@ -51,6 +62,8 @@ POST {{kbApiUrl}}/api/v1/ask?question={問題}&role={user|it}
      --settings Auth__AllowedClientIds__N="<App-ID>"
    ```
    > `__0` 已被 Teams Bot 使用，請用 `__1`、`__2` 依序遞增。
+
+4. （選擇性）若要限制該 client 只能存取特定知識庫，將 App ID 加入該 KB 的 `AllowedClientIds`。
 
 **程式碼（C#）：**
 
@@ -104,8 +117,14 @@ const token = await credential.getToken(
   "api://de281045-d27f-4549-972a-0b331178668a/.default"
 );
 
+// 先查詢有哪些知識庫
+const kbs = await fetch("{{kbApiUrl}}/api/v1/kbs", {
+  headers: { Authorization: `Bearer ${token.token}` }
+}).then(r => r.json());
+
+// 對指定知識庫提問
 const response = await fetch(
-  "{{kbApiUrl}}/api/v1/ask?question=VPN連線問題怎麼處理",
+  "{{kbApiUrl}}/api/v1/it-kb/ask?question=VPN連線問題怎麼處理",
   { method: "POST", headers: { Authorization: `Bearer ${token.token}` } }
 );
 ```
@@ -123,8 +142,15 @@ credential = ClientSecretCredential(
 )
 token = credential.get_token("api://de281045-d27f-4549-972a-0b331178668a/.default")
 
+# 列出有權存取的知識庫
+kbs = requests.get(
+    "{{kbApiUrl}}/api/v1/kbs",
+    headers={"Authorization": f"Bearer {token.token}"}
+).json()
+
+# 對指定知識庫提問
 response = requests.post(
-    "{{kbApiUrl}}/api/v1/ask?question=VPN連線問題怎麼處理",
+    "{{kbApiUrl}}/api/v1/it-kb/ask?question=VPN連線問題怎麼處理&role=user",
     headers={"Authorization": f"Bearer {token.token}"}
 )
 ```
@@ -133,23 +159,26 @@ response = requests.post(
 
 ## Request 範例
 
-### User 模式（給一般使用者）
+### 列出知識庫
 
 ```http
-POST /api/v1/ask?question=VPN連線問題怎麼處理&role=user HTTP/1.1
+GET /api/v1/kbs HTTP/1.1
 Host: kb-vector-service.azurewebsites.net
 Authorization: Bearer eyJ0eXAiOiJKV1Q...
 ```
 
-```bash
-curl -X POST "{{kbApiUrl}}/api/v1/ask?question=VPN%E9%80%A3%E7%B7%9A%E5%95%8F%E9%A1%8C%E6%80%8E%E9%BA%BC%E8%99%95%E7%90%86&role=user" \
-  -H "Authorization: Bearer {token}"
+### User 模式（給一般使用者）
+
+```http
+POST /api/v1/it-kb/ask?question=VPN連線問題怎麼處理&role=user HTTP/1.1
+Host: kb-vector-service.azurewebsites.net
+Authorization: Bearer eyJ0eXAiOiJKV1Q...
 ```
 
 ### IT 模式（給 IT 人員）
 
 ```bash
-curl -X POST "{{kbApiUrl}}/api/v1/ask?question=VPN%E9%80%A3%E7%B7%9A%E5%95%8F%E9%A1%8C%E6%80%8E%E9%BA%BC%E8%99%95%E7%90%86&role=it" \
+curl -X POST "{{kbApiUrl}}/api/v1/it-kb/ask?question=VPN%E9%80%A3%E7%B7%9A%E5%95%8F%E9%A1%8C%E6%80%8E%E9%BA%BC%E8%99%95%E7%90%86&role=it" \
   -H "Authorization: Bearer {token}"
 ```
 
@@ -168,7 +197,8 @@ curl -X POST "{{kbApiUrl}}/api/v1/ask?question=VPN%E9%80%A3%E7%B7%9A%E5%95%8F%E9
       "category": "03"
     }
   ],
-  "role": "user"
+  "role": "user",
+  "kb": "it-kb"
 }
 ```
 
@@ -176,7 +206,7 @@ curl -X POST "{{kbApiUrl}}/api/v1/ask?question=VPN%E9%80%A3%E7%B7%9A%E5%95%8F%E9
 
 ```json
 {
-  "answer": "根據工單 IT2026030210390002 的處理記錄，VPN 連線問題的排查步驟如下：\n1. 確認使用者帳號密碼正確性\n2. 檢查 VPN Client 版本是否為最新...",
+  "answer": "根據工單 IT2026030210390002 的處理記錄，VPN 連線問題的排查步驟如下：...",
   "sources": [
     {
       "id": "01DCCVIQCWBJQZEKFGUJDY5JKSU3737BCC",
@@ -186,7 +216,8 @@ curl -X POST "{{kbApiUrl}}/api/v1/ask?question=VPN%E9%80%A3%E7%B7%9A%E5%95%8F%E9
       "contentPreview": "使用者反映 VPN 無法連線，經確認為密碼過期導致..."
     }
   ],
-  "role": "it"
+  "role": "it",
+  "kb": "it-kb"
 }
 ```
 
@@ -194,17 +225,17 @@ curl -X POST "{{kbApiUrl}}/api/v1/ask?question=VPN%E9%80%A3%E7%B7%9A%E5%95%8F%E9
 |------|------|------|
 | `answer` | string | AI 基於知識庫產生的繁體中文回答 |
 | `sources` | array | 引用的知識庫文章來源 |
-| `sources[].id` | string | SharePoint 檔案 ID |
-| `sources[].title` | string | 工單編號 / 檔案名稱 |
-| `sources[].category` | string | 分類（來自資料夾路徑） |
-| `sources[].score` | float | 語意相似度分數 (0~1，越高越相關) |
+| `role` | string | 使用的角色模式 |
+| `kb` | string | 使用的知識庫 slug |
 
 ### 查無相關資料 (200 OK)
 
 ```json
 {
-  "answer": "No relevant knowledge base articles found.",
-  "sources": []
+  "answer": "抱歉，目前找不到相關的資料，建議您聯繫 IT 人員協助處理喔！",
+  "sources": [],
+  "role": "user",
+  "kb": "it-kb"
 }
 ```
 
@@ -214,7 +245,8 @@ curl -X POST "{{kbApiUrl}}/api/v1/ask?question=VPN%E9%80%A3%E7%B7%9A%E5%95%8F%E9
 |-------------|------|
 | 400 | 缺少 `question` 參數 |
 | 401 | 未帶 token 或 token 無效 |
-| 403 | token 有效但 App ID 不在允許名單 |
+| 403 | token 有效但無權存取（App ID 不在允許名單，或無權存取該 KB） |
+| 404 | 知識庫 slug 不存在 |
 
 ---
 
@@ -240,29 +272,48 @@ public class KbVectorClient
         _scope = "api://de281045-d27f-4549-972a-0b331178668a/.default";
     }
 
-    public async Task<KbAnswer> AskAsync(string question)
+    private async Task EnsureAuthAsync()
     {
         var token = await _credential.GetTokenAsync(
             new Azure.Core.TokenRequestContext(new[] { _scope }));
-
         _httpClient.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", token.Token);
+    }
 
+    public async Task<KbInfo[]> ListKbsAsync()
+    {
+        await EnsureAuthAsync();
+        var response = await _httpClient.GetAsync($"{_baseUrl}/api/v1/kbs");
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<KbInfo[]>(json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+    }
+
+    public async Task<KbAnswer> AskAsync(string kbSlug, string question, string role = "user")
+    {
+        await EnsureAuthAsync();
         var encoded = Uri.EscapeDataString(question);
         var response = await _httpClient.PostAsync(
-            $"{_baseUrl}/api/v1/ask?question={encoded}", null);
-
+            $"{_baseUrl}/api/v1/{kbSlug}/ask?question={encoded}&role={role}", null);
         response.EnsureSuccessStatusCode();
-
         var json = await response.Content.ReadAsStringAsync();
         return JsonSerializer.Deserialize<KbAnswer>(json,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
     }
 }
 
+public class KbInfo
+{
+    public string Slug { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+}
+
 public class KbAnswer
 {
     public string Answer { get; set; } = "";
+    public string Kb { get; set; } = "";
+    public string Role { get; set; } = "";
     public List<KbSource> Sources { get; set; } = new();
 }
 
@@ -279,15 +330,41 @@ public class KbSource
 
 ```csharp
 var kbClient = new KbVectorClient("https://kb-vector-service.azurewebsites.net");
-var result = await kbClient.AskAsync(userMessage);
+
+// 列出可用知識庫
+var kbs = await kbClient.ListKbsAsync();
+
+// 對指定知識庫提問
+var result = await kbClient.AskAsync("it-kb", userMessage);
 await turnContext.SendActivityAsync(result.Answer);
+```
+
+---
+
+## 知識庫權限控管
+
+每個知識庫可設定 `AllowedClientIds` 來限制存取：
+
+| 設定 | 效果 |
+|------|------|
+| `AllowedClientIds: []`（空） | 所有已認證的 client 都能存取 |
+| `AllowedClientIds: ["xxx-..."]` | 只有列出的 client app ID 能存取 |
+
+設定方式（Azure 環境變數）：
+
+```bash
+# 讓 HR KB 只允許特定 client 存取
+MSYS_NO_PATHCONV=1 az webapp config appsettings set \
+  --name kb-vector-service \
+  --resource-group RinnaiResource \
+  --settings "KnowledgeBases__1__AllowedClientIds__0=<App-ID>"
 ```
 
 ---
 
 ## 注意事項
 
-- API 啟動後需先呼叫 `POST /api/v1/sync` 同步知識庫（向量存記憶體，重啟後需重新同步）
+- API 啟動後需先呼叫 `POST /api/v1/{kb}/sync` 同步知識庫（向量存記憶體，重啟後需重新同步）
 - `answer` 為 GPT 根據知識庫內容產生，回覆語言為繁體中文
 - `sources` 中的 `score` 可用於判斷回答可信度（建議 > 0.3 才視為可靠）
 - 新增串接服務只需：**取得 App ID** → **加入允許名單**
