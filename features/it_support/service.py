@@ -514,9 +514,12 @@ class ITSupportService:
     async def _handle_task_completed_event(self, task_gid: str):
         """處理任務完成後的通知與知識庫存檔。"""
         try:
+            logger.info("🔍 開始處理任務完成事件: %s", task_gid)
             task_data = await self.asana.get_task(task_gid)
             task = task_data.get("data", {})
+            logger.info("✅ 取得任務: %s, 完成狀態: %s", task_gid, task.get("completed"))
             if not task.get("completed"):
+                logger.info("⚠️ 任務 %s 未標記為完成，跳過", task_gid)
                 return
         except Exception as e:
             logger.warning("查詢 Asana 任務 %s 失敗: %s", task_gid, e)
@@ -524,9 +527,15 @@ class ITSupportService:
 
         # 獲取提單人資訊 TR
         reporter_info = self._task_to_reporter.get(task_gid)
+        logger.info("📋 從緩存查詢提單人: %s, 結果: %s", task_gid, "找到" if reporter_info else "未找到")
+
         if not reporter_info:
+            logger.info("📝 開始從 notes 解析提單人信息...")
             reporter_info = self._parse_reporter_from_notes(task.get("notes", ""))
+            logger.info("📝 解析結果: %s", reporter_info)
+
         if not reporter_info:
+            logger.error("❌ 無法獲取提單人信息，中止處理")
             return
 
         reporter_email = reporter_info.get("email", "")
@@ -535,7 +544,10 @@ class ITSupportService:
         permalink = reporter_info.get("permalink_url") or task.get("permalink_url", "")
 
         if not reporter_email:
+            logger.error("❌ 提單人 Email 為空，中止處理")
             return
+
+        logger.info("✅ 提單信息: issue_id=%s, reporter=%s, task=%s", issue_id, reporter_email, task_name)
 
         # 1) 抓取對話評論內容
         comments_str = ""
@@ -637,8 +649,8 @@ class ITSupportService:
             logger.error("處理評論 Webhook 失敗: %s", e)
 
     def _parse_reporter_from_notes(self, notes: str) -> Optional[Dict[str, str]]:
-        """從 Asana task notes 中解析提單人 email 與單號。
-        Notes 格式: '單號: ITxxx\n提出人: Name <email>\n...'
+        """從 Asana task notes 中解析提單人 email、單號、部門等資訊。
+        Notes 格式: '單號: ITxxx\n提出人: Name <email>\n提出人部門: 資訊課\n...'
         """
         import re
         result: Dict[str, str] = {}
@@ -647,20 +659,25 @@ class ITSupportService:
             m_id = re.search(r"單號[:：]\s*(IT[A-Za-z0-9]+)", notes)
             if m_id:
                 result["issue_id"] = m_id.group(1)
-            
+
             m_email = re.search(r"提出人[:：].*?<([^>]+)>", notes)
             if m_email:
                 result["email"] = m_email.group(1)
-            
+
             m_name = re.search(r"提出人[:：]\s*(.+?)\s*<", notes)
             if m_name:
                 result["reporter_name"] = m_name.group(1).strip()
-            
+
+            # 提取部門資訊（支援 "提出人部門" 或 "代理人部門"）
+            m_dept = re.search(r"(?:提出人|代理人)部門[:：]\s*(.+?)(?:\n|$)", notes)
+            if m_dept:
+                result["reporter_department"] = m_dept.group(1).strip()
+
             # 從內容中嘗試抓取分類 (如果在 notes 中有寫)
             m_cat = re.search(r"分類[:：]\s*(.+?)\s*\(", notes)
             if m_cat:
                 result["category_label"] = m_cat.group(1).strip()
-                
+
             m_priority = re.search(r"優先順序[:：]\s*(\S+)", notes)
             if m_priority:
                 result["priority"] = m_priority.group(1).strip()
