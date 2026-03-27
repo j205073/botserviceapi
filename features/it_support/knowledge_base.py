@@ -49,7 +49,8 @@ class ITKnowledgeBase:
                 "resolved_at": now.isoformat(),
                 "priority": reporter_info.get("priority", "P3"),
                 "reporter": reporter_info.get("reporter_name", ""),
-                "reporter_email": reporter_info.get("email", ""),
+                "reporter_email": reporter_info.get("email") or reporter_info.get("reporter_email", ""),
+                "reporter_department": reporter_info.get("reporter_department", "未指定部門"),
                 "category": reporter_info.get("category_label", "其他")
             },
             "content": {

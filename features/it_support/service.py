@@ -91,6 +91,23 @@ class ITSupportService:
         if not description:
             return {"success": False, "error": "需求/問題說明不得為空"}
 
+        # 從 Microsoft Graph 取得提出人的詳細資訊（姓名、部門）
+        user_display_name = reporter_name
+        user_department = "未指定部門"
+        try:
+            from core.container import get_container
+            from infrastructure.external.graph_api_client import GraphAPIClient
+
+            container = get_container()
+            graph_client: GraphAPIClient = container.get(GraphAPIClient)
+            user_info = await graph_client.get_user_info(reporter_email)
+            if user_info:
+                user_display_name = user_info.get("displayName") or reporter_name
+                user_department = user_info.get("department") or "未指定部門"
+                logger.info("✅ 從 Graph API 取得用戶信息: %s, 部門: %s", user_display_name, user_department)
+        except Exception as e:
+            logger.warning("⚠️ 無法從 Graph API 取得用戶部門資訊: %s", e)
+
         # AI-based classification (uses IT_ANALYSIS_MODEL); fallback to keyword classifier
         category_code, category_label = await self._classify_issue_ai(description)
 
@@ -134,7 +151,8 @@ class ITSupportService:
             notes = (
                 f"單號: {issue_id}\n"
                 f"提出人: {requester_email}\n"
-                f"代理提報人: {reporter_name} <{reporter_email}>\n"
+                f"代理提報人: {user_display_name} <{reporter_email}>\n"
+                f"代理人部門: {user_department}\n"
                 f"分類: {category_label} ({category_code})\n"
                 f"優先順序: {priority}\n"
                 f"建立來源: TR GPT bot（代提單 @itt）\n"
@@ -146,7 +164,8 @@ class ITSupportService:
         else:
             notes = (
                 f"單號: {issue_id}\n"
-                f"提出人: {reporter_name} <{reporter_email}>\n"
+                f"提出人: {user_display_name} <{reporter_email}>\n"
+                f"提出人部門: {user_department}\n"
                 f"分類: {category_label} ({category_code})\n"
                 f"優先順序: {priority}\n"
                 f"建立來源: TR GPT bot\n"
@@ -209,8 +228,12 @@ class ITSupportService:
                     "email": notify_email,
                     "issue_id": issue_id,
                     "reporter_name": notify_name,
+                    "reporter_email": reporter_email,
+                    "reporter_department": user_department,
                     "task_name": name,
                     "permalink_url": link or "",
+                    "category_label": category_label,
+                    "priority": priority,
                 }
             # ── 提單確認 Email ──
             # EMAIL_TEST_MODE=true 時僅通知白名單用戶；false（預設）則通知所有提單人
@@ -248,7 +271,7 @@ class ITSupportService:
                 "task_gid": gid,
                 "permalink_url": link,
                 "issue_id": issue_id,
-                "message": f"您的需求已被受理，請耐心等候。單號：{issue_id}"
+                "message": f"您的需求已被受理，請耐心等候。單號：{issue_id}\n👤 提出人：{user_display_name}\n🏢 部門：{user_department}"
             }
         except Exception as e:
             return {"success": False, "error": f"建立 Asana 任務失敗：{str(e)}"}
