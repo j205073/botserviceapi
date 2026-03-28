@@ -69,9 +69,84 @@ class APIRoutes:
         api_bp.route("/asana/webhook", methods=["POST"])(self.asana_webhook)
         api_bp.route("/asana/webhook/setup", methods=["POST"])(self.asana_webhook_setup)
 
+        # Graph API 工具端點
+        api_bp.route("/graph/departments", methods=["GET"])(self.list_all_departments)
+
         # SharePoint KB 知識庫查詢端點
         api_bp.route("/kb", methods=["GET"])(self.list_knowledge_base)
         api_bp.route("/kb/<issue_id>", methods=["GET"])(self.get_knowledge_entry)
+
+    async def list_all_departments(self):
+        """從 Graph API 撈出所有使用者的部門名稱（去重）。
+
+        GET /api/graph/departments
+        回傳：所有不重複部門名稱 + 建議的 KB_DEPARTMENT_MAP 模板
+        """
+        try:
+            from core.container import get_container
+            from infrastructure.external.graph_api_client import GraphAPIClient
+
+            container = get_container()
+            graph_client: GraphAPIClient = container.get(GraphAPIClient)
+
+            # 分頁撈所有 user 的 department
+            departments = set()
+            dept_users = {}  # dept -> [displayName, ...]
+            user_count = 0
+            next_link = "users?$select=displayName,department,mail,accountEnabled&$top=999&$filter=accountEnabled eq true"
+
+            while next_link:
+                # 處理完整 URL（@odata.nextLink）或相對路徑
+                if next_link.startswith("http"):
+                    # nextLink 是完整 URL，需直接請求
+                    import aiohttp
+                    headers = await graph_client._get_headers()
+                    await graph_client._ensure_session()
+                    async with graph_client.session.get(next_link, headers=headers) as resp:
+                        if resp.status >= 400:
+                            break
+                        data = json.loads(await resp.text())
+                else:
+                    data = await graph_client._make_request("GET", next_link)
+
+                for user in data.get("value", []):
+                    user_count += 1
+                    dept = (user.get("department") or "").strip()
+                    if dept:
+                        departments.add(dept)
+                        if dept not in dept_users:
+                            dept_users[dept] = []
+                        name = user.get("displayName") or user.get("mail") or ""
+                        dept_users[dept].append(name)
+
+                next_link = data.get("@odata.nextLink", "")
+
+            sorted_depts = sorted(departments)
+
+            # 建議模板：部門名 -> 小寫 slug
+            suggested_map = {}
+            for dept in sorted_depts:
+                slug = dept.lower().replace(" ", "-").replace("/", "-")
+                suggested_map[dept] = f"{slug}-kb"
+
+            return jsonify({
+                "success": True,
+                "total_users": user_count,
+                "total_departments": len(sorted_depts),
+                "departments": [
+                    {
+                        "name": dept,
+                        "count": len(dept_users.get(dept, [])),
+                        "users": dept_users.get(dept, []),
+                    }
+                    for dept in sorted_depts
+                ],
+                "suggested_KB_DEPARTMENT_MAP": suggested_map,
+            })
+
+        except Exception as e:
+            logging.getLogger(__name__).exception("list_all_departments failed")
+            return jsonify({"success": False, "error": str(e)}), 500
 
     async def list_knowledge_base(self):
         """列出知識庫 JSON。"""

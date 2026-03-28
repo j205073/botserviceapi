@@ -63,23 +63,46 @@ class KBVectorClient:
 
             return self._access_token
 
-    async def ask(self, question: str, role: str = "it", timeout: int = 15) -> Dict[str, Any]:
+    async def list_kbs(self, timeout: int = 10) -> list:
         """
-        呼叫 KB-Vector-Service /api/v1/ask。
+        呼叫 GET /api/v1/kbs 列出有權存取的知識庫。
+
+        Returns:
+            list of dict，每筆含 slug, displayName 等欄位。
+        """
+        token = await self._ensure_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"{self.base_url}/api/v1/kbs"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.warning("KB list_kbs 回應異常: %s - %s", resp.status, text)
+                    return []
+                return await resp.json()
+
+    async def ask(self, question: str, role: str = "it", kb_name: str = "", timeout: int = 15) -> Dict[str, Any]:
+        """
+        呼叫 KB-Vector-Service /api/v1/{kb}/ask（多知識庫）或 /api/v1/ask（向後相容）。
 
         Args:
             question: 使用者的問題描述
             role: "user"（親切回覆）或 "it"（專業詳細，含 score/contentPreview）
+            kb_name: 知識庫 slug（如 "it-kb", "cs-kb"），空字串則使用向後相容端點
             timeout: 請求逾時秒數
 
         Returns:
-            {"answer": str, "sources": list, "role": str}
+            {"answer": str, "sources": list, "role": str, "kb": str}
             查無資料時 sources 為空陣列。
         """
         token = await self._ensure_token()
         headers = {"Authorization": f"Bearer {token}"}
 
-        url = f"{self.base_url}/api/v1/ask"
+        if kb_name:
+            url = f"{self.base_url}/api/v1/{kb_name}/ask"
+        else:
+            url = f"{self.base_url}/api/v1/ask"
         params = {"question": question, "role": role}
 
         async with aiohttp.ClientSession() as session:
@@ -90,10 +113,10 @@ class KBVectorClient:
                     return {"answer": "", "sources": [], "role": role}
                 return await resp.json()
 
-    async def ask_safe(self, question: str, role: str = "it", timeout: int = 15) -> Dict[str, Any]:
+    async def ask_safe(self, question: str, role: str = "it", kb_name: str = "", timeout: int = 15) -> Dict[str, Any]:
         """ask() 的安全包裝，任何例外都回傳空結果，不影響主流程。"""
         try:
-            return await self.ask(question, role=role, timeout=timeout)
+            return await self.ask(question, role=role, kb_name=kb_name, timeout=timeout)
         except Exception as e:
-            logger.warning("KB 知識庫查詢失敗（不影響提單流程）: %s", e)
+            logger.warning("KB 知識庫查詢失敗（不影響主流程）: %s", e)
             return {"answer": "", "sources": [], "role": role}

@@ -333,6 +333,27 @@ class ConversationService:
             if len(context) <= 1:  # 只有用戶消息或空對話
                 system_prompt = self._get_system_prompt(user_mail)
                 context = [{"role": "system", "content": system_prompt}] + context
+            # 注入知識庫參考資料（由 message_handler 查詢部門對應 KB 後傳入）
+            kb_context = kwargs.get("kb_context", "")
+            if kb_context:
+                kb_system_msg = {
+                    "role": "system",
+                    "content": (
+                        "以下是從公司知識庫中查詢到的參考資料，請優先參考這些內容來回答使用者的問題。"
+                        "如果知識庫內容與問題相關，請據此回答；如果不相關，則用你自己的知識回答。\n\n"
+                        f"【知識庫參考】\n{kb_context}"
+                    ),
+                }
+                # 插入到 system prompt 之後、使用者訊息之前
+                if context and context[0].get("role") == "system":
+                    context.insert(1, kb_system_msg)
+                else:
+                    context.insert(0, kb_system_msg)
+                self.logger.info(
+                    "KB context injected into conversation user_mail=%s conversation_id=%s kb_len=%d request_id=%s",
+                    user_mail, conversation_id, len(kb_context), request_id,
+                )
+
             max_tokens = 4000
             # 記錄上下文資訊（避免記錄完整內容）
             self.logger.debug(

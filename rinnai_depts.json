@@ -1,0 +1,377 @@
+{
+    "departments": [
+        {
+            "name": "CallCenter",
+            "sample_users": [
+                "戴筠庭 Eva Tai",
+                "黃采緹 Olivia Huang",
+                "林姿吟 Abby Lin"
+            ]
+        },
+        {
+            "name": "人力資源課",
+            "sample_users": [
+                "廖慧琦 Fanny Liao",
+                "朱雅蘭 Jessica Chu",
+                "吳青妃 Joyce Wu"
+            ]
+        },
+        {
+            "name": "企劃推動室",
+            "sample_users": [
+                "游文瑜 Vince Yo"
+            ]
+        },
+        {
+            "name": "倉儲課",
+            "sample_users": [
+                "WarehouseShare 倉儲共用"
+            ]
+        },
+        {
+            "name": "切削課",
+            "sample_users": [
+                "鄭惠玲 Kitty Cheng",
+                "林美員 Mien Lin",
+                "葉爾傑 Ernchieh Yeh"
+            ]
+        },
+        {
+            "name": "台中營業所",
+            "sample_users": [
+                "呂念媛 Taichung Lu",
+                "陳汶憶 Wenyi Chen",
+                "李謹如 May Li"
+            ]
+        },
+        {
+            "name": "台北營業所",
+            "sample_users": [
+                "張嘉君 Roy Chang",
+                "李純蓁 Vera Lee",
+                "謝禕柔 Yijou Hsieh"
+            ]
+        },
+        {
+            "name": "台南營業所",
+            "sample_users": [
+                "籃執中 Genius Lan",
+                "胡証凱 Chengkai Hu",
+                "許詠程 Yungcheng Hsu"
+            ]
+        },
+        {
+            "name": "品質管理課",
+            "sample_users": [
+                "楊正男 Alen Yen",
+                "徐千惇 Kelly Hsu",
+                "李浚愷 Chunkai Lee"
+            ]
+        },
+        {
+            "name": "商品開發部",
+            "sample_users": [
+                "藍品秈 Sharon Lan",
+                "陳泊均 Amber Chen",
+                "楊雅淇 Kiki Yang"
+            ]
+        },
+        {
+            "name": "商業營業室",
+            "sample_users": [
+                "商用營業公用"
+            ]
+        },
+        {
+            "name": "商用營業室",
+            "sample_users": [
+                "李明哲 Jake Li",
+                "陳威凱 Weikai Chen",
+                "陳文彥 Mo Chen"
+            ]
+        },
+        {
+            "name": "嘉義營業所",
+            "sample_users": [
+                "吳美玲 Ling Wu",
+                "王子明 Tzuming Wang",
+                "馮忠偉 Andy Feng"
+            ]
+        },
+        {
+            "name": "安全衛生部",
+            "sample_users": [
+                "邱竑愷 Kenny Chiu",
+                "賴明發 Minfa Lai",
+                "温國憲 Kevin Wen"
+            ]
+        },
+        {
+            "name": "客服室",
+            "sample_users": [
+                "戴浚宇 Junyu Dai",
+                "于文彬 Wenpin Yu",
+                "王瑋麟 Lin Wang"
+            ]
+        },
+        {
+            "name": "廚房課",
+            "sample_users": [
+                "羅文穗 Wensui Lo",
+                "林崇宇 Chongyu Lin"
+            ]
+        },
+        {
+            "name": "新竹營業所",
+            "sample_users": [
+                "白恒榮 Hengjung Pai",
+                "魏能勳 Nenghsun Wei",
+                "涂家瑀 Joan Tu"
+            ]
+        },
+        {
+            "name": "桃園營業所",
+            "sample_users": [
+                "徐源東 Dondon Hsu",
+                "黃麗珍 Lijean Huang",
+                "張幸智 Sofia Chang"
+            ]
+        },
+        {
+            "name": "水箱課",
+            "sample_users": [
+                "May0903 Hsu (許美玉)",
+                "彭惠君 Jill Peng",
+                "許耿峰 Will Hsu"
+            ]
+        },
+        {
+            "name": "沖床烤漆課",
+            "sample_users": [
+                "00740 (徐偉豪)",
+                "01591 (陳錦興)",
+                "01587 (劉興富)"
+            ]
+        },
+        {
+            "name": "營業企劃室",
+            "sample_users": [
+                "IG官方帳號",
+                "Gmail Marketing"
+            ]
+        },
+        {
+            "name": "營業本部",
+            "sample_users": [
+                "李慧蘭 TP00412"
+            ]
+        },
+        {
+            "name": "營業管理課",
+            "sample_users": [
+                "謝亭俞 Vicky Hsieh",
+                "黃文香 Fumika Huang",
+                "邱金玉 Candy Chiu"
+            ]
+        },
+        {
+            "name": "營業部",
+            "sample_users": [
+                "鄭劦伶 Sherry Cheng"
+            ]
+        },
+        {
+            "name": "物流統括室",
+            "sample_users": [
+                "任怜瑋 Karin Jen",
+                "易書廷 Naomi Yi",
+                "翁韻婷 Michelle Wong"
+            ]
+        },
+        {
+            "name": "生產技術課",
+            "sample_users": [
+                "陳振文 Ivan Chen",
+                "黃勝吉 Chi Huang",
+                "陳正忠 Peter Chen"
+            ]
+        },
+        {
+            "name": "生產本部",
+            "sample_users": [
+                "黃馨誼 Hsinyi Huang",
+                "卓芬圓 Fendy Tso",
+                "Daiki Matsunami 松波大輝"
+            ]
+        },
+        {
+            "name": "生管課",
+            "sample_users": [
+                "彭惠英 Nina Peng",
+                "余春菊 Gina Yu",
+                "鄧桂芳 Fang Teng"
+            ]
+        },
+        {
+            "name": "管理本部",
+            "sample_users": [
+                "邱逢貞 Chris Chiu",
+                "楊淑分 Ayako Yang"
+            ]
+        },
+        {
+            "name": "組立課",
+            "sample_users": [
+                "Sofia Li (黎清水)",
+                "00267 (李雪娥)",
+                "Fairy Chen (陳麗仙)"
+            ]
+        },
+        {
+            "name": "給湯課",
+            "sample_users": [
+                "王仁政 Dick Wang",
+                "張源峰 Tennsai Chang"
+            ]
+        },
+        {
+            "name": "羅東營業所",
+            "sample_users": [
+                "林鳯慈 maggie.lin",
+                "吳世偉 Dio Wu",
+                "蕭呈隆 Chenglung Hsiao"
+            ]
+        },
+        {
+            "name": "花蓮營業所",
+            "sample_users": [
+                "羅浤菖 Hualien2",
+                "李建毅 Jay Lee",
+                "黃采綝 Lena Huang"
+            ]
+        },
+        {
+            "name": "董事長室",
+            "sample_users": [
+                "Tsutsumi 堤俊介"
+            ]
+        },
+        {
+            "name": "行銷部",
+            "sample_users": [
+                "陳妍蓉 Kristine Chen",
+                "黃憶麗 Tiffany Huang",
+                "歐幸宜 Momo Ou"
+            ]
+        },
+        {
+            "name": "財務部",
+            "sample_users": [
+                "陳玫伶 Sophia Chen",
+                "戴玉貞 Jenny Dai",
+                "林妘宣 Jennifer Lin"
+            ]
+        },
+        {
+            "name": "資材部",
+            "sample_users": [
+                "鄭清源 Meco Cheng"
+            ]
+        },
+        {
+            "name": "資訊課",
+            "sample_users": [
+                "張子亮 George Chang",
+                "劉俊晨 Juncheng Liu",
+                "蔡協宏 Hung Tsai"
+            ]
+        },
+        {
+            "name": "量產準備課",
+            "sample_users": [
+                "吳美藝 Emma Wu",
+                "邱志豪 Charles Chiu",
+                "吳秉樺 Rex Wu"
+            ]
+        },
+        {
+            "name": "開發本部",
+            "sample_users": [
+                "陳勝田 Tang Chen",
+                "Suzuki 鈴木隆史"
+            ]
+        },
+        {
+            "name": "零件供應課",
+            "sample_users": [
+                "陳婉瑜 Polly Chen",
+                "羅曉嵐 Ringo Lo",
+                "李瑞娥 Jenny Lee"
+            ]
+        },
+        {
+            "name": "電器商品課",
+            "sample_users": [
+                "戴志祥 Kenny Tai",
+                "林建全 Kane Lin",
+                "呂麗君 Coco Lu"
+            ]
+        },
+        {
+            "name": "高雄營業所",
+            "sample_users": [
+                "張雅評 ping.chang",
+                "林國寶 Qiang Lin",
+                "紀又銜 Cookagy Brian"
+            ]
+        }
+    ],
+    "success": true,
+    "suggested_KB_DEPARTMENT_MAP": {
+        "CallCenter": "callcenter-kb",
+        "人力資源課": "人力資源課-kb",
+        "企劃推動室": "企劃推動室-kb",
+        "倉儲課": "倉儲課-kb",
+        "切削課": "切削課-kb",
+        "台中營業所": "台中營業所-kb",
+        "台北營業所": "台北營業所-kb",
+        "台南營業所": "台南營業所-kb",
+        "品質管理課": "品質管理課-kb",
+        "商品開發部": "商品開發部-kb",
+        "商業營業室": "商業營業室-kb",
+        "商用營業室": "商用營業室-kb",
+        "嘉義營業所": "嘉義營業所-kb",
+        "安全衛生部": "安全衛生部-kb",
+        "客服室": "客服室-kb",
+        "廚房課": "廚房課-kb",
+        "新竹營業所": "新竹營業所-kb",
+        "桃園營業所": "桃園營業所-kb",
+        "水箱課": "水箱課-kb",
+        "沖床烤漆課": "沖床烤漆課-kb",
+        "營業企劃室": "營業企劃室-kb",
+        "營業本部": "營業本部-kb",
+        "營業管理課": "營業管理課-kb",
+        "營業部": "營業部-kb",
+        "物流統括室": "物流統括室-kb",
+        "生產技術課": "生產技術課-kb",
+        "生產本部": "生產本部-kb",
+        "生管課": "生管課-kb",
+        "管理本部": "管理本部-kb",
+        "組立課": "組立課-kb",
+        "給湯課": "給湯課-kb",
+        "羅東營業所": "羅東營業所-kb",
+        "花蓮營業所": "花蓮營業所-kb",
+        "董事長室": "董事長室-kb",
+        "行銷部": "行銷部-kb",
+        "財務部": "財務部-kb",
+        "資材部": "資材部-kb",
+        "資訊課": "資訊課-kb",
+        "量產準備課": "量產準備課-kb",
+        "開發本部": "開發本部-kb",
+        "零件供應課": "零件供應課-kb",
+        "電器商品課": "電器商品課-kb",
+        "高雄營業所": "高雄營業所-kb"
+    },
+    "total_departments": 43,
+    "total_users": 605
+}

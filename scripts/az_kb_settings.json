@@ -1,0 +1,12 @@
+[
+  {
+    "name": "KB_DEPARTMENT_MAP",
+    "value": "{\"CallCenter\": [\"callcenter-kb\"], \"客服中心\": [\"cs-center-kb\"], \"客服室\": [\"cs-office-kb\"], \"台中營業所\": [\"tc-sales-kb\"], \"台北營業所\": [\"tp-sales-kb\"], \"台南營業所\": [\"tn-sales-kb\"], \"嘉義營業所\": [\"cy-sales-kb\"], \"新竹營業所\": [\"hc-sales-kb\"], \"桃園營業所\": [\"ty-sales-kb\"], \"羅東營業所\": [\"ld-sales-kb\"], \"花蓮營業所\": [\"hl-sales-kb\"], \"高雄營業所\": [\"ks-sales-kb\"], \"商業營業室\": [\"commercial-kb\"], \"商用營業室\": [\"commercial-sales-kb\"], \"營業企劃室\": [\"sales-planning-kb\"], \"營業企劃課\": [\"sales-plan-kb\"], \"營業本部\": [\"sales-hq-kb\"], \"營業管理課\": [\"sales-mgmt-kb\"], \"營業部\": [\"sales-dept-kb\"], \"切削一課\": [\"cutting1-kb\"], \"切削課\": [\"cutting-kb\"], \"廚房課\": [\"kitchen-kb\"], \"水箱課\": [\"tank-kb\"], \"沖床烤漆課\": [\"press-paint-kb\"], \"組立課\": [\"assembly-kb\"], \"給湯課\": [\"heater-kb\"], \"生產技術課\": [\"prod-tech-kb\"], \"生產本部\": [\"prod-hq-kb\"], \"生產部\": [\"prod-dept-kb\"], \"生管課\": [\"prod-ctrl-kb\"], \"量產準備課\": [\"mass-prod-kb\"], \"資訊課\": [\"mis-kb\"], \"人力資源課\": [\"hr-kb\"], \"財務課\": [\"finance-kb\"], \"財務部\": [\"finance-dept-kb\"], \"品管課\": [\"qc-kb\"], \"品質管理課\": [\"qa-kb\"], \"行銷部\": [\"mktg-kb\"], \"倉儲課\": [\"warehouse-kb\"], \"物流統括室\": [\"logistics-kb\"], \"零件供應課\": [\"parts-kb\"], \"國內零件供應課\": [\"domestic-parts-kb\"], \"資材部\": [\"materials-kb\"], \"商品開發部\": [\"product-dev-kb\"], \"開發本部\": [\"rd-hq-kb\"], \"電器商品課\": [\"appliance-kb\"], \"管理本部\": [\"mgmt-hq-kb\"], \"董事長室\": [\"chairman-kb\"], \"企劃推動室\": [\"planning-kb\"], \"安全衛生部\": [\"safety-kb\"], \"服務\": [\"service-kb\"]}",
+    "slotSetting": false
+  },
+  {
+    "name": "KB_USER_MAP",
+    "value": "{}",
+    "slotSetting": false
+  }
+]

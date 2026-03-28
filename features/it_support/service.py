@@ -129,7 +129,7 @@ class ITSupportService:
 
         # 查詢知識庫（KB-Vector-Service），取得相關歷史工單與建議
         kb_section = ""
-        kb_result = await self.kb_client.ask_safe(description, role="it")
+        kb_result = await self.kb_client.ask_safe(description, role="it", kb_name="it-kb")
         kb_answer = (kb_result.get("answer") or "").strip()
         kb_sources = kb_result.get("sources") or []
         if kb_answer and kb_answer != "No relevant knowledge base articles found.":

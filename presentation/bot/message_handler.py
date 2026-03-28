@@ -727,6 +727,111 @@ class TeamsMessageHandler:
             )
             await self._handle_direct_openai_response(turn_context, user_info)
 
+    async def _resolve_kb_for_user(self, user_mail: str, question: str) -> str:
+        """根據使用者部門 + 個人權限查詢對應知識庫，並行查詢後合併回答。
+
+        兩層映射：
+        1. KB_DEPARTMENT_MAP — 部門共用 KB（value 為陣列）
+        2. KB_USER_MAP — 個人專屬 KB（機密/主管級）
+        合併去重後並行查詢所有 KB，回傳合併的參考文字。
+        """
+        import os
+        import json
+        import asyncio
+
+        try:
+            from core.container import get_container
+            from infrastructure.external.graph_api_client import GraphAPIClient
+            from features.it_support.kb_client import KBVectorClient
+
+            container = get_container()
+            graph_client: GraphAPIClient = container.get(GraphAPIClient)
+
+            # 取得使用者部門
+            user_department = ""
+            try:
+                user_profile = await graph_client.get_user_info(user_mail)
+                if user_profile:
+                    user_department = (user_profile.get("department") or "").strip()
+            except Exception as e:
+                self.logger.warning("⚠️ KB: 無法取得使用者部門: %s", e)
+
+            # --- 第一層：部門共用 KB ---
+            dept_map_raw = os.getenv("KB_DEPARTMENT_MAP", "{}")
+            try:
+                dept_map: dict = json.loads(dept_map_raw)
+            except json.JSONDecodeError:
+                dept_map = {}
+
+            kb_list: list[str] = []
+            if user_department:
+                matched = dept_map.get(user_department)
+                if not matched:
+                    # 模糊匹配
+                    for key, slugs in dept_map.items():
+                        if key in user_department or user_department in key:
+                            matched = slugs
+                            break
+                if matched:
+                    # 相容舊格式（字串）與新格式（陣列）
+                    if isinstance(matched, str):
+                        kb_list.append(matched)
+                    elif isinstance(matched, list):
+                        kb_list.extend(matched)
+
+            # --- 第二層：個人專屬 KB ---
+            user_map_raw = os.getenv("KB_USER_MAP", "{}")
+            try:
+                user_map: dict = json.loads(user_map_raw)
+            except json.JSONDecodeError:
+                user_map = {}
+
+            user_kbs = user_map.get(user_mail) or user_map.get(user_mail.lower()) or []
+            if isinstance(user_kbs, str):
+                user_kbs = [user_kbs]
+            kb_list.extend(user_kbs)
+
+            # 去重並保持順序
+            seen = set()
+            unique_kbs = []
+            for kb in kb_list:
+                if kb and kb not in seen:
+                    seen.add(kb)
+                    unique_kbs.append(kb)
+
+            if not unique_kbs:
+                self.logger.debug("KB: user=%s 部門='%s' 無對應知識庫，跳過查詢", user_mail, user_department)
+                return ""
+
+            self.logger.info("📚 KB 查詢: user=%s, 部門=%s, KBs=%s", user_mail, user_department, unique_kbs)
+
+            # --- 並行查詢所有 KB（return_exceptions 確保單一 KB 失敗不影響其他） ---
+            kb_client = KBVectorClient()
+            tasks = [
+                kb_client.ask_safe(question, role="user", kb_name=kb)
+                for kb in unique_kbs
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 合併有效結果，跳過失敗或不存在的 KB
+            combined_parts: list[str] = []
+            for kb_name, result in zip(unique_kbs, results):
+                if isinstance(result, Exception):
+                    self.logger.warning("⚠️ KB '%s' 查詢異常（已略過）: %s", kb_name, result)
+                    continue
+                answer = (result.get("answer") or "").strip()
+                if answer and answer != "No relevant knowledge base articles found.":
+                    combined_parts.append(f"[{kb_name}] {answer}")
+                    self.logger.info("📚 KB 命中: kb=%s, answer_len=%d", kb_name, len(answer))
+
+            if combined_parts:
+                return "\n\n".join(combined_parts)
+
+        except Exception as e:
+            self.logger.warning("⚠️ KB 查詢失敗（不影響主流程）: %s", e)
+
+        return ""
+
     async def _handle_direct_openai_response(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
     ) -> None:
@@ -754,19 +859,22 @@ class TeamsMessageHandler:
                 model_arg or self.config.openai.model,
                 prompt_preview or "<empty>",
             )
+
+            # 查詢使用者部門對應的知識庫
+            kb_context = await self._resolve_kb_for_user(user_info.user_mail, user_info.message_text)
+
+            call_kwargs: dict = {}
             if model_arg:
-                response = await self.conversation_service.get_ai_response(
-                    user_info.conversation_id,
-                    user_info.user_mail,
-                    user_info.message_text,
-                    model=model_arg,
-                )
-            else:
-                response = await self.conversation_service.get_ai_response(
-                    user_info.conversation_id,
-                    user_info.user_mail,
-                    user_info.message_text,
-                )
+                call_kwargs["model"] = model_arg
+            if kb_context:
+                call_kwargs["kb_context"] = kb_context
+
+            response = await self.conversation_service.get_ai_response(
+                user_info.conversation_id,
+                user_info.user_mail,
+                user_info.message_text,
+                **call_kwargs,
+            )
 
             suggested_actions = get_suggested_replies(
                 user_info.message_text, user_info.user_mail
