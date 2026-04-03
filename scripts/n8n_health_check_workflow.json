@@ -1,0 +1,184 @@
+{
+  "name": "TR GPT Bot Health Check",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "每 5 分鐘執行",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://rinnai-py-api.azurewebsites.net/api/health",
+        "authentication": "none",
+        "options": {
+          "timeout": 15000,
+          "fullResponse": true
+        }
+      },
+      "id": "http-health-check",
+      "name": "呼叫 Health Check API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [250, 0],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-status-code",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "check-body-status",
+              "leftValue": "={{ $json.body.status }}",
+              "rightValue": "healthy",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-healthy",
+      "name": "是否健康？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [500, 0]
+    },
+    {
+      "parameters": {
+        "fromEmail": "services@rinnai.com.tw",
+        "toEmail": "juncheng.liu@rinnai.com.tw",
+        "subject": "=🚨 TR GPT Bot 服務異常 — {{ $now.format('yyyy-MM-dd HH:mm:ss') }}",
+        "emailType": "html",
+        "html": "=<html>\n<body style=\"font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;\">\n  <div style=\"max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;\">\n    <div style=\"background: linear-gradient(135deg, #DE350B, #BF2600); padding: 32px 24px; text-align: center;\">\n      <h1 style=\"color: #ffffff; margin: 0; font-size: 24px; font-weight: 600;\">🚨 TR GPT Bot 服務異常</h1>\n    </div>\n    <div style=\"padding: 40px 32px;\">\n      <p style=\"color: #172B4D; font-size: 16px; line-height: 1.6;\">Health Check 偵測到服務異常，請儘速排查：</p>\n      <div style=\"background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 24px; margin: 24px 0;\">\n        <table style=\"width: 100%; border-collapse: collapse;\">\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600; width: 120px;\">檢查端點</td>\n            <td style=\"padding: 8px 0; color: #172B4D; font-size: 14px;\">https://rinnai-py-api.azurewebsites.net/api/health</td>\n          </tr>\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;\">HTTP 狀態碼</td>\n            <td style=\"padding: 8px 0; color: #DE350B; font-size: 14px; font-weight: 600;\">{{ $json.statusCode ?? '連線逾時或無回應' }}</td>\n          </tr>\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;\">回應內容</td>\n            <td style=\"padding: 8px 0; color: #172B4D; font-size: 13px;\"><pre style=\"margin:0; white-space:pre-wrap;\">{{ JSON.stringify($json.body ?? $json.error ?? '無回應', null, 2) }}</pre></td>\n          </tr>\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;\">偵測時間</td>\n            <td style=\"padding: 8px 0; color: #172B4D; font-size: 14px;\">{{ $now.format('yyyy-MM-dd HH:mm:ss') }}</td>\n          </tr>\n        </table>\n      </div>\n      <div style=\"background-color: #FFFAE6; border-left: 4px solid #FF8B00; padding: 16px; border-radius: 4px;\">\n        <p style=\"color: #172B4D; font-size: 14px; margin: 0; line-height: 1.5;\">\n          <strong>建議操作：</strong><br>\n          1. 登入 Azure Portal 檢查 App Service 狀態<br>\n          2. 查看 Application Log 是否有 crash 紀錄<br>\n          3. 若為部署問題，考慮 Swap 回穩定 Slot\n        </p>\n      </div>\n    </div>\n    <div style=\"background-color: #F4F5F7; padding: 20px; text-align: center; border-top: 1px solid #DFE1E6;\">\n      <p style=\"color: #6B778C; font-size: 12px; margin: 0;\">TR GPT Health Check Monitor (n8n)</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-alert-email",
+      "name": "發送異常告警 Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [800, 100],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIAL_ID",
+          "name": "Rinnai SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "services@rinnai.com.tw",
+        "toEmail": "juncheng.liu@rinnai.com.tw",
+        "subject": "=✅ TR GPT Bot 運作正常 — {{ $now.format('yyyy-MM-dd HH:mm:ss') }}",
+        "emailType": "html",
+        "html": "=<html>\n<body style=\"font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;\">\n  <div style=\"max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;\">\n    <div style=\"background: linear-gradient(135deg, #00875A, #006644); padding: 32px 24px; text-align: center;\">\n      <h1 style=\"color: #ffffff; margin: 0; font-size: 24px; font-weight: 600;\">✅ TR GPT Bot 運作正常</h1>\n    </div>\n    <div style=\"padding: 40px 32px;\">\n      <p style=\"color: #172B4D; font-size: 16px; line-height: 1.6;\">定期健康檢查通過，所有服務運作正常。</p>\n      <div style=\"background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 24px; margin: 24px 0;\">\n        <table style=\"width: 100%; border-collapse: collapse;\">\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600; width: 120px;\">服務狀態</td>\n            <td style=\"padding: 8px 0; color: #00875A; font-size: 14px; font-weight: 600;\">{{ $json.body.status }}</td>\n          </tr>\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;\">Bot 認證</td>\n            <td style=\"padding: 8px 0; color: #172B4D; font-size: 14px;\">{{ $json.body.checks.bot_auth.status }} — {{ $json.body.checks.bot_auth.message }}</td>\n          </tr>\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;\">Bot Adapter</td>\n            <td style=\"padding: 8px 0; color: #172B4D; font-size: 14px;\">{{ $json.body.checks.bot_adapter.status }} — {{ $json.body.checks.bot_adapter.message }}</td>\n          </tr>\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;\">SMTP</td>\n            <td style=\"padding: 8px 0; color: #172B4D; font-size: 14px;\">{{ $json.body.checks.smtp.status }} — {{ $json.body.checks.smtp.message }}</td>\n          </tr>\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;\">Asana</td>\n            <td style=\"padding: 8px 0; color: #172B4D; font-size: 14px;\">{{ $json.body.checks.asana.status }} — {{ $json.body.checks.asana.message }}</td>\n          </tr>\n          <tr>\n            <td style=\"padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;\">檢查時間</td>\n            <td style=\"padding: 8px 0; color: #172B4D; font-size: 14px;\">{{ $now.format('yyyy-MM-dd HH:mm:ss') }}</td>\n          </tr>\n        </table>\n      </div>\n    </div>\n    <div style=\"background-color: #F4F5F7; padding: 20px; text-align: center; border-top: 1px solid #DFE1E6;\">\n      <p style=\"color: #6B778C; font-size: 12px; margin: 0;\">TR GPT Health Check Monitor (n8n)</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-ok-email",
+      "name": "發送正常通知 Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [800, -100],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_CREDENTIAL_ID",
+          "name": "Rinnai SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-success",
+      "name": "記錄成功（不寄信）",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [800, -250]
+    }
+  ],
+  "connections": {
+    "每 5 分鐘執行": {
+      "main": [
+        [
+          {
+            "node": "呼叫 Health Check API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "呼叫 Health Check API": {
+      "main": [
+        [
+          {
+            "node": "是否健康？",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "發送異常告警 Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "是否健康？": {
+      "main": [
+        [
+          {
+            "node": "記錄成功（不寄信）",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "發送異常告警 Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "monitoring"
+    }
+  ],
+  "pinData": {}
+}

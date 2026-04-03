@@ -4,6 +4,7 @@ Email 通知模組
 """
 import os
 import re
+import html as html_mod
 import logging
 import smtplib
 from email.mime.text import MIMEText
@@ -11,6 +12,85 @@ from email.mime.multipart import MIMEMultipart
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# ── 共用樣式常數 ──────────────────────────────────────────────
+_FONT = "'Segoe UI', Helvetica, Arial, sans-serif"
+_CLR_NAVY = "#1B2A4A"
+_CLR_GREEN = "#10B981"
+_CLR_BLUE = "#3B82F6"
+_CLR_BODY = "#374151"
+_CLR_MUTED = "#9CA3AF"
+_CLR_LABEL = "#6B7280"
+_CLR_CARD_BG = "#F9FAFB"
+_CLR_BORDER = "#E5E7EB"
+_CLR_BORDER_LIGHT = "#F3F4F6"
+
+
+def _section_header(title: str) -> str:
+    """卡片區塊的灰色標題列"""
+    return (
+        f'<tr><td style="background-color: {_CLR_CARD_BG}; padding: 16px 20px; '
+        f'border-bottom: 1px solid {_CLR_BORDER};">'
+        f'<span style="font-family: {_FONT}; color: {_CLR_LABEL}; font-size: 11px; '
+        f'font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">{title}</span>'
+        f'</td></tr>'
+    )
+
+
+def _info_row(label: str, value: str, is_last: bool = False, value_style: str = "") -> str:
+    """資訊表格中的單列"""
+    border = "" if is_last else f"border-bottom: 1px solid {_CLR_BORDER_LIGHT};"
+    v_style = value_style or f"color: {_CLR_BODY}; font-size: 14px;"
+    return (
+        f'<tr>'
+        f'<td style="padding: 14px 20px; {border} width: 100px;">'
+        f'<span style="font-family: {_FONT}; color: {_CLR_MUTED}; font-size: 13px;">{label}</span></td>'
+        f'<td style="padding: 14px 20px; {border}">'
+        f'<span style="font-family: {_FONT}; {v_style}">{value}</span></td>'
+        f'</tr>'
+    )
+
+
+def _wrap_email(header_html: str, body_html: str) -> str:
+    """將 header + body 包進完整 email 骨架（table-based layout for Outlook）"""
+    return f"""\
+<html>
+<body style="margin: 0; padding: 0; -webkit-text-size-adjust: 100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+       style="background-color: #EAEEF3; padding: 32px 0;">
+<tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0"
+       style="background-color: #ffffff; border-radius: 16px; overflow: hidden;
+              box-shadow: 0 2px 24px rgba(0,0,0,0.08);">
+
+  {header_html}
+
+  {body_html}
+
+  <!-- FOOTER -->
+  <tr>
+    <td style="background-color: {_CLR_CARD_BG}; border-top: 1px solid {_CLR_BORDER}; padding: 24px 40px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td>
+            <p style="font-family: {_FONT}; color: {_CLR_MUTED}; font-size: 11px; margin: 0; line-height: 1.6;">
+              此為系統自動發送郵件，請勿直接回覆。</p>
+            <p style="font-family: {_FONT}; color: {_CLR_MUTED}; font-size: 11px; margin: 6px 0 0;">
+              台灣林內 &middot; 資訊課 &middot; TR GPT</p>
+          </td>
+          <td align="right" valign="top">
+            <span style="font-family: {_FONT}; color: #D1D5DB; font-size: 10px; letter-spacing: 1px;">RINNAI</span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
 
 
 class EmailNotifier:
@@ -28,6 +108,8 @@ class EmailNotifier:
         self.smtp_user = smtp_user or os.getenv("SMTP_USER", "")
         self.smtp_password = smtp_password or os.getenv("SMTP_PASSWORD", "")
 
+    # ── 完成通知 ──────────────────────────────────────────────────
+
     def _build_completion_email(
         self,
         to_email: str,
@@ -41,9 +123,9 @@ class EmailNotifier:
         msg = MIMEMultipart("alternative")
         msg["From"] = self.smtp_user
         msg["To"] = to_email
-        msg["Subject"] = f"✅ IT 單 {issue_id} 已處理完成"
+        msg["Subject"] = f"IT 單 {issue_id} 已處理完成"
 
-        # 純文字版本
+        # ── 純文字版本 ──
         text_body = (
             f"您好，\n\n"
             f"您提交的 IT 支援需求已由服務台工程師處理完成：\n\n"
@@ -51,9 +133,9 @@ class EmailNotifier:
             f"  摘要：{task_name}\n"
         )
         if description:
-            text_body += f"\n📄 您當初提交的需求內容：\n{description}\n"
+            text_body += f"\n您當初提交的需求內容：\n{description}\n"
         if comments:
-            text_body += f"\n💬 處理評論：\n{comments}\n"
+            text_body += f"\n處理評論：\n{comments}\n"
         if permalink_url:
             text_body += f"  連結：{permalink_url}\n"
         text_body += (
@@ -61,112 +143,145 @@ class EmailNotifier:
             f"台灣林內-TR GPT"
         )
 
-        # HTML 版本
-        link_button = ""
-        if permalink_url:
-            link_button = (
-                f'<div style="text-align: center; margin: 32px 0;">'
-                f'<a href="{permalink_url}" style="background-color: #0052CC; color: #ffffff; '
-                f'padding: 12px 24px; text-decoration: none; border-radius: 6px; '
-                f'font-weight: 600; display: inline-block;">查看任務詳情</a>'
-                f'</div>'
-            )
+        # ── HTML header ──
+        header_html = f"""
+  <tr>
+    <td style="background-color: {_CLR_NAVY}; padding: 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding: 36px 40px 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+              <td style="width: 36px; height: 36px; background-color: {_CLR_GREEN};
+                         border-radius: 10px; text-align: center; vertical-align: middle;
+                         font-size: 18px; color: #ffffff;">&#10003;</td>
+              <td style="padding-left: 14px;">
+                <span style="font-family: {_FONT}; color: #ffffff; font-size: 13px;
+                             font-weight: 600; letter-spacing: 3px; text-transform: uppercase;
+                             opacity: 0.7;">RINNAI IT</span></td>
+            </tr></table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 0 40px 36px;">
+            <h1 style="font-family: {_FONT}; color: #ffffff; margin: 0;
+                       font-size: 28px; font-weight: 700; line-height: 1.2;">
+              您的支援需求<br>已處理完成</h1>
+            <div style="margin-top: 16px; display: inline-block; background-color: {_CLR_GREEN};
+                        border-radius: 20px; padding: 6px 16px;">
+              <span style="font-family: {_FONT}; color: #ffffff; font-size: 12px;
+                           font-weight: 700; letter-spacing: 1px;">已完成</span></div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>"""
 
-        # 原始提交內容區塊
-        description_section = ""
-        if description:
-            import html as html_mod
-            desc_html = html_mod.escape(description).replace("\n", "<br>")
-            description_section = (
-                f'<div style="margin: 24px 0;">'
-                f'<p style="color: #172B4D; font-size: 15px; font-weight: 600; margin: 0 0 12px;">📄 您當初提交的需求內容</p>'
-                f'<div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 16px 20px;">'
-                f'<p style="color: #42526E; font-size: 14px; line-height: 1.6; margin: 0; white-space: pre-wrap;">{desc_html}</p>'
-                f'</div>'
-                f'</div>'
-            )
+        # ── HTML body sections ──
+        body_parts = []
 
-        # 溝通評論區塊
-        comments_section = ""
-        if comments:
-            # comments 格式為 "  - **Author**: text" 每行一則，轉為 HTML
-            comment_items = ""
-            for line in comments.strip().split("\n"):
-                line = line.strip()
-                if line.startswith("- "):
-                    line = line[2:]
-                # 將 **text** 轉為 <strong>text</strong>
-                line = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)
-                if line:
-                    comment_items += (
-                        f'<div style="padding: 10px 16px; border-bottom: 1px solid #EBECF0;">'
-                        f'<span style="color: #172B4D; font-size: 14px; line-height: 1.5;">{line}</span>'
-                        f'</div>'
-                    )
-            if comment_items:
-                comments_section = (
-                    f'<div style="margin: 24px 0;">'
-                    f'<p style="color: #172B4D; font-size: 15px; font-weight: 600; margin: 0 0 12px;">💬 溝通評論</p>'
-                    f'<div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; overflow: hidden;">'
-                    f'{comment_items}'
-                    f'</div>'
-                    f'</div>'
-                )
-
-        html_body = f"""\
-<html>
-<body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;">
-  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px;
-              box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
-    <!-- Header -->
-    <div style="background: linear-gradient(135deg, #0052CC, #0747A6); padding: 32px 24px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 2px;">✅ IT 單已處理完成</h1>
-    </div>
-
-    <!-- Content -->
-    <div style="padding: 40px 32px;">
-      <p style="color: #172B4D; font-size: 16px; line-height: 1.6; margin-top: 0;">您好，</p>
-      <p style="color: #42526E; font-size: 16px; line-height: 1.6;">您提交的 IT 支援需求已由服務台工程師處理完成：</p>
-
-      <div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 24px; margin: 32px 0;">
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600; width: 100px;">支援單號</td>
-            <td style="padding: 8px 0; color: #172B4D; font-size: 15px; font-weight: 600;">{issue_id}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0; color: #6B778C; font-size: 14px; font-weight: 600;">需求摘要</td>
-            <td style="padding: 8px 0; color: #172B4D; font-size: 15px;">{task_name}</td>
-          </tr>
+        # 支援單資訊
+        body_parts.append(f"""
+  <tr><td style="padding: 40px 40px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="border: 1px solid {_CLR_BORDER}; border-radius: 12px; overflow: hidden;">
+      {_section_header('支援單資訊')}
+      <tr><td style="padding: 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          {_info_row('單號', issue_id, value_style=f'color: {_CLR_NAVY}; font-size: 15px; font-weight: 700;')}
+          {_info_row('摘要', html_mod.escape(task_name), is_last=True)}
         </table>
-      </div>
+      </td></tr>
+    </table>
+  </td></tr>""")
 
-      {description_section}
+        # 需求內容
+        if description:
+            desc_html = html_mod.escape(description).replace("\n", "<br>")
+            body_parts.append(f"""
+  <tr><td style="padding: 16px 40px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="border: 1px solid {_CLR_BORDER}; border-radius: 12px; overflow: hidden;">
+      {_section_header('您提交的需求內容')}
+      <tr><td style="padding: 20px;">
+        <p style="font-family: {_FONT}; color: #4B5563; font-size: 14px;
+                  line-height: 1.7; margin: 0; white-space: pre-wrap;">{desc_html}</p>
+      </td></tr>
+    </table>
+  </td></tr>""")
 
-      {comments_section}
+        # 評論
+        if comments:
+            comment_rows = self._build_comment_rows(comments)
+            if comment_rows:
+                body_parts.append(f"""
+  <tr><td style="padding: 16px 40px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="border: 1px solid {_CLR_BORDER}; border-radius: 12px; overflow: hidden;">
+      {_section_header('處理評論')}
+      <tr><td style="padding: 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          {comment_rows}
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>""")
 
-      {link_button}
-
-      <div style="padding: 24px; background-color: #EBF5FB; border-left: 4px solid #0052CC; border-radius: 4px; margin-top: 32px;">
-        <p style="color: #0747A6; font-size: 14px; margin: 0; line-height: 1.5;">
+        # 提示
+        body_parts.append(f"""
+  <tr><td style="padding: 24px 40px 40px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="background-color: #F0FDF4; border-radius: 10px; padding: 20px;
+                 border: 1px solid #BBF7D0;">
+        <p style="font-family: {_FONT}; color: #166534; font-size: 13px; margin: 0; line-height: 1.6;">
           <strong>需要進一步協助？</strong><br>
-          如問題尚未解決或有後續需求，請在 Teams 中使用 <code>@it</code> 重新提單。
-        </p>
-      </div>
-    </div>
+          如問題尚未解決或有後續需求，請在 Teams 中輸入
+          <code style="background-color: #DCFCE7; padding: 2px 6px; border-radius: 4px;
+                       font-size: 12px; color: #15803D;">@it</code> 重新提單。</p>
+      </td>
+    </tr></table>
+  </td></tr>""")
 
-    <!-- Footer -->
-    <div style="background-color: #F4F5F7; padding: 24px; text-align: center; border-top: 1px solid #DFE1E6;">
-      <p style="color: #6B778C; font-size: 12px; margin: 0;">此為系統自動發送郵件，請勿直接回覆。</p>
-      <p style="color: #6B778C; font-size: 12px; margin: 8px 0 0;">台灣林內-TR GPT</p>
-    </div>
-  </div>
-</body>
-</html>"""
-
+        html_body = _wrap_email(header_html, "\n".join(body_parts))
         msg.attach(MIMEText(text_body, "plain", "utf-8"))
         msg.attach(MIMEText(html_body, "html", "utf-8"))
         return msg
+
+    def _build_comment_rows(self, comments: str) -> str:
+        """將 markdown 格式評論轉為 HTML 表格列（含頭像）"""
+        rows = []
+        lines = [ln.strip() for ln in comments.strip().split("\n") if ln.strip()]
+        for i, line in enumerate(lines):
+            if line.startswith("- "):
+                line = line[2:]
+            # 提取作者名
+            m = re.match(r'\*\*(.+?)\*\*:\s*(.*)', line)
+            if m:
+                author = m.group(1)
+                text = html_mod.escape(m.group(2))
+                initials = author[0] if author else "?"
+            else:
+                line = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)
+                author = ""
+                text = line
+                initials = "?"
+
+            is_last = (i == len(lines) - 1)
+            border = "" if is_last else f"border-bottom: 1px solid {_CLR_BORDER_LIGHT};"
+            rows.append(f"""
+          <tr><td style="padding: 16px 20px; {border}">
+            <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+              <td style="width: 32px; height: 32px; background-color: #DBEAFE;
+                         border-radius: 50%; text-align: center; vertical-align: middle;">
+                <span style="font-family: {_FONT}; color: #2563EB; font-size: 13px;
+                             font-weight: 700;">{html_mod.escape(initials)}</span></td>
+              <td style="padding-left: 12px; vertical-align: top;">
+                {"<span style=" + '"' + f"font-family: {_FONT}; color: #1F2937; font-size: 13px; font-weight: 600;" + '"' + f">{html_mod.escape(author)}</span>" if author else ""}
+                <p style="font-family: {_FONT}; color: #4B5563; font-size: 14px;
+                          line-height: 1.6; margin: {'4px' if author else '0'} 0 0;">{text}</p>
+              </td>
+            </tr></table>
+          </td></tr>""")
+        return "\n".join(rows)
 
     async def send_completion_notification(
         self,
@@ -185,7 +300,6 @@ class EmailNotifier:
         try:
             msg = self._build_completion_email(to_email, issue_id, task_name, permalink_url, comments, description)
 
-            # 使用 STARTTLS 連線（Office 365 port 25/587）
             import asyncio
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._send_smtp, msg, to_email)
@@ -198,26 +312,23 @@ class EmailNotifier:
 
     def _send_smtp(self, msg: MIMEMultipart, to_email: str, cc_emails: Optional[list] = None) -> None:
         """同步 SMTP 發送（在 executor 中執行）"""
-        print(f"📧 SMTP 連線中: {self.smtp_host}:{self.smtp_port}")
+        logger.info("SMTP connecting: %s:%s", self.smtp_host, self.smtp_port)
         try:
             with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
                 server.set_debuglevel(0)
-                print("📧 SMTP EHLO...")
                 server.ehlo()
-                print("📧 SMTP STARTTLS...")
                 server.starttls()
                 server.ehlo()
-                print(f"📧 SMTP LOGIN: {self.smtp_user}")
+                logger.info("SMTP login: %s", self.smtp_user)
                 server.login(self.smtp_user, self.smtp_password)
-                # 收件人 = To + CC
                 recipients = [to_email]
                 if cc_emails:
                     recipients.extend(cc_emails)
-                print(f"📧 SMTP SEND: {self.smtp_user} → {to_email} (CC: {cc_emails or '無'})")
+                logger.info("SMTP send: %s -> %s (CC: %s)", self.smtp_user, to_email, cc_emails or "none")
                 server.sendmail(self.smtp_user, recipients, msg.as_string())
-                print("📧 SMTP 發送完成")
+                logger.info("SMTP send complete")
         except Exception as e:
-            print(f"❌ SMTP 錯誤: {type(e).__name__}: {e}")
+            logger.error("SMTP error: %s: %s", type(e).__name__, e)
             raise
 
     # ── 提單確認通知 ──────────────────────────────────────────────
@@ -238,24 +349,25 @@ class EmailNotifier:
         msg = MIMEMultipart("alternative")
         msg["From"] = self.smtp_user
         msg["To"] = to_email
-        msg["Subject"] = f"📋 IT 支援單已受理 — {issue_id}"
+        msg["Subject"] = f"IT 支援單已受理 — {issue_id}"
 
         display_name = reporter_name or to_email.split("@")[0]
+        priority_color = "#DC2626" if priority in ("P1", "P2") else _CLR_BODY
 
-        # 純文字版本
+        # ── 純文字版本 ──
         text_body = (
             f"{display_name} 您好，\n\n"
             f"您的 IT 支援需求已成功提交，IT 團隊將儘速為您處理。\n\n"
-            f"  📋 單號：{issue_id}\n"
-            f"  📝 需求摘要：{summary}\n"
-            f"  🏷️ 分類：{category}\n"
-            f"  🔺 優先順序：{priority}\n"
-            f"  🕐 提交時間：{created_at}\n"
+            f"  單號：{issue_id}\n"
+            f"  需求摘要：{summary}\n"
+            f"  分類：{category}\n"
+            f"  優先順序：{priority}\n"
+            f"  提交時間：{created_at}\n"
         )
         if description:
-            text_body += f"\n📄 您提交的需求內容：\n{description}\n"
+            text_body += f"\n您提交的需求內容：\n{description}\n"
         if permalink_url:
-            text_body += f"  🔗 Asana 連結：{permalink_url}\n"
+            text_body += f"  Asana 連結：{permalink_url}\n"
         text_body += (
             f"\n如需補充資訊或附件，請在 Teams 中直接傳送檔案給 Bot。\n"
             f"處理完成後，系統會再次通知您。\n\n"
@@ -263,95 +375,113 @@ class EmailNotifier:
             f"services@rinnai.com.tw"
         )
 
-        # HTML 版本
-        link_button = ""
-        if permalink_url:
-            link_button = (
-                f'<div style="text-align: center; margin: 32px 0;">'
-                f'<a href="{permalink_url}" style="background-color: #0052CC; color: #ffffff; '
-                f'padding: 12px 24px; text-decoration: none; border-radius: 6px; '
-                f'font-weight: 600; display: inline-block;">進入任務中心</a>'
-                f'</div>'
-            )
+        # ── HTML header ──
+        header_html = f"""
+  <tr>
+    <td style="background-color: {_CLR_NAVY}; padding: 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding: 36px 40px 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+              <td style="width: 36px; height: 36px; background-color: {_CLR_BLUE};
+                         border-radius: 10px; text-align: center; vertical-align: middle;
+                         font-size: 16px; color: #ffffff;">&#9998;</td>
+              <td style="padding-left: 14px;">
+                <span style="font-family: {_FONT}; color: #ffffff; font-size: 13px;
+                             font-weight: 600; letter-spacing: 3px; text-transform: uppercase;
+                             opacity: 0.7;">RINNAI IT</span></td>
+            </tr></table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 0 40px 36px;">
+            <h1 style="font-family: {_FONT}; color: #ffffff; margin: 0;
+                       font-size: 28px; font-weight: 700; line-height: 1.2;">
+              IT 支援單已受理</h1>
+            <p style="font-family: {_FONT}; color: rgba(255,255,255,0.65); margin: 12px 0 0;
+                      font-size: 15px; line-height: 1.5;">
+              您的需求已進入處理流程，IT 團隊將儘速為您處理。</p>
+            <div style="margin-top: 16px; display: inline-block; background-color: {_CLR_BLUE};
+                        border-radius: 20px; padding: 6px 16px;">
+              <span style="font-family: {_FONT}; color: #ffffff; font-size: 12px;
+                           font-weight: 700; letter-spacing: 1px;">處理中</span></div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>"""
 
-        # 需求內容區塊
-        description_section = ""
-        if description:
-            import html as html_mod
-            desc_html = html_mod.escape(description).replace("\n", "<br>")
-            description_section = (
-                f'<div style="margin: 24px 0;">'
-                f'<p style="color: #172B4D; font-size: 15px; font-weight: 600; margin: 0 0 12px;">📄 您提交的需求內容</p>'
-                f'<div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 16px 20px;">'
-                f'<p style="color: #42526E; font-size: 14px; line-height: 1.6; margin: 0; white-space: pre-wrap;">{desc_html}</p>'
-                f'</div>'
-                f'</div>'
-            )
+        # ── HTML body ──
+        body_parts = []
 
-        html_body = f"""\
-<html>
-<body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;">
-  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; 
-              box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
-    <!-- Header -->
-    <div style="background: linear-gradient(135deg, #0052CC, #0747A6); padding: 40px 24px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 700; letter-spacing: 2px;">📋 IT 支援單已受理</h1>
-      <div style="margin-top: 12px; height: 1px; background: rgba(255,255,255,0.2); width: 60%; margin-left: auto; margin-right: auto;"></div>
-      <p style="color: rgba(255,255,255,0.9); margin: 12px 0 0; font-size: 14px; font-weight: 500; letter-spacing: 5px; text-indent: 5px;">您的需求已進入處理流程</p>
-    </div>
+        # 問候
+        body_parts.append(f"""
+  <tr><td style="padding: 36px 40px 0;">
+    <p style="font-family: {_FONT}; color: #1F2937; font-size: 16px; font-weight: 600; margin: 0;">
+      {html_mod.escape(display_name)} 您好，</p>
+  </td></tr>""")
 
-    <!-- Body -->
-    <div style="padding: 40px 32px;">
-      <p style="color: #172B4D; font-size: 16px; font-weight: 600; margin: 0 0 16px;">
-        {display_name} 您好，
-      </p>
-      <p style="color: #42526E; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
-        您的 IT 支援需求已成功提交，IT 團隊將儘速為您處理。以下是您的需求摘要：
-      </p>
-
-      <!-- Info Card -->
-      <div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 24px 0;">
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 10px 24px; color: #6B778C; font-size: 14px; font-weight: 600; width: 100px;">單號</td>
-            <td style="padding: 10px 24px; color: #172B4D; font-size: 15px; font-weight: 700;">{issue_id}</td>
-          </tr>
-          <tr style="background-color: #ffffff;">
-            <td style="padding: 10px 24px; color: #6B778C; font-size: 14px; font-weight: 600;">需求摘要</td>
-            <td style="padding: 10px 24px; color: #172B4D; font-size: 15px;">{summary}</td>
-          </tr>
-          <tr>
-            <td style="padding: 10px 24px; color: #6B778C; font-size: 14px; font-weight: 600;">分類</td>
-            <td style="padding: 10px 24px; color: #172B4D; font-size: 15px;">{category}</td>
-          </tr>
-          <tr style="background-color: #ffffff;">
-            <td style="padding: 10px 24px; color: #6B778C; font-size: 14px; font-weight: 600;">優先順序</td>
-            <td style="padding: 10px 24px; color: #172B4D; font-size: 15px;">
-              <span style="color: {'#DE350B' if priority == 'P1' else '#172B4D'}; font-weight: 600;">{priority}</span>
-            </td>
-          </tr>
+        # 資訊卡
+        body_parts.append(f"""
+  <tr><td style="padding: 24px 40px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="border: 1px solid {_CLR_BORDER}; border-radius: 12px; overflow: hidden;">
+      {_section_header('支援單資訊')}
+      <tr><td style="padding: 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          {_info_row('單號', issue_id, value_style=f'color: {_CLR_NAVY}; font-size: 15px; font-weight: 700;')}
+          {_info_row('摘要', html_mod.escape(summary))}
+          {_info_row('分類', html_mod.escape(category))}
+          {_info_row('優先序', priority, value_style=f'color: {priority_color}; font-size: 14px; font-weight: 700;')}
+          {_info_row('提交時間', html_mod.escape(created_at), is_last=True)}
         </table>
-      </div>
+      </td></tr>
+    </table>
+  </td></tr>""")
 
-      {description_section}
+        # 需求內容
+        if description:
+            desc_html = html_mod.escape(description).replace("\n", "<br>")
+            body_parts.append(f"""
+  <tr><td style="padding: 0 40px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="border: 1px solid {_CLR_BORDER}; border-radius: 12px; overflow: hidden;">
+      {_section_header('您提交的需求內容')}
+      <tr><td style="padding: 20px;">
+        <p style="font-family: {_FONT}; color: #4B5563; font-size: 14px;
+                  line-height: 1.7; margin: 0; white-space: pre-wrap;">{desc_html}</p>
+      </td></tr>
+    </table>
+  </td></tr>""")
 
-      {link_button}
+        # 按鈕
+        if permalink_url:
+            body_parts.append(f"""
+  <tr><td style="padding: 16px 40px 8px;" align="center">
+    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+      <td style="background-color: {_CLR_NAVY}; border-radius: 10px;">
+        <a href="{permalink_url}" style="display: inline-block; padding: 14px 36px;
+           font-family: {_FONT}; color: #ffffff; font-size: 14px; font-weight: 600;
+           text-decoration: none; letter-spacing: 0.5px;">進入任務中心 &rarr;</a>
+      </td>
+    </tr></table>
+  </td></tr>""")
 
-      <div style="background-color: #EBF5FB; border-left: 4px solid #0052CC; padding: 20px; border-radius: 4px; margin-top: 32px;">
-        <p style="color: #0747A6; font-size: 14px; margin: 0; line-height: 1.6;">
-          <strong>小提示：</strong> 如需補充資訊或附加檔案，可直接在 Teams 中將檔案傳送給 IT Bot，系統將自動為您關聯至此支援單。
-        </p>
-      </div>
-    </div>
+        # 提示
+        body_parts.append(f"""
+  <tr><td style="padding: 24px 40px 40px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="background-color: #EFF6FF; border-radius: 10px; padding: 20px;
+                 border: 1px solid #BFDBFE;">
+        <p style="font-family: {_FONT}; color: #1E40AF; font-size: 13px; margin: 0; line-height: 1.6;">
+          <strong>小提示</strong><br>
+          如需補充資訊或附加檔案，可直接在 Teams 中將檔案傳送給 IT Bot，系統將自動為您關聯至此支援單。
+          處理完成後，系統會再次通知您。</p>
+      </td>
+    </tr></table>
+  </td></tr>""")
 
-    <!-- Footer -->
-    <div style="background-color: #F4F5F7; padding: 24px; text-align: center; border-top: 1px solid #DFE1E6;">
-      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內-資訊課 · services@rinnai.com.tw</p>
-    </div>
-  </div>
-</body>
-</html>"""
-
+        html_body = _wrap_email(header_html, "\n".join(body_parts))
         msg.attach(MIMEText(text_body, "plain", "utf-8"))
         msg.attach(MIMEText(html_body, "html", "utf-8"))
         return msg
@@ -380,7 +510,6 @@ class EmailNotifier:
                 created_at, permalink_url, reporter_name, description,
             )
 
-            # 若有 CC 收件人，加入 Cc header
             cc_list = []
             if cc_email and cc_email.lower() != to_email.lower():
                 msg["Cc"] = cc_email
@@ -397,6 +526,8 @@ class EmailNotifier:
             logger.error("提單確認 Email 發送失敗: %s", e)
             return False
 
+    # ── 自訂通知 ──────────────────────────────────────────────────
+
     async def send_custom_notification(
         self,
         to_email: str,
@@ -412,37 +543,40 @@ class EmailNotifier:
             msg["From"] = self.smtp_user
             msg["To"] = to_email
             msg["Subject"] = subject
-            
-            # 轉換 body_text 中的換行為 HTML br (如果需要)
-            html_content = body_text.replace("\n", "<br>")
-            
-            html_body = f"""\
-<html>
-<body style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F5F7; padding: 40px 20px; margin: 0;">
-  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; 
-              box-shadow: 0 4px 20px rgba(9, 30, 66, 0.15); overflow: hidden;">
-    <!-- Header -->
-    <div style="background-color: #0052CC; padding: 24px; text-align: left; border-bottom: 1px solid #DFE1E6;">
-      <span style="color: #0052CC; font-size: 18px; font-weight: 700;">IT Notification</span>
-    </div>
-    
-    <!-- Content -->
-    <div style="padding: 32px;">
-      <div style="color: #172B4D; font-size: 16px; line-height: 1.6;">
-        {html_content}
-      </div>
-    </div>
 
-    <!-- Footer -->
-    <div style="background-color: #F4F5F7; padding: 20px; text-align: center; border-top: 1px solid #DFE1E6;">
-      <p style="color: #6B778C; font-size: 12px; margin: 0;">台灣林內-TR GPT · 智慧助理系統</p>
+            html_content = html_mod.escape(body_text).replace("\n", "<br>")
+
+            header_html = f"""
+  <tr>
+    <td style="background-color: {_CLR_NAVY}; padding: 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding: 36px 40px;">
+            <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+              <td style="width: 36px; height: 36px; background-color: #8B5CF6;
+                         border-radius: 10px; text-align: center; vertical-align: middle;
+                         font-size: 16px; color: #ffffff;">&#9993;</td>
+              <td style="padding-left: 14px;">
+                <span style="font-family: {_FONT}; color: #ffffff; font-size: 13px;
+                             font-weight: 600; letter-spacing: 3px; text-transform: uppercase;
+                             opacity: 0.7;">RINNAI IT</span></td>
+            </tr></table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>"""
+
+            body_html = f"""
+  <tr><td style="padding: 40px;">
+    <div style="font-family: {_FONT}; color: {_CLR_BODY}; font-size: 15px; line-height: 1.7;">
+      {html_content}
     </div>
-  </div>
-</body>
-</html>"""
-            
+  </td></tr>"""
+
+            full_html = _wrap_email(header_html, body_html)
             msg.attach(MIMEText(body_text, "plain", "utf-8"))
-            msg.attach(MIMEText(html_body, "html", "utf-8"))
+            msg.attach(MIMEText(full_html, "html", "utf-8"))
 
             import asyncio
             loop = asyncio.get_event_loop()

@@ -78,6 +78,81 @@ class ITSupportService:
         """Build the IT Team proxy card (with requester email input)."""
         return build_itt_issue_card(language, self._taxonomy, reporter_name, reporter_email)
 
+    async def query_my_tickets(self, user_email: str) -> Dict[str, Any]:
+        """查詢使用者自己的 IT 工單（含自提 + 被代提）。
+        回傳 {"incomplete": [...], "recent_completed": [...top 3]}
+        """
+        import re as _re
+        try:
+            tasks = await self.asana.search_tasks_in_project(
+                project_gid=self.project_gid,
+                text=user_email,
+                sort_by="created_at",
+                sort_ascending=False,
+                limit=100,
+            )
+        except Exception as e:
+            logger.error("查詢 Asana 工單失敗: %s", e)
+            return {"incomplete": [], "recent_completed": []}
+
+        incomplete = []
+        completed = []
+        for t in tasks:
+            notes = t.get("notes", "")
+            # 確認 notes 中確實包含此 email（避免搜尋結果誤匹配）
+            if user_email.lower() not in notes.lower():
+                continue
+            info = self._extract_ticket_info(t)
+            if t.get("completed"):
+                completed.append(info)
+            else:
+                incomplete.append(info)
+
+        return {
+            "incomplete": incomplete,
+            "recent_completed": completed[:3],
+        }
+
+    def _extract_ticket_info(self, task: Dict[str, Any]) -> Dict[str, str]:
+        """從 Asana task 中提取顯示用資訊。"""
+        import re as _re
+        notes = task.get("notes", "")
+        issue_id = ""
+        priority = ""
+        category = ""
+        description = ""
+
+        m = _re.search(r"單號[:：]\s*(IT\S+)", notes)
+        if m:
+            issue_id = m.group(1)
+        m = _re.search(r"優先順序[:：]\s*(\S+)", notes)
+        if m:
+            priority = m.group(1)
+        m = _re.search(r"分類[:：]\s*(.+?)(?:\s*\(|$)", notes)
+        if m:
+            category = m.group(1).strip()
+        if "【需求/問題說明】" in notes:
+            start = notes.index("【需求/問題說明】") + len("【需求/問題說明】")
+            end = len(notes)
+            for marker in ["【AI 分析", "【知識庫參考"]:
+                if marker in notes[start:]:
+                    pos = notes.index(marker, start)
+                    if pos < end:
+                        end = pos
+            description = notes[start:end].strip()
+            if len(description) > 80:
+                description = description[:77] + "..."
+
+        return {
+            "issue_id": issue_id or task.get("name", ""),
+            "task_name": task.get("name", ""),
+            "priority": priority,
+            "category": category,
+            "description": description,
+            "completed": task.get("completed", False),
+            "created_at": (task.get("created_at") or "")[:10],
+        }
+
     async def submit_issue(self, form: Dict[str, Any], reporter_name: str, reporter_email: str, requester_email: str = "") -> Dict[str, Any]:
         """
         Create Asana task from submitted form. Auto-classify if no category selected.

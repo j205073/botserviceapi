@@ -44,7 +44,8 @@ class APIRoutes:
         """註冊所有路由"""
         # 健康檢查
         health_bp.route("/ping", methods=["GET"])(self.ping)
-        
+        api_bp.route("/health", methods=["GET"])(self.deep_health_check)
+
         # 測試端點
         api_bp.route("/test", methods=["GET", "POST"])(self.test_api)
         api_bp.route("/routes", methods=["GET"])(self.list_routes)
@@ -267,7 +268,95 @@ class APIRoutes:
             "service": "Taiwan Rinnai GPT",
             "version": "2.0.0"
         })
-    
+
+    async def deep_health_check(self):
+        """深度健康檢查 — 驗證 Bot Framework 認證與關鍵依賴。
+
+        GET /api/health
+        回傳各元件狀態，供外部監控（n8n）判斷 Teams Bot 是否可正常服務。
+        """
+        import os
+        import time
+        import aiohttp
+
+        results = {
+            "service": "Taiwan Rinnai GPT",
+            "timestamp": datetime.utcnow().isoformat(),
+            "checks": {},
+        }
+        overall_healthy = True
+
+        # 1) Bot Framework 認證 — 最關鍵，失敗代表 Teams 訊息收不到也送不出
+        try:
+            app_id = self.config.bot.app_id
+            app_password = self.config.bot.app_password
+            if not app_id or not app_password:
+                results["checks"]["bot_auth"] = {"status": "fail", "message": "BOT_APP_ID 或 BOT_APP_PASSWORD 未設定"}
+                overall_healthy = False
+            else:
+                tenant_id = self.config.graph_api.tenant_id or "botframework.com"
+                token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+                payload = {
+                    "grant_type": "client_credentials",
+                    "client_id": app_id,
+                    "client_secret": app_password,
+                    "scope": "https://api.botframework.com/.default",
+                }
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(token_url, data=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            results["checks"]["bot_auth"] = {"status": "ok", "message": "Bot Framework token 取得成功"}
+                        else:
+                            body = await resp.text()
+                            results["checks"]["bot_auth"] = {"status": "fail", "message": f"HTTP {resp.status}: {body[:200]}"}
+                            overall_healthy = False
+        except Exception as e:
+            results["checks"]["bot_auth"] = {"status": "fail", "message": str(e)}
+            overall_healthy = False
+
+        # 2) Bot Adapter 初始化
+        if self.bot_adapter and hasattr(self.bot_adapter, 'adapter'):
+            results["checks"]["bot_adapter"] = {"status": "ok", "message": "Bot adapter 已初始化"}
+        else:
+            results["checks"]["bot_adapter"] = {"status": "fail", "message": "Bot adapter 未初始化"}
+            overall_healthy = False
+
+        # 3) SMTP 連線（Email 通知能力）
+        try:
+            import smtplib
+            smtp_host = os.getenv("SMTP_HOST", "smtp.office365.com")
+            smtp_port = int(os.getenv("SMTP_PORT", "587"))
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                results["checks"]["smtp"] = {"status": "ok", "message": f"{smtp_host}:{smtp_port} 連線正常"}
+        except Exception as e:
+            results["checks"]["smtp"] = {"status": "warn", "message": f"SMTP 連線失敗: {e}"}
+            # SMTP 失敗不影響 Teams Bot 核心功能，標記 warn 而非 fail
+
+        # 4) Asana API（提單功能）
+        try:
+            asana_token = os.getenv("ASANA_ACCESS_TOKEN", "")
+            if not asana_token:
+                results["checks"]["asana"] = {"status": "warn", "message": "ASANA_ACCESS_TOKEN 未設定"}
+            else:
+                async with aiohttp.ClientSession() as session:
+                    headers = {"Authorization": f"Bearer {asana_token}"}
+                    async with session.get("https://app.asana.com/api/1.0/users/me", headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            results["checks"]["asana"] = {"status": "ok", "message": "Asana API 認證正常"}
+                        else:
+                            results["checks"]["asana"] = {"status": "warn", "message": f"Asana API HTTP {resp.status}"}
+        except Exception as e:
+            results["checks"]["asana"] = {"status": "warn", "message": f"Asana API 連線失敗: {e}"}
+
+        # 彙總
+        results["status"] = "healthy" if overall_healthy else "unhealthy"
+
+        status_code = 200 if overall_healthy else 503
+        return jsonify(results), status_code
+
     async def test_api(self):
         """測試 API 端點"""
         method = request.method
@@ -299,7 +388,8 @@ class APIRoutes:
         # 這裡可以動態獲取所有註冊的路由
         # 暫時返回靜態列表
         available_routes = [
-            {"path": "/ping", "method": "GET", "description": "健康檢查"},
+            {"path": "/ping", "method": "GET", "description": "基本健康檢查"},
+            {"path": "/api/health", "method": "GET", "description": "深度健康檢查（Bot 認證 + 依賴元件）"},
             {"path": "/api/test", "method": "GET|POST", "description": "API 測試"},
             {"path": "/api/routes", "method": "GET", "description": "列出所有路由"},
             {"path": "/api/audit/upload-all", "method": "GET", "description": "上傳所有用戶的稽核日誌"},

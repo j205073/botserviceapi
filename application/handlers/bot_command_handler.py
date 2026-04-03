@@ -45,6 +45,7 @@ class BotCommandHandler:
             "model": self._handle_model_command,
             "it": self._handle_it_command,
             "itt": self._handle_itt_command,
+            "itls": self._handle_itls_command,
         }
     
     async def handle_command(self, turn_context: TurnContext, user_info: BotInteractionDTO) -> None:
@@ -464,6 +465,35 @@ class BotCommandHandler:
                 Activity(
                     type=ActivityTypes.message,
                     text=f"❌ 無法顯示 IT 代提單：{str(e)}",
+                )
+            )
+
+    async def _handle_itls_command(
+        self,
+        turn_context: TurnContext,
+        user_info: BotInteractionDTO,
+        command_dto: CommandExecutionDTO,
+    ) -> None:
+        """處理 @itls 命令：列出使用者的 IT 支援單"""
+        try:
+            from core.container import get_container
+            from features.it_support.service import ITSupportService
+            svc: ITSupportService = get_container().get(ITSupportService)
+
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="🔍 查詢中，請稍候...")
+            )
+
+            result = await svc.query_my_tickets(user_info.user_mail)
+
+            from features.it_support.cards import build_my_tickets_card
+            card = build_my_tickets_card(result["incomplete"], result["recent_completed"])
+            await turn_context.send_activity(card)
+        except Exception as e:
+            await turn_context.send_activity(
+                Activity(
+                    type=ActivityTypes.message,
+                    text=f"❌ 查詢 IT 工單失敗：{str(e)}",
                 )
             )
 

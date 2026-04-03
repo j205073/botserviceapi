@@ -151,6 +151,83 @@ def build_it_issue_card(
     return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
 
 
+def build_my_tickets_card(incomplete: List[Dict], recent_completed: List[Dict]) -> Activity:
+    """Build an Adaptive Card showing user's IT tickets."""
+
+    body: List[Dict[str, Any]] = [
+        {"type": "TextBlock", "text": "📋 我的 IT 支援單", "weight": "Bolder", "size": "Medium"},
+    ]
+
+    # ── 未完成 ──
+    if incomplete:
+        body.append({
+            "type": "TextBlock",
+            "text": f"🔴 未完成（{len(incomplete)} 筆）",
+            "weight": "Bolder", "size": "Small", "spacing": "Medium",
+            "color": "Attention",
+        })
+        for t in incomplete:
+            facts = [
+                {"title": "單號", "value": t["issue_id"]},
+                {"title": "分類", "value": t["category"] or "—"},
+                {"title": "優先序", "value": t["priority"] or "—"},
+                {"title": "提交日期", "value": t["created_at"]},
+            ]
+            if t.get("description"):
+                facts.append({"title": "需求摘要", "value": t["description"]})
+            body.append({
+                "type": "Container",
+                "style": "emphasis",
+                "spacing": "Small",
+                "items": [{"type": "FactSet", "facts": facts}],
+                "separator": True,
+            })
+    else:
+        body.append({
+            "type": "TextBlock",
+            "text": "✅ 沒有未完成的支援單",
+            "spacing": "Medium", "color": "Good",
+        })
+
+    # ── 最近已完成 ──
+    if recent_completed:
+        body.append({
+            "type": "TextBlock",
+            "text": f"🟢 最近已完成（前 {len(recent_completed)} 筆）",
+            "weight": "Bolder", "size": "Small", "spacing": "Large",
+            "color": "Good",
+        })
+        for t in recent_completed:
+            facts = [
+                {"title": "單號", "value": t["issue_id"]},
+                {"title": "分類", "value": t["category"] or "—"},
+                {"title": "提交日期", "value": t["created_at"]},
+            ]
+            if t.get("description"):
+                facts.append({"title": "需求摘要", "value": t["description"]})
+            body.append({
+                "type": "Container",
+                "spacing": "Small",
+                "items": [{"type": "FactSet", "facts": facts}],
+                "separator": True,
+            })
+
+    body.append({
+        "type": "TextBlock",
+        "text": "輸入 @it 提交新的支援需求",
+        "size": "Small", "spacing": "Medium", "isSubtle": True,
+    })
+
+    card_content: Dict[str, Any] = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": body,
+    }
+
+    return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
+
+
 def build_broadcast_card(language: str) -> Activity:
     """Build an Adaptive Card for sending broadcast messages."""
 
