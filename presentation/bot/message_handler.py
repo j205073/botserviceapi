@@ -59,6 +59,9 @@ class TeamsMessageHandler:
         self.upload_card_builder = UploadCardBuilder()
         self.logger = logging.getLogger(__name__)
 
+        # 暫存使用者附件（等待確認是否附加到 IT 工單）
+        self._pending_attachments: dict = {}
+
     async def handle_message(self, turn_context: TurnContext) -> None:
         """處理 Teams 訊息"""
         try:
@@ -100,7 +103,7 @@ class TeamsMessageHandler:
                         bool(getattr(a, "content", None)),
                     )
 
-            # 若含有附件：優先附加到 IT 工單，否則用 AI 解析內容
+            # 若含有附件：判斷是否有最近 IT 工單，決定附加或 AI 解析
             if turn_context.activity.attachments:
                 self.logger.info(
                     "Attempting attachment handling user_mail=%s conversation_id=%s attachment_count=%d",
@@ -108,17 +111,46 @@ class TeamsMessageHandler:
                     user_info.conversation_id,
                     len(turn_context.activity.attachments or []),
                 )
-                # 有最近的 IT 工單 → 附加檔案
-                handled = await self._try_attach_images(turn_context, user_info)
-                if handled:
-                    self.logger.info(
-                        "Attachment handling completed user_mail=%s conversation_id=%s",
-                        user_info.user_mail,
-                        user_info.conversation_id,
+
+                # 檢查是否有最近 10 分鐘內的 IT 工單
+                from core.container import get_container
+                from features.it_support.service import ITSupportService
+                svc: ITSupportService = get_container().get(ITSupportService)
+                recent_gid = svc.get_recent_task_gid(user_info.user_mail)
+
+                if recent_gid:
+                    # 有最近的 IT 單 → 暫存附件，發確認卡片讓使用者選擇
+                    self._pending_attachments[user_info.user_mail] = {
+                        "activity": turn_context.activity,
+                        "user_info": user_info,
+                    }
+                    language = determine_language(user_info.user_mail)
+                    confirm_text = {
+                        "zh": "您最近有提交 IT 工單，請問要將此檔案附加到該工單嗎？",
+                        "en": "You recently submitted an IT ticket. Attach this file to it?",
+                        "ja": "最近ITチケットを提出しました。このファイルを添付しますか？",
+                    }.get(language, "您最近有提交 IT 工單，請問要將此檔案附加到該工單嗎？")
+                    card = {
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "type": "AdaptiveCard",
+                        "version": "1.3",
+                        "body": [{"type": "TextBlock", "text": confirm_text, "wrap": True}],
+                        "actions": [
+                            {"type": "Action.Submit", "title": "✅ 附加到 IT 工單", "data": {"action": "confirmAttachIT"}},
+                            {"type": "Action.Submit", "title": "🤖 AI 解析內容", "data": {"action": "skipAttachIT"}},
+                        ],
+                    }
+                    from botbuilder.schema import Attachment as BotAttachment
+                    card_attachment = BotAttachment(
+                        content_type="application/vnd.microsoft.card.adaptive",
+                        content=card,
+                    )
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, attachments=[card_attachment])
                     )
                     return
 
-                # 一般對話：用 AI 解析附件內容（圖片或檔案，支援多筆）
+                # 無最近 IT 單 → 直接 AI 解析
                 attachments = await self._extract_all_attachments(turn_context)
                 if attachments:
                     self.logger.info(
@@ -220,6 +252,10 @@ class TeamsMessageHandler:
             await self._handle_upload_option(turn_context, user_info)
         elif card_action == "submitBroadcast":
             await self._handle_submit_broadcast(turn_context, user_info)
+        elif card_action == "confirmAttachIT":
+            await self._handle_confirm_attach_it(turn_context, user_info)
+        elif card_action == "skipAttachIT":
+            await self._handle_skip_attach_it(turn_context, user_info)
 
     async def _handle_submit_it_issue(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
@@ -644,6 +680,49 @@ class TeamsMessageHandler:
         text = tips.get(language, tips["zh"]).get(opt)
         if text:
             await turn_context.send_activity(Activity(type=ActivityTypes.message, text=text))
+
+    async def _handle_confirm_attach_it(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """使用者確認將附件附加到 IT 工單"""
+        pending = self._pending_attachments.pop(user_info.user_mail, None)
+        if not pending:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="⚠️ 找不到待處理的附件，請重新上傳。")
+            )
+            return
+
+        # 還原原始 activity 的 attachments，走 IT 工單附加流程
+        original_activity = pending["activity"]
+        # 建立一個臨時 context 來處理（使用原始 activity 的 attachments）
+        turn_context.activity.attachments = original_activity.attachments
+        handled = await self._try_attach_images(turn_context, pending["user_info"])
+        if not handled:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="⚠️ 附加失敗，可能工單已超過 10 分鐘。")
+            )
+
+    async def _handle_skip_attach_it(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """使用者選擇不附加到 IT 工單，改走 AI 解析"""
+        pending = self._pending_attachments.pop(user_info.user_mail, None)
+        if not pending:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="⚠️ 找不到待處理的附件，請重新上傳。")
+            )
+            return
+
+        # 還原原始 activity 的 attachments，走 AI 解析流程
+        original_activity = pending["activity"]
+        turn_context.activity.attachments = original_activity.attachments
+        attachments = await self._extract_all_attachments(turn_context)
+        if attachments:
+            await self._handle_attachment_analysis(turn_context, pending["user_info"], attachments)
+        else:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="⚠️ 無法解析附件，請重新上傳。")
+            )
 
     async def _handle_text_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
