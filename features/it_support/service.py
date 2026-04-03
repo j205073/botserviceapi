@@ -827,7 +827,7 @@ class ITSupportService:
         """透過 Bot Framework 推播任務完成通知。"""
         detail_section = ""
         if comments:
-            detail_section = f"\n\n💬 **溝通評論：**\n{comments}"
+            detail_section = f"\n\n💬 **處理方式：**\n{comments}"
 
         images_section = ""
         if image_urls:

@@ -291,7 +291,7 @@ class TeamsMessageHandler:
                     except Exception:
                         pass
                     # 提示使用者可查詢工單狀態
-                    tip = "💡 小提示：輸入 **@my-it** 可隨時查看您申請的 IT 工單處理進度。"
+                    tip = "💡 小提示：輸入 **@itls** 可隨時查看您申請的 IT 工單處理進度。"
                     await turn_context.send_activity(
                         Activity(type=ActivityTypes.message, text=tip)
                     )
@@ -410,7 +410,7 @@ class TeamsMessageHandler:
                         await turn_context.send_activity(upload_card)
                     except Exception:
                         pass
-                    tip = "💡 小提示：輸入 **@my-it** 可隨時查看您申請的 IT 工單處理進度。"
+                    tip = "💡 小提示：輸入 **@itls** 可隨時查看您申請的 IT 工單處理進度。"
                     await turn_context.send_activity(
                         Activity(type=ActivityTypes.message, text=tip)
                     )
