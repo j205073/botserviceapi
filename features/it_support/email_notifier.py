@@ -118,12 +118,17 @@ class EmailNotifier:
         permalink_url: str = "",
         comments: str = "",
         description: str = "",
+        images: Optional[list] = None,
     ) -> MIMEMultipart:
-        """建立任務完成通知郵件"""
-        msg = MIMEMultipart("alternative")
+        """建立任務完成通知郵件。
+        images: list of {"filename": str, "data": bytes, "content_type": str}
+        """
+        msg = MIMEMultipart("related")
         msg["From"] = self.smtp_user
         msg["To"] = to_email
         msg["Subject"] = f"IT 單 {issue_id} 已處理完成"
+        alt_part = MIMEMultipart("alternative")
+        images = images or []
 
         # ── 純文字版本 ──
         text_body = (
@@ -226,6 +231,31 @@ class EmailNotifier:
     </table>
   </td></tr>""")
 
+        # 附件圖片
+        if images:
+            img_items = ""
+            for idx, img in enumerate(images):
+                cid = f"att_img_{idx}"
+                fname = html_mod.escape(img.get("filename", f"image_{idx}"))
+                img_items += (
+                    f'<tr><td style="padding: 12px 20px; border-bottom: 1px solid {_CLR_BORDER_LIGHT};">'
+                    f'<p style="font-family: {_FONT}; color: {_CLR_MUTED}; font-size: 12px; margin: 0 0 8px;">{fname}</p>'
+                    f'<img src="cid:{cid}" style="max-width: 100%; border-radius: 8px; display: block;" alt="{fname}">'
+                    f'</td></tr>'
+                )
+            body_parts.append(f"""
+  <tr><td style="padding: 16px 40px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+           style="border: 1px solid {_CLR_BORDER}; border-radius: 12px; overflow: hidden;">
+      {_section_header('附件圖片')}
+      <tr><td style="padding: 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          {img_items}
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>""")
+
         # 提示
         body_parts.append(f"""
   <tr><td style="padding: 24px 40px 40px;">
@@ -242,8 +272,22 @@ class EmailNotifier:
   </td></tr>""")
 
         html_body = _wrap_email(header_html, "\n".join(body_parts))
-        msg.attach(MIMEText(text_body, "plain", "utf-8"))
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        alt_part.attach(MIMEText(text_body, "plain", "utf-8"))
+        alt_part.attach(MIMEText(html_body, "html", "utf-8"))
+        msg.attach(alt_part)
+
+        # 內嵌圖片為 cid 附件
+        if images:
+            from email.mime.image import MIMEImage
+            for idx, img in enumerate(images):
+                cid = f"att_img_{idx}"
+                ct = img.get("content_type", "image/png")
+                maintype, subtype = ct.split("/", 1) if "/" in ct else ("image", "png")
+                mime_img = MIMEImage(img["data"], _subtype=subtype)
+                mime_img.add_header("Content-ID", f"<{cid}>")
+                mime_img.add_header("Content-Disposition", "inline", filename=img.get("filename", f"image_{idx}"))
+                msg.attach(mime_img)
+
         return msg
 
     def _build_comment_rows(self, comments: str) -> str:
@@ -291,14 +335,17 @@ class EmailNotifier:
         permalink_url: str = "",
         comments: str = "",
         description: str = "",
+        images: Optional[list] = None,
     ) -> bool:
-        """發送任務完成通知郵件。回傳 True 表示成功。"""
+        """發送任務完成通知郵件。回傳 True 表示成功。
+        images: list of {"filename": str, "data": bytes, "content_type": str}
+        """
         if not self.smtp_user or not self.smtp_password:
             logger.warning("SMTP 未設定，跳過 Email 通知")
             return False
 
         try:
-            msg = self._build_completion_email(to_email, issue_id, task_name, permalink_url, comments, description)
+            msg = self._build_completion_email(to_email, issue_id, task_name, permalink_url, comments, description, images)
 
             import asyncio
             loop = asyncio.get_event_loop()

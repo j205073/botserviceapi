@@ -661,10 +661,38 @@ class ITSupportService:
         except Exception as e:
             logger.warning("抓取任務評論失敗: %s", e)
 
-        # 2) Teams 通知
-        await self._send_teams_notification(reporter_email, issue_id, task_name, permalink, comments_str)
-        # 3) Email 通知
-        await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink, comments_str, original_description)
+        # 2) 抓取附件圖片
+        images = []
+        image_urls = []  # for Teams (用原始 URL)
+        try:
+            attachments = await self.asana.get_task_attachments(task_gid)
+            for att in attachments:
+                name = att.get("name", "")
+                dl_url = att.get("download_url", "")
+                if not dl_url:
+                    continue
+                # 只處理圖片類型
+                ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+                if ext not in ("png", "jpg", "jpeg", "gif", "webp", "bmp"):
+                    continue
+                image_urls.append({"name": name, "url": dl_url})
+                # 下載到記憶體給 Email 用
+                img_data = await self.asana.download_attachment(dl_url)
+                if img_data:
+                    ct_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                              "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp"}
+                    images.append({
+                        "filename": name,
+                        "data": img_data,
+                        "content_type": ct_map.get(ext, "image/png"),
+                    })
+        except Exception as e:
+            logger.warning("抓取任務附件失敗: %s", e)
+
+        # 3) Teams 通知
+        await self._send_teams_notification(reporter_email, issue_id, task_name, permalink, comments_str, image_urls)
+        # 4) Email 通知（圖片用 cid 內嵌）
+        await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink, comments_str, original_description, images)
 
         # 4) 處理 IT 知識庫
         if self.knowledge_base:
@@ -779,22 +807,26 @@ class ITSupportService:
         return result if result.get("email") or result.get("issue_id") else None
 
     async def _send_teams_notification(
-        self, reporter_email: str, issue_id: str, task_name: str, permalink: str, comments: str = ""
+        self, reporter_email: str, issue_id: str, task_name: str, permalink: str,
+        comments: str = "", image_urls: Optional[List] = None,
     ) -> bool:
         """透過 Bot Framework 推播任務完成通知。"""
-        link_text = f"\n🔗 [查看任務詳情]({permalink})" if permalink else ""
-        
         detail_section = ""
         if comments:
             detail_section = f"\n\n💬 **溝通評論：**\n{comments}"
+
+        images_section = ""
+        if image_urls:
+            images_section = "\n\n📎 **附件圖片：**"
+            for img in image_urls:
+                images_section += f"\n\n![{img['name']}]({img['url']})"
 
         message = (
             f"🎉 **您的 IT 支援單已處理完成！**\n\n"
             f"📋 **單號：** {issue_id}\n"
             f"📝 **摘要：** {task_name}"
             f"{detail_section}"
-            f"\n\n---"
-            f"{link_text}"
+            f"{images_section}"
         )
         return await self._send_teams_push(reporter_email, message)
 

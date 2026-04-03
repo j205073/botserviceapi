@@ -175,6 +175,45 @@ class AsanaClient:
 
         return all_tasks
 
+    async def list_webhooks(self, workspace_gid: str, resource_gid: str = "") -> list[Dict[str, Any]]:
+        """列出 workspace 下的 webhook 訂閱。可選 resource_gid 過濾。"""
+        url = f"{self.base_url}/webhooks"
+        params: Dict[str, Any] = {
+            "workspace": workspace_gid,
+            "opt_fields": "resource,resource.name,target,active,created_at",
+        }
+        if resource_gid:
+            params["resource"] = resource_gid
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=self._headers(), params=params)
+            resp.raise_for_status()
+            return resp.json().get("data", [])
+
+    async def get_task_attachments(self, task_gid: str) -> list[Dict[str, Any]]:
+        """取得任務的附件列表（含 download_url）。"""
+        if not task_gid:
+            return []
+        url = f"{self.base_url}/tasks/{task_gid}/attachments"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                url, headers=self._headers(),
+                params={"opt_fields": "name,download_url,host,resource_subtype"},
+            )
+            resp.raise_for_status()
+            return resp.json().get("data", [])
+
+    async def download_attachment(self, download_url: str) -> Optional[bytes]:
+        """下載附件內容到記憶體，回傳 bytes。"""
+        if not download_url:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                resp = await client.get(download_url)
+                resp.raise_for_status()
+                return resp.content
+        except Exception:
+            return None
+
     async def upload_attachment(self, task_gid: str, filename: str, content: bytes, mime_type: str) -> Dict[str, Any]:
         """Upload an attachment file to a task."""
         if not task_gid:

@@ -416,6 +416,67 @@ class APIRoutes:
         else:
             results["checks"]["config"] = {"status": "ok", "message": "所有必要環境變數已設定"}
 
+        # 8) Asana Webhook 存活檢查 + 自動重建
+        try:
+            from features.it_support.service import ITSupportService
+            from core.container import get_container
+            svc: ITSupportService = get_container().get(ITSupportService)
+
+            workspace_gid = svc.workspace_gid
+            project_gid = svc.project_gid
+            if not project_gid:
+                results["checks"]["asana_webhook"] = {"status": "warn", "message": "ASANA_PROJECT_GID 未設定"}
+            else:
+                webhooks = await svc.asana.list_webhooks(workspace_gid, resource_gid=project_gid)
+                active_hooks = [w for w in webhooks if w.get("active", False)]
+
+                if active_hooks:
+                    results["checks"]["asana_webhook"] = {
+                        "status": "ok",
+                        "message": f"Webhook 存活中（{len(active_hooks)} 個有效訂閱）",
+                    }
+                else:
+                    # 自動重建 webhook
+                    host = request.headers.get("Host", "")
+                    scheme = request.headers.get("X-Forwarded-Proto", "https")
+                    if host:
+                        target_url = f"{scheme}://{host}/api/asana/webhook"
+                        rebuild_result = await svc.setup_webhook(target_url)
+                        if rebuild_result.get("success"):
+                            results["checks"]["asana_webhook"] = {
+                                "status": "ok",
+                                "message": f"Webhook 已自動重建 → {target_url}",
+                            }
+                        else:
+                            results["checks"]["asana_webhook"] = {
+                                "status": "warn",
+                                "message": f"Webhook 不存在且自動重建失敗: {rebuild_result.get('error', '')}",
+                            }
+                    else:
+                        results["checks"]["asana_webhook"] = {
+                            "status": "warn",
+                            "message": "Webhook 不存在，無法推導 target_url 進行重建",
+                        }
+        except Exception as e:
+            results["checks"]["asana_webhook"] = {"status": "warn", "message": f"Webhook 檢查失敗: {e}"}
+
+        # 9) Teams 推播能力（conversation refs 數量）
+        try:
+            from app import user_conversation_refs
+            ref_count = len(user_conversation_refs)
+            if ref_count > 0:
+                results["checks"]["teams_push"] = {
+                    "status": "ok",
+                    "message": f"可推播 {ref_count} 位使用者",
+                }
+            else:
+                results["checks"]["teams_push"] = {
+                    "status": "warn",
+                    "message": "尚無使用者 conversation reference（重啟後需使用者先與 Bot 互動）",
+                }
+        except Exception as e:
+            results["checks"]["teams_push"] = {"status": "warn", "message": f"無法取得推播狀態: {e}"}
+
         # 彙總
         results["status"] = "healthy" if overall_healthy else "unhealthy"
 
