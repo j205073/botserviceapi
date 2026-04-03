@@ -40,11 +40,21 @@ class CustomBotAdapter:
         self.adapter.on_turn_error = self._on_turn_error
     
     async def _on_turn_error(self, context: TurnContext, error: Exception) -> None:
-        """Turn 錯誤處理器"""
-        logger.error("Bot Framework Turn 錯誤: %s", error)
-        
+        """Turn 錯誤處理器（未捕獲的例外才會到這裡）"""
+        logger.error("Bot Framework Turn 錯誤: %s", error, exc_info=True)
+
+        # 寄送嚴重錯誤通知
         try:
-            # 發送錯誤消息給用戶
+            from shared.utils.error_notifier import notify_critical_error
+            user_id = getattr(context.activity.from_property, "id", "unknown") if context.activity else "unknown"
+            notify_critical_error(
+                "Bot 未捕獲例外", error,
+                context=f"user={user_id}, type={getattr(context.activity, 'type', '?')}",
+            )
+        except Exception:
+            pass
+
+        try:
             await context.send_activity(
                 Activity(
                     type="message",
