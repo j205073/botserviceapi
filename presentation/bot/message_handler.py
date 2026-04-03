@@ -1261,23 +1261,50 @@ class TeamsMessageHandler:
                 except Exception:
                     continue
 
+            # 跳過 text/html 附件（Teams 的 HTML 預覽，不是檔案）
+            if ctype == "text/html":
+                continue
+
             # HTTP URL — 下載內容
             if url and str(url).startswith("http"):
                 try:
+                    # Teams 圖片 URL 可能需要 Bot Framework auth token
+                    headers = {}
+                    if "botframework.com" in str(url) or "skype.com" in str(url):
+                        try:
+                            from features.it_support.service import ITSupportService
+                            from core.container import get_container
+                            svc: ITSupportService = get_container().get(ITSupportService)
+                            token = await svc._get_botframework_token()
+                            if token:
+                                headers["Authorization"] = f"Bearer {token}"
+                        except Exception:
+                            pass
+
                     async with aiohttp.ClientSession() as session:
-                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                            self.logger.info(
+                                "Attachment download status=%d content_type=%s url_prefix=%s",
+                                resp.status, resp.content_type, str(url)[:80],
+                            )
                             if resp.status == 200:
                                 data = await resp.read()
-                                if not ctype or "vnd.microsoft" in ctype:
-                                    ctype = (resp.content_type or "").lower()
-                                if not ctype or ctype == "application/octet-stream":
+                                # 用 response header 或 magic bytes 確定真正的 mime type
+                                real_ctype = (resp.content_type or "").lower()
+                                if real_ctype and real_ctype != "application/octet-stream" and "*" not in real_ctype:
+                                    ctype = real_ctype
+                                # 如果 ctype 仍不確定（如 image/*），用 magic bytes
+                                if not ctype or ctype == "application/octet-stream" or "*" in ctype:
                                     if data.startswith(b"\x89PNG\r\n\x1a\n"): ctype = "image/png"
                                     elif data.startswith(b"\xff\xd8"): ctype = "image/jpeg"
                                     elif data.startswith(b"GIF8"): ctype = "image/gif"
+                                    elif data.startswith(b"RIFF") and b"WEBP" in data[:16]: ctype = "image/webp"
                                     elif data.startswith(b"%PDF"): ctype = "application/pdf"
                                 results.append({"bytes": data, "mime_type": ctype or "application/octet-stream", "name": name or "file"})
-                except Exception:
-                    self.logger.warning("Failed to download attachment from URL: %s", url)
+                            else:
+                                self.logger.warning("Attachment download failed status=%d url=%s", resp.status, str(url)[:100])
+                except Exception as e:
+                    self.logger.warning("Failed to download attachment: %s url=%s", e, str(url)[:100])
                     continue
 
         return results
