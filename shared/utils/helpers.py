@@ -240,9 +240,9 @@ async def get_user_email(turn_context) -> Optional[str]:
             email = getattr(member, "email", None) or getattr(member, "user_principal_name", None)
             if email:
                 return email
-        except Exception:
-            # 可能非 Teams 環境、或無權限；忽略並進入下一步
-            pass
+            logger.debug("TeamsInfo.get_member 成功但無 email 欄位")
+        except Exception as e:
+            logger.debug("TeamsInfo.get_member 失敗: %s", e)
 
         # 3) 使用 AAD Object ID 向 Graph 查詢
         try:

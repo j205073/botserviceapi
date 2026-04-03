@@ -570,6 +570,7 @@ class HelpCardBuilder(BaseCardBuilder):
                     "id": "selectedFunction",
                     "style": "compact",
                     "choices": choices,
+                    "value": choices[0]["value"] if choices else "",
                 },
             ],
             "actions": [

@@ -4,7 +4,7 @@ Teams Bot 訊息處理器
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from botbuilder.core import TurnContext
 from botbuilder.schema import Activity, ActivityTypes, SuggestedActions
 
@@ -87,7 +87,7 @@ class TeamsMessageHandler:
                 await self._handle_card_interaction(turn_context, user_info)
                 return
 
-            # 若含有附件：優先附加到 IT 工單，否則嘗試 AI 圖片解析
+            # 若含有附件：優先附加到 IT 工單，否則用 AI 解析內容
             if turn_context.activity.attachments:
                 self.logger.info(
                     "Attempting attachment handling user_mail=%s conversation_id=%s attachment_count=%d",
@@ -95,6 +95,7 @@ class TeamsMessageHandler:
                     user_info.conversation_id,
                     len(turn_context.activity.attachments or []),
                 )
+                # 有最近的 IT 工單 → 附加檔案
                 handled = await self._try_attach_images(turn_context, user_info)
                 if handled:
                     self.logger.info(
@@ -104,32 +105,18 @@ class TeamsMessageHandler:
                     )
                     return
 
-                # 沒有最近 IT 單時，嘗試用 AI 解析圖片內容
-                image_data = await self._extract_first_image(turn_context)
-                if image_data:
+                # 一般對話：用 AI 解析附件內容（圖片或檔案，支援多筆）
+                attachments = await self._extract_all_attachments(turn_context)
+                if attachments:
                     self.logger.info(
-                        "Image analysis start user_mail=%s mime=%s size=%d",
+                        "Attachment analysis start user_mail=%s count=%d",
                         user_info.user_mail,
-                        image_data["mime_type"],
-                        len(image_data["bytes"]),
+                        len(attachments),
                     )
-                    await self._handle_image_analysis(
-                        turn_context, user_info,
-                        image_data["bytes"], image_data["mime_type"],
+                    await self._handle_attachment_analysis(
+                        turn_context, user_info, attachments,
                     )
                     return
-
-                # 非圖片附件且無 IT 工單：提示使用者先建單
-                language = determine_language(user_info.user_mail)
-                hint = {
-                    "zh": "ℹ️ 如需上傳檔案至 IT 工單，請先使用 @it 建立工單，再上傳檔案。",
-                    "en": "ℹ️ To upload files to an IT ticket, please create one first with @it.",
-                    "ja": "ℹ️ ITチケットにファイルを添付するには、まず @it でチケットを作成してください。",
-                }.get(language, "ℹ️ 如需上傳檔案至 IT 工單，請先使用 @it 建立工單，再上傳檔案。")
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=hint)
-                )
-                return
 
             # 處理文字訊息
             await self._handle_text_message(turn_context, user_info)
@@ -290,6 +277,11 @@ class TeamsMessageHandler:
                         await turn_context.send_activity(upload_card)
                     except Exception:
                         pass
+                    # 提示使用者可查詢工單狀態
+                    tip = "💡 小提示：輸入 **@my-it** 可隨時查看您申請的 IT 工單處理進度。"
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=tip)
+                    )
 
                 await bot_adapter.adapter.continue_conversation(
                     conversation_ref, send_result, bot_app_id
@@ -405,6 +397,10 @@ class TeamsMessageHandler:
                         await turn_context.send_activity(upload_card)
                     except Exception:
                         pass
+                    tip = "💡 小提示：輸入 **@my-it** 可隨時查看您申請的 IT 工單處理進度。"
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=tip)
+                    )
 
                 await bot_adapter.adapter.continue_conversation(
                     conversation_ref, send_result, bot_app_id
@@ -1119,105 +1115,193 @@ class TeamsMessageHandler:
             )
             return True
 
-    async def _extract_first_image(self, turn_context: TurnContext) -> Optional[dict]:
-        """從 attachments 中提取第一張圖片的 bytes 和 mime_type。
-        Returns dict with 'bytes' and 'mime_type', or None if no image found.
+    async def _extract_all_attachments(self, turn_context: TurnContext) -> List[dict]:
+        """從 attachments 中提取所有可處理的附件。
+        使用與 _try_attach_images 相同的解析邏輯（支援 Teams 各種附件格式）。
+        Returns list of dict with 'bytes', 'mime_type', 'name'.
         """
         import base64
         import aiohttp
 
+        results = []
         for att in (turn_context.activity.attachments or []):
             ctype = (getattr(att, "content_type", None) or "").lower()
+            name = getattr(att, "name", None) or ""
+            url = getattr(att, "content_url", None) or getattr(att, "contentUrl", None)
 
             # 跳過 Adaptive Card 等非檔案附件
             if ctype.startswith("application/vnd.microsoft.card"):
                 continue
 
-            url = getattr(att, "content_url", None) or getattr(att, "contentUrl", None)
-
-            # data URL（例如 Bot Emulator 內嵌圖片）
-            if url and str(url).startswith("data:"):
-                try:
-                    header, b64data = str(url).split(",", 1)
-                    mime = "image/png"
-                    if ":" in header and ";" in header:
-                        mime = header.split(":", 1)[1].split(";", 1)[0] or mime
-                    if not mime.startswith("image/"):
-                        continue
-                    return {"bytes": base64.b64decode(b64data), "mime_type": mime}
-                except Exception:
-                    continue
-
-            # Teams file download info
+            # Teams file info attachments
             if not url and ctype == "application/vnd.microsoft.teams.file.download.info":
                 content = getattr(att, "content", None) or {}
                 if isinstance(content, dict):
                     url = content.get("downloadUrl")
-                    # Teams file info 可能不帶 image content type，需要從 fileType 推斷
+                    if not name:
+                        name = content.get("name") or name
                     ft = (content.get("fileType") or "").lower()
-                    if ft in ("png", "jpg", "jpeg", "gif", "webp", "bmp"):
-                        ctype = f"image/{ft}" if ft != "jpg" else "image/jpeg"
+                    if ft:
+                        ft_mime_map = {
+                            "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                            "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp",
+                            "pdf": "application/pdf", "txt": "text/plain",
+                            "doc": "application/msword", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            "xls": "application/vnd.ms-excel", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        }
+                        ctype = ft_mime_map.get(ft, ctype)
 
-            # HTTP URL — 僅處理圖片
-            if url and str(url).startswith("http"):
-                if not ctype.startswith("image/"):
+            # data URL（Bot Emulator 內嵌）
+            if url and str(url).startswith("data:"):
+                try:
+                    header, b64data = str(url).split(",", 1)
+                    mime = "application/octet-stream"
+                    if ":" in header and ";" in header:
+                        mime = header.split(":", 1)[1].split(";", 1)[0] or mime
+                    data_bytes = base64.b64decode(b64data)
+                    if mime == "application/octet-stream":
+                        if data_bytes.startswith(b"\x89PNG\r\n\x1a\n"): mime = "image/png"
+                        elif data_bytes.startswith(b"\xff\xd8"): mime = "image/jpeg"
+                        elif data_bytes.startswith(b"GIF8"): mime = "image/gif"
+                        elif data_bytes.startswith(b"%PDF"): mime = "application/pdf"
+                    results.append({"bytes": data_bytes, "mime_type": mime, "name": name or "file"})
                     continue
+                except Exception:
+                    continue
+
+            # HTTP URL — 下載內容
+            if url and str(url).startswith("http"):
                 try:
                     async with aiohttp.ClientSession() as session:
-                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                             if resp.status == 200:
                                 data = await resp.read()
-                                return {"bytes": data, "mime_type": ctype or "image/png"}
+                                if not ctype or "vnd.microsoft" in ctype:
+                                    ctype = (resp.content_type or "").lower()
+                                if not ctype or ctype == "application/octet-stream":
+                                    if data.startswith(b"\x89PNG\r\n\x1a\n"): ctype = "image/png"
+                                    elif data.startswith(b"\xff\xd8"): ctype = "image/jpeg"
+                                    elif data.startswith(b"GIF8"): ctype = "image/gif"
+                                    elif data.startswith(b"%PDF"): ctype = "application/pdf"
+                                results.append({"bytes": data, "mime_type": ctype or "application/octet-stream", "name": name or "file"})
                 except Exception:
-                    self.logger.warning("Failed to download image from URL: %s", url)
+                    self.logger.warning("Failed to download attachment from URL: %s", url)
                     continue
 
-        return None
+        return results
 
-    async def _handle_image_analysis(
+    async def _handle_attachment_analysis(
         self, turn_context: TurnContext, user_info: BotInteractionDTO,
-        image_bytes: bytes, mime_type: str,
+        attachments: List[dict],
     ) -> None:
-        """使用 GPT-4o Vision 解析使用者貼上的圖片內容"""
+        """用 AI 解析使用者上傳的附件（圖片用 Vision，文件用文字擷取）。支援多筆附件。"""
         import base64
 
-        b64 = base64.b64encode(image_bytes).decode("utf-8")
-        data_url = f"data:{mime_type};base64,{b64}"
-
-        # 使用者附帶的文字作為 prompt（沒有就用預設）
         user_text = (user_info.message_text or "").strip()
-        prompt = user_text if user_text else "請描述這張圖片的內容。如果是錯誤截圖，請說明可能的問題和建議解法。"
+        openai_client = self.conversation_service.openai_client
+        vision_model = self.config.openai.vision_model
 
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            }
-        ]
+        # 分離圖片與文件
+        images = [a for a in attachments if a["mime_type"].startswith("image/")]
+        files = [a for a in attachments if not a["mime_type"].startswith("image/")]
 
         try:
-            # 使用支援 vision 的模型（從設定讀取，預設 gpt-4o）
-            openai_client = self.conversation_service.openai_client
-            vision_model = self.config.openai.vision_model
-            response = await openai_client.chat_completion(
-                messages=messages,
-                model=vision_model,
-                max_tokens=1000,
-            )
-            await turn_context.send_activity(
-                Activity(type=ActivityTypes.message, text=response)
-            )
-        except Exception:
-            self.logger.exception("圖片解析失敗 user_mail=%s", user_info.user_mail)
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message,
-                    text="❌ 圖片解析失敗，請稍後再試。",
+            # --- 有圖片：用 Vision 一次送所有圖片 ---
+            if images:
+                prompt = user_text if user_text else "請描述這些圖片的內容。如果是錯誤截圖，請說明可能的問題和建議解法。"
+                content_parts = [{"type": "text", "text": prompt}]
+                for img in images:
+                    b64 = base64.b64encode(img["bytes"]).decode("utf-8")
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{img['mime_type']};base64,{b64}"},
+                    })
+
+                messages = [{"role": "user", "content": content_parts}]
+                response = await openai_client.chat_completion(
+                    messages=messages, model=vision_model, max_tokens=1500,
                 )
-            )
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=response)
+                )
+
+            # --- 有文件：逐一擷取文字，合併後送 AI ---
+            if files:
+                all_texts = []
+                unsupported = []
+                for f in files:
+                    file_text = self._extract_text_from_file(f["bytes"], f["mime_type"], f["name"])
+                    if file_text:
+                        all_texts.append(f"📄 **{f['name']}**\n{file_text}")
+                    else:
+                        unsupported.append(f["name"])
+
+                if unsupported:
+                    await turn_context.send_activity(Activity(
+                        type=ActivityTypes.message,
+                        text=f"⚠️ 無法解析：{', '.join(unsupported)}。目前支援圖片、PDF、Word、Excel、純文字檔。",
+                    ))
+
+                if all_texts:
+                    combined = "\n\n---\n\n".join(all_texts)
+                    max_chars = 12000
+                    if len(combined) > max_chars:
+                        combined = combined[:max_chars] + "\n\n...（內容過長，已截斷）"
+                    prompt = user_text if user_text else "以下是上傳檔案的內容，請分析並摘要重點："
+                    messages = [{"role": "user", "content": f"{prompt}\n\n---\n{combined}"}]
+                    response = await openai_client.chat_completion(
+                        messages=messages, max_tokens=1500,
+                    )
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text=response)
+                    )
+
+        except Exception:
+            names = ", ".join(a["name"] for a in attachments)
+            self.logger.exception("附件解析失敗 user_mail=%s files=%s", user_info.user_mail, names)
+            await turn_context.send_activity(Activity(
+                type=ActivityTypes.message, text="❌ 檔案解析失敗，請稍後再試。",
+            ))
+
+    def _extract_text_from_file(self, data: bytes, mime: str, name: str) -> Optional[str]:
+        """從檔案 bytes 中擷取文字內容"""
+        try:
+            # PDF
+            if mime == "application/pdf" or name.lower().endswith(".pdf"):
+                from PyPDF2 import PdfReader
+                import io
+                reader = PdfReader(io.BytesIO(data))
+                pages = [p.extract_text() or "" for p in reader.pages[:20]]
+                return "\n".join(pages).strip() or None
+
+            # Word (.docx)
+            if "wordprocessingml" in mime or name.lower().endswith(".docx"):
+                from docx import Document
+                import io
+                doc = Document(io.BytesIO(data))
+                return "\n".join(p.text for p in doc.paragraphs).strip() or None
+
+            # Excel (.xlsx)
+            if "spreadsheetml" in mime or name.lower().endswith(".xlsx"):
+                import openpyxl
+                import io
+                wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+                lines = []
+                for ws in wb.worksheets[:3]:  # 最多讀 3 個 sheet
+                    lines.append(f"[Sheet: {ws.title}]")
+                    for row in ws.iter_rows(max_row=100, values_only=True):
+                        cells = [str(c) if c is not None else "" for c in row]
+                        lines.append("\t".join(cells))
+                return "\n".join(lines).strip() or None
+
+            # 純文字
+            if mime.startswith("text/") or name.lower().endswith((".txt", ".csv", ".log", ".json", ".xml")):
+                return data.decode("utf-8", errors="replace").strip() or None
+
+        except Exception as e:
+            self.logger.warning("擷取檔案文字失敗 name=%s: %s", name, e)
+
+        return None
 
     async def _send_welcome_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
