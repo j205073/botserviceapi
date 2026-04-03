@@ -35,6 +35,7 @@ class EmailNotifier:
         task_name: str,
         permalink_url: str = "",
         comments: str = "",
+        description: str = "",
     ) -> MIMEMultipart:
         """建立任務完成通知郵件"""
         msg = MIMEMultipart("alternative")
@@ -49,8 +50,10 @@ class EmailNotifier:
             f"  單號：{issue_id}\n"
             f"  摘要：{task_name}\n"
         )
+        if description:
+            text_body += f"\n📄 您當初提交的需求內容：\n{description}\n"
         if comments:
-            text_body += f"\n溝通評論：\n{comments}\n"
+            text_body += f"\n💬 處理評論：\n{comments}\n"
         if permalink_url:
             text_body += f"  連結：{permalink_url}\n"
         text_body += (
@@ -66,6 +69,20 @@ class EmailNotifier:
                 f'<a href="{permalink_url}" style="background-color: #0052CC; color: #ffffff; '
                 f'padding: 12px 24px; text-decoration: none; border-radius: 6px; '
                 f'font-weight: 600; display: inline-block;">查看任務詳情</a>'
+                f'</div>'
+            )
+
+        # 原始提交內容區塊
+        description_section = ""
+        if description:
+            import html as html_mod
+            desc_html = html_mod.escape(description).replace("\n", "<br>")
+            description_section = (
+                f'<div style="margin: 24px 0;">'
+                f'<p style="color: #172B4D; font-size: 15px; font-weight: 600; margin: 0 0 12px;">📄 您當初提交的需求內容</p>'
+                f'<div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 16px 20px;">'
+                f'<p style="color: #42526E; font-size: 14px; line-height: 1.6; margin: 0; white-space: pre-wrap;">{desc_html}</p>'
+                f'</div>'
                 f'</div>'
             )
 
@@ -124,6 +141,8 @@ class EmailNotifier:
         </table>
       </div>
 
+      {description_section}
+
       {comments_section}
 
       {link_button}
@@ -156,6 +175,7 @@ class EmailNotifier:
         task_name: str,
         permalink_url: str = "",
         comments: str = "",
+        description: str = "",
     ) -> bool:
         """發送任務完成通知郵件。回傳 True 表示成功。"""
         if not self.smtp_user or not self.smtp_password:
@@ -163,7 +183,7 @@ class EmailNotifier:
             return False
 
         try:
-            msg = self._build_completion_email(to_email, issue_id, task_name, permalink_url, comments)
+            msg = self._build_completion_email(to_email, issue_id, task_name, permalink_url, comments, description)
 
             # 使用 STARTTLS 連線（Office 365 port 25/587）
             import asyncio
@@ -212,6 +232,7 @@ class EmailNotifier:
         created_at: str,
         permalink_url: str = "",
         reporter_name: str = "",
+        description: str = "",
     ) -> MIMEMultipart:
         """建立提單確認通知郵件"""
         msg = MIMEMultipart("alternative")
@@ -231,6 +252,8 @@ class EmailNotifier:
             f"  🔺 優先順序：{priority}\n"
             f"  🕐 提交時間：{created_at}\n"
         )
+        if description:
+            text_body += f"\n📄 您提交的需求內容：\n{description}\n"
         if permalink_url:
             text_body += f"  🔗 Asana 連結：{permalink_url}\n"
         text_body += (
@@ -248,6 +271,20 @@ class EmailNotifier:
                 f'<a href="{permalink_url}" style="background-color: #0052CC; color: #ffffff; '
                 f'padding: 12px 24px; text-decoration: none; border-radius: 6px; '
                 f'font-weight: 600; display: inline-block;">進入任務中心</a>'
+                f'</div>'
+            )
+
+        # 需求內容區塊
+        description_section = ""
+        if description:
+            import html as html_mod
+            desc_html = html_mod.escape(description).replace("\n", "<br>")
+            description_section = (
+                f'<div style="margin: 24px 0;">'
+                f'<p style="color: #172B4D; font-size: 15px; font-weight: 600; margin: 0 0 12px;">📄 您提交的需求內容</p>'
+                f'<div style="background-color: #FAFBFC; border: 1px solid #DFE1E6; border-radius: 8px; padding: 16px 20px;">'
+                f'<p style="color: #42526E; font-size: 14px; line-height: 1.6; margin: 0; white-space: pre-wrap;">{desc_html}</p>'
+                f'</div>'
                 f'</div>'
             )
 
@@ -296,6 +333,8 @@ class EmailNotifier:
         </table>
       </div>
 
+      {description_section}
+
       {link_button}
 
       <div style="background-color: #EBF5FB; border-left: 4px solid #0052CC; padding: 20px; border-radius: 4px; margin-top: 32px;">
@@ -328,6 +367,7 @@ class EmailNotifier:
         permalink_url: str = "",
         reporter_name: str = "",
         cc_email: str = "",
+        description: str = "",
     ) -> bool:
         """發送提單確認通知郵件。可選 cc_email 用於 @itt 代提單時 CC 給提出人。回傳 True 表示成功。"""
         if not self.smtp_user or not self.smtp_password:
@@ -337,7 +377,7 @@ class EmailNotifier:
         try:
             msg = self._build_submission_email(
                 to_email, issue_id, summary, category, priority,
-                created_at, permalink_url, reporter_name,
+                created_at, permalink_url, reporter_name, description,
             )
 
             # 若有 CC 收件人，加入 Cc header

@@ -258,6 +258,7 @@ class ITSupportService:
                         permalink_url="",
                         reporter_name=reporter_name,
                         cc_email=cc_target,
+                        description=description,
                     )
                     print(f"📧 提單確認 Email → {reporter_email}: {'✅ 成功' if email_ok else '❌ 失敗'}")
                 except Exception as mail_err:
@@ -549,6 +550,19 @@ class ITSupportService:
 
         logger.info("✅ 提單信息: issue_id=%s, reporter=%s, task=%s", issue_id, reporter_email, task_name)
 
+        # 0) 從 notes 解析原始提交內容（排除知識庫區塊）
+        original_description = ""
+        task_notes = task.get("notes", "")
+        if "【需求/問題說明】" in task_notes:
+            desc_start = task_notes.index("【需求/問題說明】") + len("【需求/問題說明】")
+            desc_end = len(task_notes)
+            for marker in ["【AI 分析", "【知識庫參考"]:
+                if marker in task_notes[desc_start:]:
+                    marker_pos = task_notes.index(marker, desc_start)
+                    if marker_pos < desc_end:
+                        desc_end = marker_pos
+            original_description = task_notes[desc_start:desc_end].strip()
+
         # 1) 抓取對話評論內容
         comments_str = ""
         try:
@@ -572,7 +586,7 @@ class ITSupportService:
         # 2) Teams 通知
         await self._send_teams_notification(reporter_email, issue_id, task_name, permalink, comments_str)
         # 3) Email 通知
-        await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink, comments_str)
+        await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink, comments_str, original_description)
 
         # 4) 處理 IT 知識庫
         if self.knowledge_base:
