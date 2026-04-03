@@ -4,7 +4,8 @@ botbuilder-schema==4.16.2
 botbuilder-integration-aiohttp==4.16.2
 aiohttp==3.10.5
 
-# Web framework (ASGI)
+# Web framework (ASGI) — Quart 依賴 Flask，需釘版避免 Flask 3.1+ 不相容
+flask==3.0.0
 Quart==0.19.4
 hypercorn==0.15.0
 
