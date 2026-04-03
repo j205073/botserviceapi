@@ -15,6 +15,12 @@ TR GPT Bot 變更紀錄（2026-03-01 ~ 2026-04-03）
 - **n8n Health Check 工作流程** — 每 5 分鐘監控，異常時寄發告警 Email（含各項目狀態明細）
 - **Email 完成通知附件圖片** — Asana 任務的附件圖片透過 `cid:` 內嵌到 Email（零暫存），Teams 推播用原始 URL 顯示
 - **Email 通知加入需求內容** — 提單確認 Email 包含使用者原始問題描述；完成通知 Email 包含原始提交內容 + Asana 評論（排除知識庫區塊）
+- **對話附件 AI 解析** — 使用者在一般對話中傳圖片或檔案，Bot 自動解析內容回覆：
+  - 圖片：GPT-4o Vision 描述/分析（支援多張同時送）
+  - 文件：擷取文字後 AI 摘要（支援 PDF、Word、Excel、純文字）
+  - 有 IT 工單時優先附加到 Asana，無工單時走 AI 解析
+- **嚴重錯誤 Email 通知** — 啟動失敗、Bot 未捕獲例外、背景任務崩潰時自動寄信通知管理員（10 分鐘冷卻防爆量）
+- **IT 提單完成提示** — `@it` / `@itt` 提單成功後顯示「輸入 @itls 查看工單進度」
 
 ### 改進
 
@@ -22,6 +28,33 @@ TR GPT Bot 變更紀錄（2026-03-01 ~ 2026-04-03）
 - **Asana 工單查詢改用 Project Tasks API** — 避免 Search API 的付費方案限制（402 Payment Required）
 - **移除使用者通知中的 Asana 連結** — Teams 推播和 Email 完成通知不再顯示「查看任務詳情」（使用者無 Asana 帳號）
 - **SMTP 日誌改用 logger** — 移除 print emoji，解決 Windows cp950 編碼錯誤
+- **IT Support 模組融入 DI 架構** — `ITSupportService` 改為 constructor injection，支援 mock 測試
+- **IT Support 設定集中管理** — 新增 `ITSupportConfig`，Asana GID 等設定從 `os.getenv` 搬到 `AppConfig`
+- **全域 logging 統一** — 16 個核心檔案的 `print()` 統一替換為 `logging` 模組（info/warning/error/debug）
+- **OpenAI Client 支援多模態** — `chat_completion` type hint 擴充支援 vision 格式（image_url）
+- **歡迎選單預設值** — 功能下拉選單預設選第一個選項，不再顯示空白
+- **Azure 健康檢查** — 設定 `/ping` 為 health check path，服務異常時自動重啟
+
+### 清理
+
+- **移除死碼** — 刪除 `app_bak.py`、`app copy.py`、root 層 legacy modules（`token_manager.py`、`s3_manager.py`、`graph_api.py`）、未使用的 `check_webhooks.py`、`refresh_webhook.py`
+- **移除 `app.py` 死函式** — `get_user_pending_todos()`、`call_openai()` 無引用已移除
+- **移除未使用虛擬環境** — 刪除 `myenv`（Linux 環境用，Windows 不需要）
+- **移除未使用套件** — `pandas` 從 requirements.txt 移除（專案無 import）
+- **移除 GEMINI.md** — 不再需要
+
+### 測試
+
+- **建立 pytest 測試框架** — `pytest.ini`、`tests/` 目錄結構、conftest.py
+- **30 個單元測試** — 涵蓋 IT 分類器（12 類）、意圖解析/正規化、Asana notes 解析
+- **測試依賴分離** — pytest 移至 `requirements-dev.txt`，不裝到 production
+- **Git pre-push hook** — push 前自動跑測試，失敗阻止 push
+
+### 修復
+
+- **Flask 版本釘回 3.0.0** — Quart 0.19.4 依賴 Flask，未釘版導致 Azure 裝 Flask 3.1+ 啟動崩潰
+- **Asana GID 預設值恢復** — DI 重構時誤改為空字串，導致 Asana API 400 錯誤
+- **helpers.py Graph API 遷移** — `get_user_email()` 改用 DI 容器的 `GraphAPIClient` 取代已刪除的 legacy module
 
 ---
 
@@ -94,11 +127,3 @@ TR GPT Bot 變更紀錄（2026-03-01 ~ 2026-04-03）
 
 ---
 
-## 未提交（本地修改中）
-
-以下功能已開發完成，尚未 commit：
-
-- **健康檢查擴充至 9 項** — 新增 OpenAI API、Graph API、環境設定、Asana Webhook、Teams 推播檢查
-- **Asana Webhook 自動重建** — health check 發現 webhook 不存在時自動重建
-- **附件圖片內嵌 Email** — Asana 任務附件圖片透過 cid: 內嵌到完成通知 Email
-- **n8n 工作流程更新** — 修正 URL、優化 Email 模板、動態列出各項檢查結果
