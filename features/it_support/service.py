@@ -564,10 +564,18 @@ class ITSupportService:
         # Fallback to keyword classifier
         return self.classifier.classify(description)
 
-    def get_recent_task_gid(self, user_email: str) -> str | None:
+    def get_recent_task_gid(self, user_email: str, max_age_minutes: int = 10) -> str | None:
+        """取得使用者最近建立的 IT 工單 GID。
+        超過 max_age_minutes 分鐘的工單不視為「最近」，避免一般對話附件被誤攔。
+        """
         item = self._recent_task_by_user.get(user_email)
         if not item:
             return None
+        created_at = item.get("ts")
+        if created_at:
+            elapsed = (datetime.now(timezone.utc) - created_at).total_seconds()
+            if elapsed > max_age_minutes * 60:
+                return None
         return item.get("gid")
 
     # ── Webhook 處理 ──────────────────────────────────────────────
