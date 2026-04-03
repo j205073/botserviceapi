@@ -19,6 +19,7 @@
 - Presentation/Bot/UI 僅處理 I/O 與資料展示；業務流程盡量封裝在 ApplicationService
   （或領域服務）中，讓行為可被多種介面重用。
 """
+import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -33,6 +34,8 @@ from infrastructure.external.s3_client import S3Client
 from config.settings import AppConfig
 from shared.exceptions import BusinessLogicError
 from shared.utils.helpers import get_taiwan_time
+
+logger = logging.getLogger(__name__)
 
 
 class ApplicationService:
@@ -145,7 +148,7 @@ class ApplicationService:
             
         except Exception as e:
             error_msg = f"處理用戶訊息失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             
             # 記錄錯誤到稽核日誌
             await self.audit_service.log_message(conversation_id, {

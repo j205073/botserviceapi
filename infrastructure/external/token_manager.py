@@ -3,6 +3,7 @@ OAuth Token 管理器
 處理 Microsoft Graph API 的認證和 Token 管理
 """
 import asyncio
+import logging
 from typing import Optional, Dict, Any
 import aiohttp
 import time
@@ -10,6 +11,8 @@ from datetime import datetime, timedelta
 
 from config.settings import AppConfig
 from shared.exceptions import AuthenticationError
+
+logger = logging.getLogger(__name__)
 
 
 class TokenManager:
@@ -81,7 +84,7 @@ class TokenManager:
                     # 設置過期時間
                     self._token_expires_at = time.time() + expires_in
                     
-                    print(f"✅ 成功獲取 Access Token，有效期：{expires_in} 秒")
+                    logger.info("成功獲取 Access Token，有效期：%s 秒", expires_in)
                     
         except aiohttp.ClientError as e:
             raise AuthenticationError(f"網路請求失敗: {str(e)}") from e
@@ -135,11 +138,11 @@ class TokenManager:
                 self._access_token = None
                 self._token_expires_at = None
             
-            print("✅ Token 快取已清除")
+            logger.info("Token 快取已清除")
             return True
             
         except Exception as e:
-            print(f"❌ 撤銷 Token 失敗: {e}")
+            logger.error("撤銷 Token 失敗: %s", e)
             return False
     
     def get_token_info(self) -> Dict[str, Any]:

@@ -3,6 +3,7 @@
 重構自原始 app.py 的 analyze_user_intent 函數
 """
 
+import logging
 from typing import Dict, Any, Optional
 import json
 import re
@@ -12,6 +13,8 @@ from config.settings import AppConfig
 from infrastructure.external.openai_client import OpenAIClient
 from shared.exceptions import OpenAIServiceError
 from shared.utils.helpers import clean_json_response, extract_json_from_text
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -78,8 +81,8 @@ class IntentService:
             # 選擇適當的模型
             model_name = self._get_intent_model()
 
-            print(f"🤖 [意圖分析] 使用模型: {model_name}")
-            print(f"📝 [意圖分析] 用戶輸入: {user_message}")
+            logger.debug("[意圖分析] 使用模型: %s", model_name)
+            logger.debug("[意圖分析] 用戶輸入: %s", user_message)
 
             # 構建訊息
             messages = self._build_messages(system_prompt, user_message, model_name)
@@ -92,22 +95,19 @@ class IntentService:
                 temperature=0.1 if not model_name.startswith("o1") else None,
             )
 
-            print(f"🎯 [意圖分析] AI回應: {response_text}")
-            print(f"📏 [意圖分析] 回應長度: {len(response_text)} 字符")
+            logger.debug("[意圖分析] AI回應: %s", response_text)
+            logger.debug("[意圖分析] 回應長度: %d 字符", len(response_text))
 
             # 解析回應
             result = self._parse_intent_response(response_text)
 
-            print(f"✅ [意圖分析] 解析成功:")
-            print(f"   類別: {result.category}")
-            print(f"   動作: {result.action}")
-            print(f"   現有功能: {result.is_existing_feature}")
-            print(f"   信心度: {result.confidence}")
+            logger.info("[意圖分析] 解析成功: 類別=%s 動作=%s 現有功能=%s 信心度=%s",
+                        result.category, result.action, result.is_existing_feature, result.confidence)
 
             return result
 
         except Exception as e:
-            print(f"❌ [意圖分析] 失敗: {str(e)}")
+            logger.error("[意圖分析] 失敗: %s", e)
             return IntentResult(
                 is_existing_feature=False,
                 category="",

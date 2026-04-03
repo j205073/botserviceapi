@@ -243,7 +243,7 @@ class APIRoutes:
                     )
                     success_count += 1
                 except Exception as e:
-                    print(f"推播給 {email} 失敗: {str(e)}")
+                    logging.getLogger(__name__).warning("推播給 %s 失敗: %s", email, e)
                     fail_count += 1
 
             return jsonify({
@@ -257,7 +257,7 @@ class APIRoutes:
             })
 
         except Exception as e:
-            print(f"❌ 廣播訊息失敗: {str(e)}")
+            logging.getLogger(__name__).error("廣播訊息失敗: %s", e)
             return jsonify({"success": False, "error": str(e)}), 500
     
     async def ping(self):
@@ -703,7 +703,7 @@ class APIRoutes:
     async def messages(self):
         """Bot 訊息處理端點"""
         try:
-            print("=== 開始處理訊息 ===")
+            logging.getLogger(__name__).info("開始處理訊息")
             
             # 檢查Content-Type
             if "application/json" not in request.headers.get("Content-Type", ""):
@@ -711,12 +711,12 @@ class APIRoutes:
             
             # 獲取請求體
             body = await request.get_json()
-            print(f"請求內容: {json.dumps(body, ensure_ascii=False, indent=2)}")
+            logging.getLogger(__name__).debug("請求內容: %s", json.dumps(body, ensure_ascii=False, indent=2))
             
             # 獲取Authorization header
             auth_header = request.headers.get("Authorization", "")
-            print(f"Authorization header: {auth_header[:50] if auth_header else '(空白)'}")
-            print(f"Current Bot App ID: {self.config.bot.app_id or '(空白)'}")
+            logging.getLogger(__name__).debug("Authorization header: %s", auth_header[:50] if auth_header else '(空白)')
+            logging.getLogger(__name__).debug("Current Bot App ID: %s", self.config.bot.app_id or '(空白)')
             
             # 檢查是否有Bot適配器
             if not self.bot_adapter:
@@ -725,11 +725,11 @@ class APIRoutes:
             # 處理Bot Framework活動
             result = await self.bot_adapter.process_activity(body, auth_header)
             
-            print("=== 訊息處理完成 ===")
+            logging.getLogger(__name__).info("訊息處理完成")
             return {"status": 200}
             
         except Exception as e:
-            print(f"❌ Error processing message: {str(e)}")
+            logging.getLogger(__name__).error("Error processing message: %s", e)
             return {"status": 500}
 
     async def asana_webhook(self):

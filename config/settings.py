@@ -2,9 +2,12 @@
 應用程式配置管理
 """
 import os
+import logging
 from dataclasses import dataclass
 from typing import Optional
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,6 +27,7 @@ class OpenAIConfig:
     model: str
     intent_model: str
     summary_model: str
+    vision_model: str
     max_tokens: int
     temperature: float
     timeout: int
@@ -62,6 +66,39 @@ class TaskConfig:
 
 
 @dataclass
+class ITSupportConfig:
+    """IT Support 相關配置"""
+    enable_ai_analysis: bool
+    analysis_model: str
+    workspace_gid: str
+    project_gid: str
+    assignee_gid: str
+    assignee_section_gid: str
+    onboarding_assignee_email: str
+    priority_tag_map: dict
+    default_priority_tag_gid: str
+
+    @classmethod
+    def from_env(cls) -> "ITSupportConfig":
+        return cls(
+            enable_ai_analysis=os.getenv("ENABLE_IT_AI_ANALYSIS", "false").strip().lower() == "true",
+            analysis_model=os.getenv("IT_ANALYSIS_MODEL", "gpt-5-nano").strip(),
+            workspace_gid=os.getenv("ASANA_WORKSPACE_GID", ""),
+            project_gid=os.getenv("ASANA_PROJECT_GID", ""),
+            assignee_gid=os.getenv("ASANA_ASSIGNEE_GID", ""),
+            assignee_section_gid=os.getenv("ASANA_ASSIGNEE_SECTION_GID", ""),
+            onboarding_assignee_email=os.getenv("ASANA_ONBOARDING_ASSIGNEE_EMAIL", "").strip(),
+            priority_tag_map={
+                "P1": os.getenv("ASANA_TAG_P1", "").strip(),
+                "P2": os.getenv("ASANA_TAG_P2", "").strip(),
+                "P3": os.getenv("ASANA_TAG_P3", "").strip(),
+                "P4": os.getenv("ASANA_TAG_P4", "").strip(),
+            },
+            default_priority_tag_gid=os.getenv("ASANA_PRIORITY_TAG_GID", "").strip(),
+        )
+
+
+@dataclass
 class AppConfig:
     """應用程式總配置"""
     debug_mode: bool
@@ -75,6 +112,7 @@ class AppConfig:
     s3: S3Config
     graph_api: GraphAPIConfig
     tasks: TaskConfig
+    it_support: ITSupportConfig
     
     @classmethod
     def from_env(cls) -> 'AppConfig':
@@ -99,6 +137,7 @@ class AppConfig:
                 model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
                 intent_model=os.getenv("OPENAI_INTENT_MODEL", "gpt-4o-mini"),
                 summary_model=os.getenv("OPENAI_SUMMARY_MODEL", "gpt-4o-mini"),
+                vision_model=os.getenv("OPENAI_VISION_MODEL", "gpt-4o"),
                 max_tokens=int(os.getenv("MAX_TOKENS", "4000")),
                 temperature=float(os.getenv("TEMPERATURE", "0.7")),
                 timeout=int(os.getenv("OPENAI_TIMEOUT", "30"))
@@ -125,7 +164,9 @@ class AppConfig:
             tasks=TaskConfig(
                 s3_upload_hour=int(os.getenv("S3_UPLOAD_HOUR", "7")),
                 todo_reminder_interval_seconds=int(os.getenv("TODO_REMINDER_INTERVAL_SECONDS", "3600"))
-            )
+            ),
+
+            it_support=ITSupportConfig.from_env()
         )
     
     def validate(self) -> list[str]:
@@ -177,9 +218,9 @@ def get_config() -> AppConfig:
         # 驗證配置
         errors = config.validate()
         if errors:
-            print("配置驗證失敗:")
+            logger.warning("配置驗證失敗:")
             for error in errors:
-                print(f"  - {error}")
+                logger.warning("  - %s", error)
             # 在開發模式下可以繼續運行，生產模式下應該拋出異常
             if not config.debug_mode:
                 raise ValueError("配置不完整，無法啟動應用程式")

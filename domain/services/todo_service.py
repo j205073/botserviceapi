@@ -2,6 +2,7 @@
 待辦事項業務邏輯服務
 重構自原始 app.py 中的待辦事項相關功能
 """
+import logging
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 
@@ -10,6 +11,8 @@ from domain.repositories.todo_repository import TodoRepository
 from config.settings import AppConfig
 from shared.exceptions import BusinessLogicError, NotFoundError
 from shared.utils.helpers import get_taiwan_time
+
+logger = logging.getLogger(__name__)
 
 
 class TodoSimilarityAnalyzer:
@@ -199,7 +202,7 @@ class TodoService:
                     completed_todo = await self.complete_todo(todo.id, user_mail)
                     completed_todos.append(completed_todo)
                 except Exception as e:
-                    print(f"完成待辦事項 {todo.id} 失敗: {e}")
+                    logger.warning("完成待辦事項 %s 失敗: %s", todo.id, e)
         
         return completed_todos
     

@@ -2,8 +2,12 @@
 依賴注入配置
 註冊所有服務到容器中
 """
+import logging
+
 from core.container import Container, ServiceProvider
 from config.settings import AppConfig, get_config
+
+logger = logging.getLogger(__name__)
 
 
 class CoreServiceProvider(ServiceProvider):
@@ -101,7 +105,28 @@ class ApplicationServiceProvider(ServiceProvider):
         container.register_singleton(ApplicationService)
         container.register_singleton(BotCommandHandler)
         container.register_singleton(TeamsMessageHandler)
-        container.register_singleton(ITSupportService)
+
+        # IT Support 使用 factory 以注入集中式設定
+        def create_it_support_service():
+            from features.it_support.asana_client import AsanaClient
+            from features.it_support.intent_classifier import ITIntentClassifier
+            from features.it_support.email_notifier import EmailNotifier
+            from features.it_support.kb_client import KBVectorClient
+            from infrastructure.external.graph_api_client import GraphAPIClient
+            from features.it_support.knowledge_base import ITKnowledgeBase
+
+            cfg = container.get(AppConfig)
+            graph_client = container.get(GraphAPIClient)
+            return ITSupportService(
+                asana=AsanaClient(),
+                classifier=ITIntentClassifier(),
+                email_notifier=EmailNotifier(),
+                kb_client=KBVectorClient(),
+                knowledge_base=ITKnowledgeBase(graph_client),
+                config=cfg.it_support,
+            )
+
+        container.register_factory(ITSupportService, create_it_support_service)
         
         # 註冊 API 路由工廠
         def create_routes():
@@ -152,5 +177,5 @@ def setup_dependency_injection() -> Container:
     container = get_container()
     configure_all_services(container)
     
-    print("✅ 依賴注入配置完成")
+    logger.info("依賴注入配置完成")
     return container

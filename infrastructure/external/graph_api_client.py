@@ -4,6 +4,7 @@ Microsoft Graph API 客戶端封裝
 """
 
 import asyncio
+import logging
 from typing import List, Dict, Any, Optional
 import re
 import aiohttp
@@ -14,6 +15,8 @@ from config.settings import AppConfig
 from shared.exceptions import GraphAPIError, AuthenticationError
 from shared.utils.helpers import AsyncRetry
 from infrastructure.external.token_manager import TokenManager
+
+logger = logging.getLogger(__name__)
 
 
 class GraphAPIClient:
@@ -288,7 +291,7 @@ class GraphAPIClient:
                 return None
 
         except Exception as e:
-            print(f"獲取用戶照片失敗: {e}")
+            logger.warning("獲取用戶照片失敗: %s", e)
             return None
 
     async def list_meeting_rooms(self) -> List[Dict[str, Any]]:

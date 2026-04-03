@@ -1,23 +1,23 @@
-﻿# Bot Framework dependencies
+# Bot Framework dependencies
 botbuilder-core==4.16.2
 botbuilder-schema==4.16.2
 botbuilder-integration-aiohttp==4.16.2
 aiohttp==3.10.5
 
-# Web framework
-flask==3.0.0
+# Web framework (ASGI)
+Quart==0.19.4
+hypercorn==0.15.0
 
 # Azure OpenAI
-openai>=1.0.0
+openai~=1.107.0
 
 # HTTP handling
 requests==2.31.0
 urllib3==2.0.7
+httpx==0.25.2
 
 # Environment variables
 python-dotenv==1.0.0
-
-
 
 # Date and time handling
 pytz==2024.1
@@ -28,35 +28,31 @@ pyOpenSSL==24.0.0
 # Security
 cryptography==42.0.0
 
-# Azure specific
+# Azure / Microsoft Auth
 msrest==0.7.1
 azure-core==1.29.5
+msal~=1.33.0
 
-# Optional but recommended for production
+# Production WSGI server (Azure fallback)
 gunicorn==21.2.0
 
-# 檔案處理
+# File handling
 python-docx==1.1.0
 openpyxl==3.1.2
 PyPDF2==3.0.1
 Pillow==10.1.0
 pandas==2.1.4
 
+# Async support
+anyio==4.2.0
+h11==0.14.0
+wsproto==1.2.0
 
-# Async support azure不用安裝
-# asyncio==3.4.3
+# AWS S3
+boto3~=1.40.0
+botocore~=1.40.0
+pyzipper==0.3.6
 
-# 新增的非同步相關依賴
-Quart==0.19.4
-hypercorn==0.15.0
-httpx==0.25.2  # 用於非同步 HTTP 請求
-anyio==4.2.0   # 非同步 I/O 支援
-
-# 新增的 ASGI 相關
-h11==0.14.0    # HTTP/1.1 協議實作
-wsproto==1.2.0 # WebSocket 協議支援
-
-# AWS S3 支援
-boto3>=1.26.0
-botocore>=1.29.0
-pyzipper>=0.3.6
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.23.0

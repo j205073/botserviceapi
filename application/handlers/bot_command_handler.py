@@ -2,9 +2,12 @@
 Bot 命令處理器
 處理所有 @command 格式的命令
 """
+import logging
 from typing import Dict, Any, Callable, Awaitable
 from botbuilder.core import TurnContext
 from botbuilder.schema import Activity, ActivityTypes
+
+logger = logging.getLogger(__name__)
 
 from application.dtos.bot_dtos import BotInteractionDTO, CommandExecutionDTO
 from domain.services.todo_service import TodoService
@@ -71,7 +74,7 @@ class BotCommandHandler:
                 )
             )
         except Exception as e:
-            print(f"處理命令時發生錯誤: {e}")
+            logger.error("處理命令時發生錯誤: %s", e)
             await turn_context.send_activity(
                 Activity(
                     type=ActivityTypes.message,

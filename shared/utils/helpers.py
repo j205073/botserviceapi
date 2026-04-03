@@ -5,9 +5,12 @@ import re
 import time
 import json
 import asyncio
+import logging
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 import pytz
+
+logger = logging.getLogger(__name__)
 
 
 # 台灣時區
@@ -113,7 +116,7 @@ class AsyncRetry:
                     if attempt == self.max_attempts - 1:
                         break
                     
-                    print(f"嘗試 {attempt + 1} 失敗: {str(e)}, {current_delay:.1f}秒後重試")
+                    logger.warning("嘗試 %d 失敗: %s, %.1f秒後重試", attempt + 1, e, current_delay)
                     await asyncio.sleep(current_delay)
                     current_delay *= self.backoff
             
@@ -171,7 +174,7 @@ class PerformanceTimer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         end_time = time.time()
         duration = end_time - self.start_time
-        print(f"⏱️ {self.name} 耗時: {format_duration(duration)}")
+        logger.info("%s 耗時: %s", self.name, format_duration(duration))
 
 
 def create_error_response(
@@ -245,32 +248,21 @@ async def get_user_email(turn_context) -> Optional[str]:
         try:
             aad_object_id = getattr(turn_context.activity.from_property, "aad_object_id", None)
             if aad_object_id:
-                # 透過組態建立 Graph API 用戶端（避免與 GraphAPIClient 的雙向依賴）
                 from core.container import get_container
-                from config.settings import AppConfig
-                from token_manager import TokenManager as LegacyTokenManager
-                from graph_api import GraphAPI
+                from infrastructure.external.graph_api_client import GraphAPIClient
 
                 container = get_container()
-                cfg: AppConfig = container.get(AppConfig)
-
-                tm = LegacyTokenManager(
-                    cfg.graph_api.tenant_id,
-                    cfg.graph_api.client_id,
-                    cfg.graph_api.client_secret,
-                )
-                graph = GraphAPI(tm)
-                user = await graph.get_user_info(aad_object_id)
+                graph_client: GraphAPIClient = container.get(GraphAPIClient)
+                user = await graph_client.get_user_info(aad_object_id)
                 email = user.get("mail") or user.get("userPrincipalName")
                 if email:
                     return email
-        except Exception:
-            # Graph 無法連線或權限不足時忽略
-            pass
+        except Exception as e:
+            logger.debug("AAD Graph 查詢用戶 email 失敗: %s", e)
 
         return None
     except Exception as e:
-        print(f"獲取用戶郵箱失敗: {e}")
+        logger.warning("獲取用戶郵箱失敗: %s", e)
         return None
 
 

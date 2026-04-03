@@ -8,6 +8,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from typing import List, Dict, Any, Optional, BinaryIO
 import gzip
 import json
+import logging
 import os
 from datetime import datetime
 import pytz
@@ -15,6 +16,8 @@ import pytz
 from config.settings import AppConfig
 from shared.exceptions import S3ServiceError
 from shared.utils.helpers import get_taiwan_time
+
+logger = logging.getLogger(__name__)
 
 
 class S3Client:
@@ -43,10 +46,10 @@ class S3Client:
                 # 使用默認憑證（環境變數或 IAM 角色）
                 self._client = boto3.client('s3', region_name=self.region)
                 
-            print("✅ S3 客戶端初始化成功")
+            logger.info("S3 客戶端初始化成功")
             
         except Exception as e:
-            print(f"❌ S3 客戶端初始化失敗: {e}")
+            logger.error("S3 客戶端初始化失敗: %s", e)
             self._client = None
     
     @property
@@ -118,16 +121,16 @@ class S3Client:
             if compress and file_path.endswith('.json') and os.path.exists(temp_compressed_file):
                 os.remove(temp_compressed_file)
             
-            print(f"✅ 文件上傳成功: {final_s3_key}")
+            logger.info("文件上傳成功: %s", final_s3_key)
             return True
             
         except ClientError as e:
             error_msg = f"S3 上傳失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise S3ServiceError(error_msg) from e
         except Exception as e:
             error_msg = f"上傳文件時發生錯誤: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise S3ServiceError(error_msg) from e
     
     async def download_file(self, s3_key: str, local_path: str) -> bool:
@@ -149,16 +152,16 @@ class S3Client:
                 )
             )
             
-            print(f"✅ 文件下載成功: {s3_key} -> {local_path}")
+            logger.info("文件下載成功: %s -> %s", s3_key, local_path)
             return True
             
         except ClientError as e:
             error_msg = f"S3 下載失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise S3ServiceError(error_msg) from e
         except Exception as e:
             error_msg = f"下載文件時發生錯誤: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise S3ServiceError(error_msg) from e
     
     async def list_objects(
@@ -194,7 +197,7 @@ class S3Client:
             
         except ClientError as e:
             error_msg = f"列出 S3 物件失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise S3ServiceError(error_msg) from e
     
     async def delete_object(self, s3_key: str) -> bool:
@@ -212,12 +215,12 @@ class S3Client:
                 )
             )
             
-            print(f"✅ 物件刪除成功: {s3_key}")
+            logger.info("物件刪除成功: %s", s3_key)
             return True
             
         except ClientError as e:
             error_msg = f"刪除 S3 物件失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise S3ServiceError(error_msg) from e
     
     async def generate_presigned_url(
@@ -245,7 +248,7 @@ class S3Client:
             
         except ClientError as e:
             error_msg = f"生成預簽名 URL 失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise S3ServiceError(error_msg) from e
     
     async def object_exists(self, s3_key: str) -> bool:
@@ -302,7 +305,7 @@ class S3Client:
             
         except ClientError as e:
             error_msg = f"獲取儲存桶資訊失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise S3ServiceError(error_msg) from e
     
     async def test_connection(self) -> Dict[str, Any]:

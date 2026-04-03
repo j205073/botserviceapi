@@ -87,7 +87,7 @@ class TeamsMessageHandler:
                 await self._handle_card_interaction(turn_context, user_info)
                 return
 
-            # 若含有附件且最近建立 IT 單，嘗試附加圖片
+            # 若含有附件：優先附加到 IT 工單，否則嘗試 AI 圖片解析
             if turn_context.activity.attachments:
                 self.logger.info(
                     "Attempting attachment handling user_mail=%s conversation_id=%s attachment_count=%d",
@@ -103,6 +103,33 @@ class TeamsMessageHandler:
                         user_info.conversation_id,
                     )
                     return
+
+                # 沒有最近 IT 單時，嘗試用 AI 解析圖片內容
+                image_data = await self._extract_first_image(turn_context)
+                if image_data:
+                    self.logger.info(
+                        "Image analysis start user_mail=%s mime=%s size=%d",
+                        user_info.user_mail,
+                        image_data["mime_type"],
+                        len(image_data["bytes"]),
+                    )
+                    await self._handle_image_analysis(
+                        turn_context, user_info,
+                        image_data["bytes"], image_data["mime_type"],
+                    )
+                    return
+
+                # 非圖片附件且無 IT 工單：提示使用者先建單
+                language = determine_language(user_info.user_mail)
+                hint = {
+                    "zh": "ℹ️ 如需上傳檔案至 IT 工單，請先使用 @it 建立工單，再上傳檔案。",
+                    "en": "ℹ️ To upload files to an IT ticket, please create one first with @it.",
+                    "ja": "ℹ️ ITチケットにファイルを添付するには、まず @it でチケットを作成してください。",
+                }.get(language, "ℹ️ 如需上傳檔案至 IT 工單，請先使用 @it 建立工單，再上傳檔案。")
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=hint)
+                )
+                return
 
             # 處理文字訊息
             await self._handle_text_message(turn_context, user_info)
@@ -1061,11 +1088,8 @@ class TeamsMessageHandler:
             svc: ITSupportService = get_container().get(ITSupportService)
             gid = svc.get_recent_task_gid(user_info.user_mail)
             if not gid:
-                # Hint user to create task first
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text="ℹ️ 請先使用 @it 建立 IT 單，再上傳檔案，我會自動附加。")
-                )
-                return True
+                # 沒有最近的 IT 單，不攔截，讓後續流程（如圖片解析）處理
+                return False
 
             # Try attach each image by URL
             ok = 0
@@ -1094,6 +1118,106 @@ class TeamsMessageHandler:
                 Activity(type=ActivityTypes.message, text=f"❌ 上傳檔案時發生錯誤：{str(e)}")
             )
             return True
+
+    async def _extract_first_image(self, turn_context: TurnContext) -> Optional[dict]:
+        """從 attachments 中提取第一張圖片的 bytes 和 mime_type。
+        Returns dict with 'bytes' and 'mime_type', or None if no image found.
+        """
+        import base64
+        import aiohttp
+
+        for att in (turn_context.activity.attachments or []):
+            ctype = (getattr(att, "content_type", None) or "").lower()
+
+            # 跳過 Adaptive Card 等非檔案附件
+            if ctype.startswith("application/vnd.microsoft.card"):
+                continue
+
+            url = getattr(att, "content_url", None) or getattr(att, "contentUrl", None)
+
+            # data URL（例如 Bot Emulator 內嵌圖片）
+            if url and str(url).startswith("data:"):
+                try:
+                    header, b64data = str(url).split(",", 1)
+                    mime = "image/png"
+                    if ":" in header and ";" in header:
+                        mime = header.split(":", 1)[1].split(";", 1)[0] or mime
+                    if not mime.startswith("image/"):
+                        continue
+                    return {"bytes": base64.b64decode(b64data), "mime_type": mime}
+                except Exception:
+                    continue
+
+            # Teams file download info
+            if not url and ctype == "application/vnd.microsoft.teams.file.download.info":
+                content = getattr(att, "content", None) or {}
+                if isinstance(content, dict):
+                    url = content.get("downloadUrl")
+                    # Teams file info 可能不帶 image content type，需要從 fileType 推斷
+                    ft = (content.get("fileType") or "").lower()
+                    if ft in ("png", "jpg", "jpeg", "gif", "webp", "bmp"):
+                        ctype = f"image/{ft}" if ft != "jpg" else "image/jpeg"
+
+            # HTTP URL — 僅處理圖片
+            if url and str(url).startswith("http"):
+                if not ctype.startswith("image/"):
+                    continue
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                            if resp.status == 200:
+                                data = await resp.read()
+                                return {"bytes": data, "mime_type": ctype or "image/png"}
+                except Exception:
+                    self.logger.warning("Failed to download image from URL: %s", url)
+                    continue
+
+        return None
+
+    async def _handle_image_analysis(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO,
+        image_bytes: bytes, mime_type: str,
+    ) -> None:
+        """使用 GPT-4o Vision 解析使用者貼上的圖片內容"""
+        import base64
+
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        data_url = f"data:{mime_type};base64,{b64}"
+
+        # 使用者附帶的文字作為 prompt（沒有就用預設）
+        user_text = (user_info.message_text or "").strip()
+        prompt = user_text if user_text else "請描述這張圖片的內容。如果是錯誤截圖，請說明可能的問題和建議解法。"
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ]
+
+        try:
+            # 使用支援 vision 的模型（從設定讀取，預設 gpt-4o）
+            openai_client = self.conversation_service.openai_client
+            vision_model = self.config.openai.vision_model
+            response = await openai_client.chat_completion(
+                messages=messages,
+                model=vision_model,
+                max_tokens=1000,
+            )
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=response)
+            )
+        except Exception:
+            self.logger.exception("圖片解析失敗 user_mail=%s", user_info.user_mail)
+            await turn_context.send_activity(
+                Activity(
+                    type=ActivityTypes.message,
+                    text="❌ 圖片解析失敗，請稍後再試。",
+                )
+            )
 
     async def _send_welcome_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO

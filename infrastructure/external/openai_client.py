@@ -34,7 +34,7 @@ class OpenAIClient:
             return OpenAI(api_key=self.config.openai.api_key)
 
     @AsyncRetry(max_attempts=3, delay=1.0, backoff=2.0)
-    async def chat_completion(self, messages: List[Dict[str, str]], **kwargs) -> str:
+    async def chat_completion(self, messages: List[Dict[str, Any]], **kwargs) -> str:
         """聊天完成"""
         request_id = kwargs.pop("request_id", None) or str(uuid4())
         model = kwargs.get("model", self.config.openai.model)

@@ -1,6 +1,7 @@
 """
 對話記錄 Repository
 """
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -8,6 +9,8 @@ from datetime import datetime
 from domain.models.conversation import Conversation, ConversationMessage, MessageRole
 from shared.exceptions import RepositoryError, NotFoundError
 from shared.utils.helpers import generate_id, get_taiwan_time
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationRepository(ABC):
@@ -99,7 +102,7 @@ class InMemoryConversationRepository(ConversationRepository):
         # 如果對話已存在，直接返回（模擬原始行為）
         if conversation_id in self._conversations:
             existing_conversation = self._conversations[conversation_id]
-            print(f"對話 {conversation_id} 已存在，返回現有對話")
+            logger.debug("對話 %s 已存在，返回現有對話", conversation_id)
             return existing_conversation
         
         conversation = Conversation(
@@ -116,7 +119,7 @@ class InMemoryConversationRepository(ConversationRepository):
             self._user_conversations[user_mail] = []
         self._user_conversations[user_mail].append(conversation_id)
         
-        print(f"成功創建新對話 {conversation_id} for {user_mail}")
+        logger.debug("成功創建新對話 %s for %s", conversation_id, user_mail)
         return conversation
     
     async def get_by_id(self, conversation_id: str) -> Optional[Conversation]:
@@ -220,7 +223,7 @@ class InMemoryConversationRepository(ConversationRepository):
             return None
         
         compressed_count = conversation.compress_messages(summary_message)
-        print(f"對話 {conversation_id} 壓縮了 {compressed_count} 條用戶/助手訊息")
+        logger.info("對話 %s 壓縮了 %d 條用戶/助手訊息", conversation_id, compressed_count)
         
         return conversation
     

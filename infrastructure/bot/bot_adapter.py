@@ -2,9 +2,10 @@
 Bot Framework 適配器
 處理 Microsoft Bot Framework 的連接和消息路由
 """
+import logging
 from typing import Dict, Any, Callable, Awaitable
 from botbuilder.core import (
-    BotFrameworkAdapter, 
+    BotFrameworkAdapter,
     BotFrameworkAdapterSettings,
     TurnContext,
     ActivityHandler
@@ -15,6 +16,8 @@ from config.settings import AppConfig
 from presentation.bot.message_handler import TeamsMessageHandler
 from shared.exceptions import BotFrameworkError
 from shared.utils.helpers import get_user_email, determine_language
+
+logger = logging.getLogger(__name__)
 
 
 class CustomBotAdapter:
@@ -38,7 +41,7 @@ class CustomBotAdapter:
     
     async def _on_turn_error(self, context: TurnContext, error: Exception) -> None:
         """Turn 錯誤處理器"""
-        print(f"❌ Bot Framework Turn 錯誤: {error}")
+        logger.error("Bot Framework Turn 錯誤: %s", error)
         
         try:
             # 發送錯誤消息給用戶
@@ -49,7 +52,7 @@ class CustomBotAdapter:
                 )
             )
         except Exception as send_error:
-            print(f"❌ 發送錯誤消息失敗: {send_error}")
+            logger.error("發送錯誤消息失敗: %s", send_error)
     
     async def process_activity(self, activity_data: Dict[str, Any], auth_header: str = "") -> Dict[str, Any]:
         """處理活動"""
@@ -69,11 +72,11 @@ class CustomBotAdapter:
                         # 處理成員離開
                         if activity.members_removed:
                             for member in activity.members_removed:
-                                print(f"📤 用戶離開: {member.name} ({member.id})")
+                                logger.info("用戶離開: %s (%s)", member.name, member.id)
                     elif activity.type == "message":
                         await self.message_handler.handle_message(turn_context)
                 except Exception as e:
-                    print(f"Error in aux_func: {str(e)}")
+                    logger.error("Error in aux_func: %s", e)
                     return
             
             # 處理活動
@@ -87,7 +90,7 @@ class CustomBotAdapter:
             
         except Exception as e:
             error_msg = f"處理 Bot 活動失敗: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error("%s", error_msg)
             raise BotFrameworkError(error_msg) from e
     
     def get_conversation_reference(self, activity: Activity):
@@ -102,7 +105,7 @@ class CustomBotAdapter:
         try:
             user_mail = await get_user_email(turn_context)
         except Exception as e:
-            print(f"取得用戶 email 時發生錯誤: {str(e)}")
+            logger.warning("取得用戶 email 時發生錯誤: %s", e)
             user_mail = None
 
         language = determine_language(user_mail)

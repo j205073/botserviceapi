@@ -3,6 +3,7 @@
 重構自原始 app.py 中的會議相關功能
 """
 
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
@@ -14,6 +15,8 @@ from shared.utils.helpers import get_taiwan_time
 from config.meeting_rooms import get_meeting_rooms as cfg_get_meeting_rooms
 import pytz
 from infrastructure.external.graph_api_client import GraphAPIClient
+
+logger = logging.getLogger(__name__)
 
 
 class MeetingService:
@@ -247,7 +250,7 @@ class MeetingService:
 
         except Exception as e:
             # 回退：出錯時回傳空列表，避免影響 UI
-            print(f"取得我的預約失敗：{e}")
+            logger.error("取得我的預約失敗: %s", e)
             return []
 
     async def list_meeting_rooms_graph(self) -> List[Dict[str, Any]]:
@@ -257,7 +260,7 @@ class MeetingService:
                 resp = await gclient.list_meeting_rooms()
                 return resp
         except Exception as e:
-            print(f"取得會議室列表失敗：{e}")
+            logger.error("取得會議室列表失敗: %s", e)
             return []
 
     async def check_room_availability(
@@ -270,7 +273,7 @@ class MeetingService:
                     room_emails, start_time, end_time
                 )
         except Exception as e:
-            print(f"檢查會議室可用性失敗：{e}")
+            logger.error("檢查會議室可用性失敗: %s", e)
             return {"value": []}
 
     async def cancel_meeting(self, user_mail: str, booking_id: str) -> Dict[str, Any]:

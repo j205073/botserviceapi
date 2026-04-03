@@ -22,11 +22,20 @@ class ITSupportService:
     Orchestrates IT issue flow: card building, intent classification, and Asana task creation.
     """
 
-    def __init__(self):
-        self.asana = AsanaClient()
-        self.classifier = ITIntentClassifier()
-        self.email_notifier = EmailNotifier()
-        self.kb_client = KBVectorClient()
+    def __init__(
+        self,
+        asana: Optional[AsanaClient] = None,
+        classifier: Optional[ITIntentClassifier] = None,
+        email_notifier: Optional[EmailNotifier] = None,
+        kb_client: Optional[KBVectorClient] = None,
+        knowledge_base: Optional[ITKnowledgeBase] = None,
+        config=None,
+    ):
+        self.asana = asana or AsanaClient()
+        self.classifier = classifier or ITIntentClassifier()
+        self.email_notifier = email_notifier or EmailNotifier()
+        self.kb_client = kb_client or KBVectorClient()
+
         # load taxonomy for cards
         self._taxonomy = self.classifier.categories
         self._recent_task_by_user: dict[str, dict] = {}
@@ -35,41 +44,46 @@ class ITSupportService:
         self._bf_token_cache: dict[str, Any] = {}
         # Webhook handshake secret (stored after Asana sends it)
         self._webhook_secret: Optional[str] = None
-        # AI 分析開關（設 True 啟用 AI 分析建議，False 關閉以節省 token 或等待串接知識庫）
-        self.enable_ai_analysis: bool = os.getenv("ENABLE_IT_AI_ANALYSIS", "false").strip().lower() == "true"
-        # Dedicated model for IT issue analysis (per-call override; does not affect global model)
-        self.analysis_model: str = os.getenv("IT_ANALYSIS_MODEL", "gpt-5-nano").strip()
 
-        # Static config from env or defaults
-        # Fallback to known IDs from Postman collection if envs not set
-        self.workspace_gid = os.getenv("ASANA_WORKSPACE_GID", "1208041237608650")
-        self.project_gid = os.getenv("ASANA_PROJECT_GID", "1208327275974093")
-        self.assignee_gid = os.getenv("ASANA_ASSIGNEE_GID", "1208683560453534")
-        self.assignee_section_gid = os.getenv("ASANA_ASSIGNEE_SECTION_GID", "1211277485675681")
-
-        # 報到開通分類指派的負責人 Email（可透過環境變數切換）
-        self.onboarding_assignee_email: str = os.getenv("ASANA_ONBOARDING_ASSIGNEE_EMAIL", "").strip()
-
-        # Optional: map priority to Asana Tag GIDs for label display in Asana
-        # Configure via env: ASANA_TAG_P1, ASANA_TAG_P2, ASANA_TAG_P3, ASANA_TAG_P4
-        self.priority_tag_map: dict[str, str] = {
-            "P1": os.getenv("ASANA_TAG_P1", "").strip(),
-            "P2": os.getenv("ASANA_TAG_P2", "").strip(),
-            "P3": os.getenv("ASANA_TAG_P3", "").strip(),
-            "P4": os.getenv("ASANA_TAG_P4", "").strip(),
-        }
-        # Fallback: a single tag to always apply regardless of priority when mapping not set
-        self.default_priority_tag_gid: str = os.getenv("ASANA_PRIORITY_TAG_GID", "").strip()
+        # 從 config 讀取設定（有傳入時），否則 fallback 到 os.getenv
+        if config is not None:
+            self.enable_ai_analysis = config.enable_ai_analysis
+            self.analysis_model = config.analysis_model
+            self.workspace_gid = config.workspace_gid
+            self.project_gid = config.project_gid
+            self.assignee_gid = config.assignee_gid
+            self.assignee_section_gid = config.assignee_section_gid
+            self.onboarding_assignee_email = config.onboarding_assignee_email
+            self.priority_tag_map = config.priority_tag_map
+            self.default_priority_tag_gid = config.default_priority_tag_gid
+        else:
+            self.enable_ai_analysis = os.getenv("ENABLE_IT_AI_ANALYSIS", "false").strip().lower() == "true"
+            self.analysis_model = os.getenv("IT_ANALYSIS_MODEL", "gpt-5-nano").strip()
+            self.workspace_gid = os.getenv("ASANA_WORKSPACE_GID", "1208041237608650")
+            self.project_gid = os.getenv("ASANA_PROJECT_GID", "1208327275974093")
+            self.assignee_gid = os.getenv("ASANA_ASSIGNEE_GID", "1208683560453534")
+            self.assignee_section_gid = os.getenv("ASANA_ASSIGNEE_SECTION_GID", "1211277485675681")
+            self.onboarding_assignee_email = os.getenv("ASANA_ONBOARDING_ASSIGNEE_EMAIL", "").strip()
+            self.priority_tag_map = {
+                "P1": os.getenv("ASANA_TAG_P1", "").strip(),
+                "P2": os.getenv("ASANA_TAG_P2", "").strip(),
+                "P3": os.getenv("ASANA_TAG_P3", "").strip(),
+                "P4": os.getenv("ASANA_TAG_P4", "").strip(),
+            }
+            self.default_priority_tag_gid = os.getenv("ASANA_PRIORITY_TAG_GID", "").strip()
 
         # Initialize Knowledge Base
-        try:
-            from core.container import get_container
-            from infrastructure.external.graph_api_client import GraphAPIClient
-            graph_client = get_container().get(GraphAPIClient)
-            self.knowledge_base = ITKnowledgeBase(graph_client)
-        except Exception as e:
-            logger.error("初始化 IT 知識庫失敗: %s", e)
-            self.knowledge_base = None
+        if knowledge_base is not None:
+            self.knowledge_base = knowledge_base
+        else:
+            try:
+                from core.container import get_container
+                from infrastructure.external.graph_api_client import GraphAPIClient
+                graph_client = get_container().get(GraphAPIClient)
+                self.knowledge_base = ITKnowledgeBase(graph_client)
+            except Exception as e:
+                logger.error("初始化 IT 知識庫失敗: %s", e)
+                self.knowledge_base = None
 
     def build_issue_card(self, language: str, reporter_name: str, reporter_email: str):
         return build_it_issue_card(language, self._taxonomy, reporter_name, reporter_email)
