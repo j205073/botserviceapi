@@ -87,6 +87,19 @@ class TeamsMessageHandler:
                 await self._handle_card_interaction(turn_context, user_info)
                 return
 
+            # Debug: 記錄所有附件的原始資訊，協助排查 Teams 各種附件格式
+            raw_atts = turn_context.activity.attachments or []
+            if raw_atts:
+                for i, a in enumerate(raw_atts):
+                    self.logger.info(
+                        "RAW attachment[%d] content_type=%s name=%s contentUrl=%s hasContent=%s",
+                        i,
+                        getattr(a, "content_type", None),
+                        getattr(a, "name", None),
+                        bool(getattr(a, "content_url", None) or getattr(a, "contentUrl", None)),
+                        bool(getattr(a, "content", None)),
+                    )
+
             # 若含有附件：優先附加到 IT 工單，否則用 AI 解析內容
             if turn_context.activity.attachments:
                 self.logger.info(

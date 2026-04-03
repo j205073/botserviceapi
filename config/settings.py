@@ -83,10 +83,10 @@ class ITSupportConfig:
         return cls(
             enable_ai_analysis=os.getenv("ENABLE_IT_AI_ANALYSIS", "false").strip().lower() == "true",
             analysis_model=os.getenv("IT_ANALYSIS_MODEL", "gpt-5-nano").strip(),
-            workspace_gid=os.getenv("ASANA_WORKSPACE_GID", ""),
-            project_gid=os.getenv("ASANA_PROJECT_GID", ""),
-            assignee_gid=os.getenv("ASANA_ASSIGNEE_GID", ""),
-            assignee_section_gid=os.getenv("ASANA_ASSIGNEE_SECTION_GID", ""),
+            workspace_gid=os.getenv("ASANA_WORKSPACE_GID", "1208041237608650"),
+            project_gid=os.getenv("ASANA_PROJECT_GID", "1208327275974093"),
+            assignee_gid=os.getenv("ASANA_ASSIGNEE_GID", "1208683560453534"),
+            assignee_section_gid=os.getenv("ASANA_ASSIGNEE_SECTION_GID", "1211277485675681"),
             onboarding_assignee_email=os.getenv("ASANA_ONBOARDING_ASSIGNEE_EMAIL", "").strip(),
             priority_tag_map={
                 "P1": os.getenv("ASANA_TAG_P1", "").strip(),
