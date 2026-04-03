@@ -335,7 +335,41 @@ class APIRoutes:
             results["checks"]["smtp"] = {"status": "warn", "message": f"SMTP 連線失敗: {e}"}
             # SMTP 失敗不影響 Teams Bot 核心功能，標記 warn 而非 fail
 
-        # 4) Asana API（提單功能）
+        # 4) OpenAI API（AI 回覆能力）
+        try:
+            if self.config.openai.use_azure:
+                # Azure OpenAI — 檢查 endpoint 可達
+                endpoint = self.config.openai.endpoint
+                api_key = self.config.openai.api_key
+                if not endpoint or not api_key:
+                    results["checks"]["openai"] = {"status": "warn", "message": "Azure OpenAI 未設定"}
+                else:
+                    test_url = f"{endpoint.rstrip('/')}/openai/models?api-version={self.config.openai.api_version}"
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(test_url, headers={"api-key": api_key}, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                            if resp.status == 200:
+                                results["checks"]["openai"] = {"status": "ok", "message": f"Azure OpenAI 連線正常"}
+                            else:
+                                results["checks"]["openai"] = {"status": "warn", "message": f"Azure OpenAI HTTP {resp.status}"}
+            else:
+                # 原生 OpenAI — 檢查 API key 有效
+                api_key = self.config.openai.api_key
+                endpoint = self.config.openai.endpoint or "https://api.openai.com/v1"
+                if not api_key:
+                    results["checks"]["openai"] = {"status": "warn", "message": "OPENAI_API_KEY 未設定"}
+                else:
+                    test_url = f"{endpoint.rstrip('/')}/models"
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(test_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                            if resp.status == 200:
+                                model = self.config.openai.model
+                                results["checks"]["openai"] = {"status": "ok", "message": f"OpenAI API 正常 (model: {model})"}
+                            else:
+                                results["checks"]["openai"] = {"status": "warn", "message": f"OpenAI API HTTP {resp.status}"}
+        except Exception as e:
+            results["checks"]["openai"] = {"status": "warn", "message": f"OpenAI 連線失敗: {e}"}
+
+        # 5) Asana API（提單功能）
         try:
             asana_token = os.getenv("ASANA_ACCESS_TOKEN", "")
             if not asana_token:
@@ -350,6 +384,37 @@ class APIRoutes:
                             results["checks"]["asana"] = {"status": "warn", "message": f"Asana API HTTP {resp.status}"}
         except Exception as e:
             results["checks"]["asana"] = {"status": "warn", "message": f"Asana API 連線失敗: {e}"}
+
+        # 6) Microsoft Graph API（使用者資訊、會議室預約）
+        try:
+            tenant_id = self.config.graph_api.tenant_id
+            client_id = self.config.graph_api.client_id
+            client_secret = self.config.graph_api.client_secret
+            if not all([tenant_id, client_id, client_secret]):
+                results["checks"]["graph_api"] = {"status": "warn", "message": "Graph API 憑證未完整設定"}
+            else:
+                token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+                payload = {
+                    "grant_type": "client_credentials",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "scope": "https://graph.microsoft.com/.default",
+                }
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(token_url, data=payload, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status == 200:
+                            results["checks"]["graph_api"] = {"status": "ok", "message": "Graph API token 取得成功"}
+                        else:
+                            results["checks"]["graph_api"] = {"status": "warn", "message": f"Graph API token 失敗 HTTP {resp.status}"}
+        except Exception as e:
+            results["checks"]["graph_api"] = {"status": "warn", "message": f"Graph API 連線失敗: {e}"}
+
+        # 7) 環境設定完整性
+        config_issues = self.config.validate()
+        if config_issues:
+            results["checks"]["config"] = {"status": "warn", "message": f"設定不完整: {'; '.join(config_issues[:3])}"}
+        else:
+            results["checks"]["config"] = {"status": "ok", "message": "所有必要環境變數已設定"}
 
         # 彙總
         results["status"] = "healthy" if overall_healthy else "unhealthy"

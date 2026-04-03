@@ -81,32 +81,35 @@ class ITSupportService:
     async def query_my_tickets(self, user_email: str) -> Dict[str, Any]:
         """查詢使用者自己的 IT 工單（含自提 + 被代提）。
         回傳 {"incomplete": [...], "recent_completed": [...top 3]}
+        分兩次查詢：未完成 + 全部（含已完成），在 client 端用 email 過濾。
         """
-        import re as _re
         try:
-            tasks = await self.asana.search_tasks_in_project(
-                project_gid=self.project_gid,
-                text=user_email,
-                sort_by="created_at",
-                sort_ascending=False,
-                limit=100,
+            # 1) 未完成的工單
+            incomplete_tasks = await self.asana.get_project_tasks(
+                project_gid=self.project_gid, completed_since="now",
+            )
+            # 2) 全部工單（含已完成，用來找最近完成的）
+            all_tasks = await self.asana.get_project_tasks(
+                project_gid=self.project_gid, completed_since=None,
             )
         except Exception as e:
             logger.error("查詢 Asana 工單失敗: %s", e)
             return {"incomplete": [], "recent_completed": []}
 
+        email_lower = user_email.lower()
+
         incomplete = []
+        for t in incomplete_tasks:
+            if email_lower in t.get("notes", "").lower():
+                incomplete.append(self._extract_ticket_info(t))
+        # 按建立日期降序
+        incomplete.sort(key=lambda x: x["created_at"], reverse=True)
+
         completed = []
-        for t in tasks:
-            notes = t.get("notes", "")
-            # 確認 notes 中確實包含此 email（避免搜尋結果誤匹配）
-            if user_email.lower() not in notes.lower():
-                continue
-            info = self._extract_ticket_info(t)
-            if t.get("completed"):
-                completed.append(info)
-            else:
-                incomplete.append(info)
+        for t in all_tasks:
+            if t.get("completed") and email_lower in t.get("notes", "").lower():
+                completed.append(self._extract_ticket_info(t))
+        completed.sort(key=lambda x: x["created_at"], reverse=True)
 
         return {
             "incomplete": incomplete,

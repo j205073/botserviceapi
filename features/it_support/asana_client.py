@@ -137,32 +137,43 @@ class AsanaClient:
                 )
             return resp.json()
 
-    async def search_tasks_in_project(
-        self, project_gid: str, text: str, completed: Optional[bool] = None,
-        sort_by: str = "created_at", sort_ascending: bool = False, limit: int = 100,
+    async def get_project_tasks(
+        self, project_gid: str, completed_since: Optional[str] = None, limit: int = 100,
     ) -> list[Dict[str, Any]]:
-        """Search tasks in a project using Asana Search API.
-        Returns list of task dicts with opt_fields.
+        """Get all tasks from a project (free-tier compatible).
+        Uses pagination to fetch all results.
+        Args:
+            completed_since: ISO date string or 'now' for incomplete only.
+                             None to get both completed and incomplete.
         """
-        url = f"{self.base_url}/workspaces/{self._workspace_gid()}/tasks/search"
-        params: Dict[str, Any] = {
-            "projects.any": project_gid,
-            "text": text,
-            "sort_by": sort_by,
-            "sort_ascending": str(sort_ascending).lower(),
-            "limit": limit,
-            "opt_fields": "name,completed,created_at,notes,permalink_url",
-        }
-        if completed is not None:
-            params["completed"] = str(completed).lower()
+        url = f"{self.base_url}/tasks"
+        all_tasks: list[Dict[str, Any]] = []
+        offset = None
 
         async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(url, headers=self._headers(), params=params)
-            resp.raise_for_status()
-            return resp.json().get("data", [])
+            while True:
+                params: Dict[str, Any] = {
+                    "project": project_gid,
+                    "opt_fields": "name,completed,created_at,notes",
+                    "limit": limit,
+                }
+                if completed_since:
+                    params["completed_since"] = completed_since
+                if offset:
+                    params["offset"] = offset
 
-    def _workspace_gid(self) -> str:
-        return os.getenv("ASANA_WORKSPACE_GID", "1208041237608650")
+                resp = await client.get(url, headers=self._headers(), params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                all_tasks.extend(data.get("data", []))
+
+                next_page = data.get("next_page")
+                if next_page and next_page.get("offset"):
+                    offset = next_page["offset"]
+                else:
+                    break
+
+        return all_tasks
 
     async def upload_attachment(self, task_gid: str, filename: str, content: bytes, mime_type: str) -> Dict[str, Any]:
         """Upload an attachment file to a task."""
