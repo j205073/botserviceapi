@@ -150,18 +150,20 @@ class TeamsMessageHandler:
                     )
                     return
 
-                # 無最近 IT 單 → 直接 AI 解析
-                attachments = await self._extract_all_attachments(turn_context)
-                if attachments:
-                    self.logger.info(
-                        "Attachment analysis start user_mail=%s count=%d",
-                        user_info.user_mail,
-                        len(attachments),
-                    )
-                    await self._handle_attachment_analysis(
-                        turn_context, user_info, attachments,
-                    )
-                    return
+                # 無最近 IT 單 → 下載附件並用 AI 解析
+                files = self._parse_attachment_files(turn_context)
+                if files:
+                    downloaded = await self._download_parsed_files(files)
+                    if downloaded:
+                        self.logger.info(
+                            "Attachment analysis start user_mail=%s count=%d",
+                            user_info.user_mail,
+                            len(downloaded),
+                        )
+                        await self._handle_attachment_analysis(
+                            turn_context, user_info, downloaded,
+                        )
+                        return
 
             # 處理文字訊息
             await self._handle_text_message(turn_context, user_info)
@@ -716,9 +718,10 @@ class TeamsMessageHandler:
         # 還原原始 activity 的 attachments，走 AI 解析流程
         original_activity = pending["activity"]
         turn_context.activity.attachments = original_activity.attachments
-        attachments = await self._extract_all_attachments(turn_context)
-        if attachments:
-            await self._handle_attachment_analysis(turn_context, pending["user_info"], attachments)
+        files = self._parse_attachment_files(turn_context)
+        downloaded = await self._download_parsed_files(files) if files else []
+        if downloaded:
+            await self._handle_attachment_analysis(turn_context, pending["user_info"], downloaded)
         else:
             await turn_context.send_activity(
                 Activity(type=ActivityTypes.message, text="⚠️ 無法解析附件，請重新上傳。")
@@ -1207,43 +1210,39 @@ class TeamsMessageHandler:
             )
             return True
 
-    async def _extract_all_attachments(self, turn_context: TurnContext) -> List[dict]:
-        """從 attachments 中提取所有可處理的附件。
-        使用與 _try_attach_images 相同的解析邏輯（支援 Teams 各種附件格式）。
-        Returns list of dict with 'bytes', 'mime_type', 'name'.
+    def _parse_attachment_files(self, turn_context: TurnContext) -> List[dict]:
+        """從 activity.attachments 解析出檔案清單。
+        複用 _try_attach_images 已驗證的解析邏輯。
+        Returns list of dict: {'data': bytes, 'url': str, 'name': str, 'ctype': str}
         """
         import base64
-        import aiohttp
-
-        results = []
-        for att in (turn_context.activity.attachments or []):
-            ctype = (getattr(att, "content_type", None) or "").lower()
-            name = getattr(att, "name", None) or ""
-            url = getattr(att, "content_url", None) or getattr(att, "contentUrl", None)
-
-            # 跳過 Adaptive Card 等非檔案附件
-            if ctype.startswith("application/vnd.microsoft.card"):
-                continue
+        atts = turn_context.activity.attachments or []
+        files = []
+        for a in atts:
+            ctype = (getattr(a, "content_type", None) or "").lower()
+            name = getattr(a, "name", None) or ""
+            url = getattr(a, "content_url", None) or getattr(a, "contentUrl", None)
 
             # Teams file info attachments
             if not url and ctype == "application/vnd.microsoft.teams.file.download.info":
-                content = getattr(att, "content", None) or {}
+                content = getattr(a, "content", None) or {}
                 if isinstance(content, dict):
                     url = content.get("downloadUrl")
                     if not name:
                         name = content.get("name") or name
-                    ft = (content.get("fileType") or "").lower()
-                    if ft:
-                        ft_mime_map = {
-                            "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                            "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp",
-                            "pdf": "application/pdf", "txt": "text/plain",
-                            "doc": "application/msword", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            "xls": "application/vnd.ms-excel", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        }
-                        ctype = ft_mime_map.get(ft, ctype)
+                    ft = content.get("fileType")
+                    if ft and not name:
+                        from datetime import datetime
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        name = f"upload_{ts}.{ft}"
 
-            # data URL（Bot Emulator 內嵌）
+            # Skip card attachments and HTML previews
+            if ctype.startswith("application/vnd.microsoft.card"):
+                continue
+            if ctype == "text/html":
+                continue
+
+            # data URL (Bot Emulator)
             if url and str(url).startswith("data:"):
                 try:
                     header, b64data = str(url).split(",", 1)
@@ -1251,61 +1250,79 @@ class TeamsMessageHandler:
                     if ":" in header and ";" in header:
                         mime = header.split(":", 1)[1].split(";", 1)[0] or mime
                     data_bytes = base64.b64decode(b64data)
-                    if mime == "application/octet-stream":
+                    if not mime or mime == "application/octet-stream":
                         if data_bytes.startswith(b"\x89PNG\r\n\x1a\n"): mime = "image/png"
                         elif data_bytes.startswith(b"\xff\xd8"): mime = "image/jpeg"
                         elif data_bytes.startswith(b"GIF8"): mime = "image/gif"
                         elif data_bytes.startswith(b"%PDF"): mime = "application/pdf"
-                    results.append({"bytes": data_bytes, "mime_type": mime, "name": name or "file"})
+                    files.append({"data": data_bytes, "name": name or "file", "ctype": mime})
                     continue
                 except Exception:
                     continue
 
-            # 跳過 text/html 附件（Teams 的 HTML 預覽，不是檔案）
-            if ctype == "text/html":
+            # HTTP URL — 記錄 URL，稍後下載
+            if url and str(url).startswith("http"):
+                files.append({"url": url, "name": name or "file", "ctype": ctype or "application/octet-stream"})
+
+        return files
+
+    async def _download_parsed_files(self, files: List[dict]) -> List[dict]:
+        """下載 _parse_attachment_files 回傳的檔案清單，使用 ITSupportService 已驗證的下載方法。
+        Returns list of dict: {'bytes': bytes, 'mime_type': str, 'name': str}
+        """
+        import httpx
+        results = []
+        for f in files:
+            name = f.get("name") or "file"
+            ctype = f.get("ctype") or "application/octet-stream"
+
+            # 已有 bytes（data URL）
+            if "data" in f:
+                results.append({"bytes": f["data"], "mime_type": ctype, "name": name})
                 continue
 
-            # HTTP URL — 下載內容
-            if url and str(url).startswith("http"):
-                try:
-                    # Teams 圖片 URL 可能需要 Bot Framework auth token
-                    headers = {}
-                    if "botframework.com" in str(url) or "skype.com" in str(url):
-                        try:
-                            from features.it_support.service import ITSupportService
-                            from core.container import get_container
-                            svc: ITSupportService = get_container().get(ITSupportService)
-                            token = await svc._get_botframework_token()
-                            if token:
-                                headers["Authorization"] = f"Bearer {token}"
-                        except Exception:
-                            pass
+            url = f.get("url")
+            if not url:
+                continue
 
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                            self.logger.info(
-                                "Attachment download status=%d content_type=%s url_prefix=%s",
-                                resp.status, resp.content_type, str(url)[:80],
-                            )
-                            if resp.status == 200:
-                                data = await resp.read()
-                                # 用 response header 或 magic bytes 確定真正的 mime type
-                                real_ctype = (resp.content_type or "").lower()
-                                if real_ctype and real_ctype != "application/octet-stream" and "*" not in real_ctype:
-                                    ctype = real_ctype
-                                # 如果 ctype 仍不確定（如 image/*），用 magic bytes
-                                if not ctype or ctype == "application/octet-stream" or "*" in ctype:
-                                    if data.startswith(b"\x89PNG\r\n\x1a\n"): ctype = "image/png"
-                                    elif data.startswith(b"\xff\xd8"): ctype = "image/jpeg"
-                                    elif data.startswith(b"GIF8"): ctype = "image/gif"
-                                    elif data.startswith(b"RIFF") and b"WEBP" in data[:16]: ctype = "image/webp"
-                                    elif data.startswith(b"%PDF"): ctype = "application/pdf"
-                                results.append({"bytes": data, "mime_type": ctype or "application/octet-stream", "name": name or "file"})
-                            else:
-                                self.logger.warning("Attachment download failed status=%d url=%s", resp.status, str(url)[:100])
-                except Exception as e:
-                    self.logger.warning("Failed to download attachment: %s url=%s", e, str(url)[:100])
-                    continue
+            try:
+                # 使用 ITSupportService 的 Bot Framework token 認證（與 IT 附件上傳相同的方法）
+                headers = {}
+                from core.container import get_container
+                from features.it_support.service import ITSupportService
+                svc: ITSupportService = get_container().get(ITSupportService)
+
+                if svc._is_botframework_protected_url(url):
+                    token = await svc._get_botframework_token()
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
+                        headers["Accept"] = "*/*"
+                        self.logger.info("Using BotFramework token for attachment download")
+
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                    resp = await client.get(url, headers=headers)
+                    self.logger.info(
+                        "Attachment download status=%d content_type=%s size=%d url=%s",
+                        resp.status_code, resp.headers.get("content-type", ""), len(resp.content), url[:80],
+                    )
+                    if resp.status_code == 200 and resp.content:
+                        data = resp.content
+                        # 用 response header 確定 mime type
+                        resp_ct = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+                        if resp_ct and resp_ct != "application/octet-stream" and "*" not in resp_ct:
+                            ctype = resp_ct
+                        # magic byte sniffing for uncertain types
+                        if not ctype or ctype == "application/octet-stream" or "*" in ctype:
+                            if data.startswith(b"\x89PNG\r\n\x1a\n"): ctype = "image/png"
+                            elif data.startswith(b"\xff\xd8"): ctype = "image/jpeg"
+                            elif data.startswith(b"GIF8"): ctype = "image/gif"
+                            elif data.startswith(b"RIFF") and b"WEBP" in data[:16]: ctype = "image/webp"
+                            elif data.startswith(b"%PDF"): ctype = "application/pdf"
+                        results.append({"bytes": data, "mime_type": ctype, "name": name})
+                    else:
+                        self.logger.warning("Attachment download failed status=%d url=%s", resp.status_code, url[:100])
+            except Exception as e:
+                self.logger.warning("Failed to download attachment: %s url=%s", e, url[:100])
 
         return results
 
