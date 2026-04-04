@@ -1,6 +1,31 @@
 # CHANGELOG
 
-TR GPT Bot 變更紀錄（2026-03-01 ~ 2026-04-03）
+TR GPT Bot 變更紀錄（2026-03-01 ~ 2026-04-04）
+
+---
+
+## 2026-04-04
+
+### 改進
+
+- **附件上傳互動確認** — 提單後 10 分鐘內傳檔案，彈出確認卡片讓使用者選擇「附加到 IT 工單」或「AI 解析內容」，不再強制附加
+- **IT 工單附件時間限制** — `get_recent_task_gid` 加入 `max_age_minutes=10`，超過 10 分鐘的工單不再攔截附件
+- **IT 工單卡片提示** — 提示文字改為「提單後 10 分鐘內可直接貼上或拖曳圖片／檔案」
+
+### 修復
+
+- **圖片附件下載認證** — Teams 圖片 URL 需要 Bot Framework auth token，之前用 aiohttp 裸下載會 401 失敗。改用 httpx + `ITSupportService._get_botframework_token()`（與 IT 附件上傳同一套認證方法）
+- **`image/*` 通配符處理** — Teams 傳圖的 content_type 為 `image/*`，加入 magic byte sniffing 自動判斷實際格式（PNG/JPEG/GIF/WebP）
+- **跳過 text/html 附件** — Teams 傳圖時附帶的 HTML 預覽不再被當成檔案處理
+- **Azure 健康檢查設定** — 設定 `/ping` 為 health check path
+- **Azure 環境變數補齊** — 透過 az cli 補上 `ASANA_WORKSPACE_GID`、`ASANA_PROJECT_GID`、`ASANA_ASSIGNEE_GID`、`ASANA_ASSIGNEE_SECTION_GID`、`ALERT_EMAIL`
+- **Application Logging 開啟** — 透過 az cli 開啟 filesystem + docker container logging
+
+### 文字修正
+
+- `@my-it` → `@itls`
+- `溝通評論` → `處理方式`
+- 移除 `GEMINI.md`
 
 ---
 
