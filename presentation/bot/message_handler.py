@@ -701,13 +701,12 @@ class TeamsMessageHandler:
 
             adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
             bot_app_id = self.config.bot.app_id
-            sender_name = user_info.user_name or user_info.user_mail
 
             # 發送純文字訊息
             async def send_text(ctx):
                 activity = Activity(
                     type="message",
-                    text=f"💬 來自 **{sender_name}** 的訊息：\n\n{message_text}",
+                    text=f"💬 來自 **TR GPT** 的訊息：\n\n{message_text}",
                 )
                 await ctx.send_activity(activity)
 
@@ -717,7 +716,6 @@ class TeamsMessageHandler:
             from datetime import datetime
             self._pending_send_message[user_info.user_mail] = {
                 "target_email": target_email,
-                "sender_name": sender_name,
                 "timestamp": datetime.now(),
             }
 
@@ -745,7 +743,6 @@ class TeamsMessageHandler:
             return
 
         target_email = pending["target_email"]
-        sender_name = pending["sender_name"]
 
         from app import user_conversation_refs, user_display_names
         from core.container import get_container
@@ -796,7 +793,7 @@ class TeamsMessageHandler:
         async def send_with_attachments(ctx):
             activity = Activity(
                 type="message",
-                text=f"📎 來自 **{sender_name}** 的圖片：",
+                text=f"📎 來自 **TR GPT** 的圖片：",
                 attachments=attachments,
             )
             await ctx.send_activity(activity)
