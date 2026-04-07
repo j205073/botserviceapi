@@ -154,7 +154,7 @@ class AsanaClient:
             while True:
                 params: Dict[str, Any] = {
                     "project": project_gid,
-                    "opt_fields": "name,completed,created_at,notes",
+                    "opt_fields": "name,completed,completed_at,created_at,notes",
                     "limit": limit,
                 }
                 if completed_since:

@@ -123,7 +123,8 @@ class ITSupportService:
         for t in all_tasks:
             if t.get("completed") and email_lower in t.get("notes", "").lower():
                 completed.append(self._extract_ticket_info(t))
-        completed.sort(key=lambda x: x["created_at"], reverse=True)
+        # 按完成時間降序（最新完成的在前）
+        completed.sort(key=lambda x: x.get("completed_at", ""), reverse=True)
 
         return {
             "incomplete": incomplete,
@@ -168,6 +169,7 @@ class ITSupportService:
             "description": description,
             "completed": task.get("completed", False),
             "created_at": (task.get("created_at") or "")[:10],
+            "completed_at": (task.get("completed_at") or "")[:10],
         }
 
     async def submit_issue(self, form: Dict[str, Any], reporter_name: str, reporter_email: str, requester_email: str = "") -> Dict[str, Any]:
