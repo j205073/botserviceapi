@@ -106,7 +106,15 @@ class TeamsMessageHandler:
                     )
 
             # 若含有附件：判斷是否有最近 IT 工單，決定附加或 AI 解析
-            if turn_context.activity.attachments:
+            # 過濾掉 Teams 非檔案附件（mention text/html、adaptive card 等）
+            real_attachments = [
+                a for a in (turn_context.activity.attachments or [])
+                if not (getattr(a, "content_type", "") or "").lower().startswith((
+                    "text/html",
+                    "application/vnd.microsoft.card",
+                ))
+            ]
+            if real_attachments:
                 self.logger.info(
                     "Attempting attachment handling user_mail=%s conversation_id=%s attachment_count=%d",
                     user_info.user_mail,
