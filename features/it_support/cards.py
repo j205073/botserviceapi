@@ -152,7 +152,7 @@ def build_it_issue_card(
 
 
 def build_send_message_card(language: str, user_choices: list) -> Activity:
-    """Build an Adaptive Card for IT staff to send a message (with optional image) to a specific user.
+    """Build an Adaptive Card for IT staff to send a message to a specific user.
 
     Parameters
     ----------
@@ -168,8 +168,7 @@ def build_send_message_card(language: str, user_choices: list) -> Activity:
             "target": "選擇收件人",
             "message": "訊息內容",
             "message_placeholder": "請輸入要發送的訊息",
-            "image_url": "圖片網址（選填）",
-            "image_placeholder": "https://... 貼上圖片連結",
+            "paste_hint": "送出後 5 分鐘內可直接貼上或拖曳圖片，我會一併轉發給對方。",
             "submit": "發送",
             "no_user": "目前沒有可發送的對象，請等待使用者與 Bot 互動後再試。",
         },
@@ -178,8 +177,7 @@ def build_send_message_card(language: str, user_choices: list) -> Activity:
             "target": "Select Recipient",
             "message": "Message",
             "message_placeholder": "Enter the message to send",
-            "image_url": "Image URL (optional)",
-            "image_placeholder": "https://... paste image link",
+            "paste_hint": "After sending, you can paste or drag images within 5 minutes to forward them.",
             "submit": "Send",
             "no_user": "No available recipients. Please wait until users interact with the Bot.",
         },
@@ -188,8 +186,7 @@ def build_send_message_card(language: str, user_choices: list) -> Activity:
             "target": "宛先を選択",
             "message": "メッセージ",
             "message_placeholder": "送信するメッセージを入力してください",
-            "image_url": "画像 URL（任意）",
-            "image_placeholder": "https://... 画像リンクを貼り付け",
+            "paste_hint": "送信後 5 分以内に画像を貼り付け／ドラッグすると、相手に転送します。",
             "submit": "送信",
             "no_user": "送信可能な相手がいません。ユーザーが Bot と対話した後に再試行してください。",
         },
@@ -228,11 +225,11 @@ def build_send_message_card(language: str, user_choices: list) -> Activity:
                 "isRequired": True,
             },
             {
-                "type": "Input.Text",
-                "id": "sendMessageImageUrl",
-                "label": t["image_url"],
-                "placeholder": t["image_placeholder"],
-                "maxLength": 2000,
+                "type": "TextBlock",
+                "text": t["paste_hint"],
+                "wrap": True,
+                "spacing": "Small",
+                "size": "Small",
             },
         ],
         "actions": [

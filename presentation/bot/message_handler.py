@@ -61,6 +61,8 @@ class TeamsMessageHandler:
 
         # 暫存使用者附件（等待確認是否附加到 IT 工單）
         self._pending_attachments: dict = {}
+        # 暫存 @t 發送訊息的目標（email -> {"target_email", "sender_name", "timestamp"}）
+        self._pending_send_message: dict = {}
 
     async def handle_message(self, turn_context: TurnContext) -> None:
         """處理 Teams 訊息"""
@@ -111,6 +113,23 @@ class TeamsMessageHandler:
                     user_info.conversation_id,
                     len(turn_context.activity.attachments or []),
                 )
+
+                # 檢查是否有待轉發的 @t 訊息（5 分鐘內）
+                pending_msg = self._pending_send_message.get(user_info.user_mail)
+                if pending_msg:
+                    from datetime import datetime
+                    elapsed = (datetime.now() - pending_msg["timestamp"]).total_seconds()
+                    if elapsed <= 300:
+                        files = self._parse_attachment_files(turn_context)
+                        if files:
+                            downloaded = await self._download_parsed_files(files)
+                            if downloaded:
+                                await self._forward_attachment_to_user(
+                                    turn_context, user_info, downloaded,
+                                )
+                                return
+                    else:
+                        self._pending_send_message.pop(user_info.user_mail, None)
 
                 # 檢查是否有最近 10 分鐘內的 IT 工單
                 from core.container import get_container
@@ -657,7 +676,6 @@ class TeamsMessageHandler:
         try:
             target_email = (turn_context.activity.value.get("targetUserEmail") or "").strip()
             message_text = (turn_context.activity.value.get("sendMessageText") or "").strip()
-            image_url = (turn_context.activity.value.get("sendMessageImageUrl") or "").strip()
 
             if not target_email:
                 await turn_context.send_activity(
@@ -670,12 +688,9 @@ class TeamsMessageHandler:
                 )
                 return
 
-            from core.container import get_container
-            from domain.repositories.user_repository import UserRepository
             from app import user_conversation_refs, user_display_names
-
-            container = get_container()
-            user_repo: UserRepository = container.get(UserRepository)
+            from core.container import get_container
+            from infrastructure.bot.bot_adapter import CustomBotAdapter
 
             ref = user_conversation_refs.get(target_email)
             if not ref:
@@ -684,69 +699,34 @@ class TeamsMessageHandler:
                 )
                 return
 
-            bot_adapter = container.get("bot_adapter")
-            if not bot_adapter:
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text="❌ 無法取得 Bot Adapter。")
-                )
-                return
-
+            adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
             bot_app_id = self.config.bot.app_id
             sender_name = user_info.user_name or user_info.user_mail
 
-            # 組裝要發送的內容
-            if image_url:
-                # 含圖片：使用 Adaptive Card 呈現
-                card_content = {
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "body": [
-                        {
-                            "type": "TextBlock",
-                            "text": f"💬 來自 {sender_name} 的訊息",
-                            "weight": "Bolder",
-                            "size": "Medium",
-                        },
-                        {
-                            "type": "TextBlock",
-                            "text": message_text,
-                            "wrap": True,
-                        },
-                        {
-                            "type": "Image",
-                            "url": image_url,
-                            "size": "Auto",
-                            "altText": "附件圖片",
-                        },
-                    ],
-                }
+            # 發送純文字訊息
+            async def send_text(ctx):
+                activity = Activity(
+                    type="message",
+                    text=f"💬 來自 **{sender_name}** 的訊息：\n\n{message_text}",
+                )
+                await ctx.send_activity(activity)
 
-                async def send_card(ctx):
-                    from botbuilder.schema import Attachment
-                    attachment = Attachment(
-                        content_type="application/vnd.microsoft.card.adaptive",
-                        content=card_content,
-                    )
-                    activity = Activity(type="message", attachments=[attachment])
-                    await ctx.send_activity(activity)
+            await adapter.adapter.continue_conversation(ref, send_text, bot_app_id)
 
-                await bot_adapter.adapter.continue_conversation(ref, send_card, bot_app_id)
-            else:
-                # 純文字
-                async def send_text(ctx):
-                    activity = Activity(
-                        type="message",
-                        text=f"💬 來自 **{sender_name}** 的訊息：\n\n{message_text}",
-                    )
-                    await ctx.send_activity(activity)
+            # 暫存目標，供後續圖片轉發使用（5 分鐘內有效）
+            from datetime import datetime
+            self._pending_send_message[user_info.user_mail] = {
+                "target_email": target_email,
+                "sender_name": sender_name,
+                "timestamp": datetime.now(),
+            }
 
-                await bot_adapter.adapter.continue_conversation(ref, send_text, bot_app_id)
-
-            # 取得目標使用者顯示名稱
-            target_name = await user_repo.get_display_name(target_email) or user_display_names.get(target_email, target_email)
+            target_name = user_display_names.get(target_email, target_email)
             await turn_context.send_activity(
-                Activity(type=ActivityTypes.message, text=f"✅ 訊息已成功發送給 {target_name}！")
+                Activity(
+                    type=ActivityTypes.message,
+                    text=f"✅ 訊息已成功發送給 {target_name}！\n📎 5 分鐘內可直接貼上或拖曳圖片，我會一併轉發。",
+                )
             )
 
         except Exception as e:
@@ -754,6 +734,68 @@ class TeamsMessageHandler:
             await turn_context.send_activity(
                 Activity(type=ActivityTypes.message, text=f"❌ 發送訊息時發生例外：{str(e)}")
             )
+
+    async def _forward_attachment_to_user(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO,
+        downloaded: list,
+    ) -> None:
+        """將附件轉發給 @t 指定的目標使用者"""
+        pending = self._pending_send_message.pop(user_info.user_mail, None)
+        if not pending:
+            return
+
+        target_email = pending["target_email"]
+        sender_name = pending["sender_name"]
+
+        from app import user_conversation_refs, user_display_names
+        from core.container import get_container
+        from infrastructure.bot.bot_adapter import CustomBotAdapter
+
+        ref = user_conversation_refs.get(target_email)
+        if not ref:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 找不到 {target_email} 的連線資訊。")
+            )
+            return
+
+        adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+        bot_app_id = self.config.bot.app_id
+
+        # 組裝含圖片的 Adaptive Card
+        body: list = [
+            {
+                "type": "TextBlock",
+                "text": f"📎 來自 {sender_name} 的圖片",
+                "weight": "Bolder",
+                "size": "Medium",
+            },
+        ]
+        for att in downloaded:
+            url = att.get("url") or att.get("content_url", "")
+            if url:
+                body.append({"type": "Image", "url": url, "size": "Auto"})
+
+        card_content = {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": body,
+        }
+
+        async def send_card(ctx):
+            from botbuilder.schema import Attachment as BotAttachment
+            attachment = BotAttachment(
+                content_type="application/vnd.microsoft.card.adaptive",
+                content=card_content,
+            )
+            await ctx.send_activity(Activity(type="message", attachments=[attachment]))
+
+        await adapter.adapter.continue_conversation(ref, send_card, bot_app_id)
+
+        target_name = user_display_names.get(target_email, target_email)
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=f"✅ 圖片已成功轉發給 {target_name}！")
+        )
 
     async def _show_upload_card(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
