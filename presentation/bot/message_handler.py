@@ -750,6 +750,7 @@ class TeamsMessageHandler:
         from app import user_conversation_refs, user_display_names
         from core.container import get_container
         from infrastructure.bot.bot_adapter import CustomBotAdapter
+        import base64
 
         ref = user_conversation_refs.get(target_email)
         if not ref:
@@ -761,36 +762,46 @@ class TeamsMessageHandler:
         adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
         bot_app_id = self.config.bot.app_id
 
-        # 組裝含圖片的 Adaptive Card
-        body: list = [
-            {
-                "type": "TextBlock",
-                "text": f"📎 來自 {sender_name} 的圖片",
-                "weight": "Bolder",
-                "size": "Medium",
-            },
-        ]
+        # 將圖片 bytes 轉為 data URI，透過 inline attachment 發送
+        from botbuilder.schema import Attachment as BotAttachment
+        attachments = []
         for att in downloaded:
-            url = att.get("url") or att.get("content_url", "")
-            if url:
-                body.append({"type": "Image", "url": url, "size": "Auto"})
+            img_bytes = att.get("bytes")
+            mime = att.get("mime_type", "application/octet-stream")
+            name = att.get("name", "file")
+            if img_bytes and mime.startswith("image/"):
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                data_uri = f"data:{mime};base64,{b64}"
+                attachments.append(BotAttachment(
+                    content_type=mime,
+                    content_url=data_uri,
+                    name=name,
+                ))
+            elif img_bytes:
+                # 非圖片檔案也用 inline 方式
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                data_uri = f"data:{mime};base64,{b64}"
+                attachments.append(BotAttachment(
+                    content_type=mime,
+                    content_url=data_uri,
+                    name=name,
+                ))
 
-        card_content = {
-            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-            "type": "AdaptiveCard",
-            "version": "1.4",
-            "body": body,
-        }
-
-        async def send_card(ctx):
-            from botbuilder.schema import Attachment as BotAttachment
-            attachment = BotAttachment(
-                content_type="application/vnd.microsoft.card.adaptive",
-                content=card_content,
+        if not attachments:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="⚠️ 無法解析附件內容。")
             )
-            await ctx.send_activity(Activity(type="message", attachments=[attachment]))
+            return
 
-        await adapter.adapter.continue_conversation(ref, send_card, bot_app_id)
+        async def send_with_attachments(ctx):
+            activity = Activity(
+                type="message",
+                text=f"📎 來自 **{sender_name}** 的圖片：",
+                attachments=attachments,
+            )
+            await ctx.send_activity(activity)
+
+        await adapter.adapter.continue_conversation(ref, send_with_attachments, bot_app_id)
 
         target_name = user_display_names.get(target_email, target_email)
         await turn_context.send_activity(
