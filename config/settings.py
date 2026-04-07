@@ -4,7 +4,7 @@
 import os
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -104,6 +104,7 @@ class AppConfig:
     debug_mode: bool
     debug_account: Optional[str]
     enable_ai_intent_analysis: bool
+    it_staff_emails: List[str]
     
     # 各模組配置
     bot: BotConfig
@@ -123,6 +124,9 @@ class AppConfig:
             debug_mode=os.getenv("DEBUG_MODE", "false").lower() == "true",
             debug_account=os.getenv("DEBUG_ACCOUNT"),
             enable_ai_intent_analysis=os.getenv("ENABLE_AI_INTENT_ANALYSIS", "false").lower() == "true",
+            it_staff_emails=[
+                e.strip().lower() for e in os.getenv("IT_STAFF_EMAILS", "").split(";") if e.strip()
+            ],
             
             bot=BotConfig(
                 app_id=os.getenv("BOT_APP_ID", ""),

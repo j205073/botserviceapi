@@ -275,6 +275,8 @@ class TeamsMessageHandler:
             await self._handle_submit_broadcast(turn_context, user_info)
         elif card_action == "submitSendMessage":
             await self._handle_submit_send_message(turn_context, user_info)
+        elif card_action == "submitReplyToIT":
+            await self._handle_submit_reply_to_it(turn_context, user_info)
         elif card_action == "confirmAttachIT":
             await self._handle_confirm_attach_it(turn_context, user_info)
         elif card_action == "skipAttachIT":
@@ -701,16 +703,56 @@ class TeamsMessageHandler:
 
             adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
             bot_app_id = self.config.bot.app_id
+            sender_email = user_info.user_mail
 
-            # 發送純文字訊息
-            async def send_text(ctx):
-                activity = Activity(
-                    type="message",
-                    text=f"💬 來自 **TR GPT** 的訊息：\n\n{message_text}",
+            # 發送含回覆按鈕的 Adaptive Card
+            from botbuilder.schema import Attachment as BotAttachment
+            card_content = {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "type": "AdaptiveCard",
+                "version": "1.4",
+                "body": [
+                    {
+                        "type": "TextBlock",
+                        "text": "💬 來自 TR GPT 的訊息",
+                        "weight": "Bolder",
+                        "size": "Medium",
+                    },
+                    {
+                        "type": "TextBlock",
+                        "text": message_text,
+                        "wrap": True,
+                    },
+                    {
+                        "type": "Input.Text",
+                        "id": "replyMessageText",
+                        "label": "回覆訊息",
+                        "isMultiline": True,
+                        "maxLength": 2000,
+                        "placeholder": "輸入回覆內容...",
+                        "height": "stretch",
+                    },
+                ],
+                "actions": [
+                    {
+                        "type": "Action.Submit",
+                        "title": "↩️ 回覆",
+                        "data": {
+                            "action": "submitReplyToIT",
+                            "replyToEmail": sender_email,
+                        },
+                    },
+                ],
+            }
+
+            async def send_card(ctx):
+                attachment = BotAttachment(
+                    content_type="application/vnd.microsoft.card.adaptive",
+                    content=card_content,
                 )
-                await ctx.send_activity(activity)
+                await ctx.send_activity(Activity(type="message", attachments=[attachment]))
 
-            await adapter.adapter.continue_conversation(ref, send_text, bot_app_id)
+            await adapter.adapter.continue_conversation(ref, send_card, bot_app_id)
 
             # 暫存目標，供後續圖片轉發使用（5 分鐘內有效）
             from datetime import datetime
@@ -804,6 +846,59 @@ class TeamsMessageHandler:
         await turn_context.send_activity(
             Activity(type=ActivityTypes.message, text=f"✅ 圖片已成功轉發給 {target_name}！")
         )
+
+    async def _handle_submit_reply_to_it(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """處理使用者回覆 IT 人員的訊息"""
+        try:
+            reply_text = (turn_context.activity.value.get("replyMessageText") or "").strip()
+            reply_to_email = (turn_context.activity.value.get("replyToEmail") or "").strip()
+
+            if not reply_text:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 回覆內容不能為空")
+                )
+                return
+            if not reply_to_email:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 無法辨識回覆對象")
+                )
+                return
+
+            from app import user_conversation_refs, user_display_names
+            from core.container import get_container
+            from infrastructure.bot.bot_adapter import CustomBotAdapter
+
+            ref = user_conversation_refs.get(reply_to_email)
+            if not ref:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 該 IT 人員目前不在線上，無法轉發回覆。")
+                )
+                return
+
+            adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+            bot_app_id = self.config.bot.app_id
+            user_name = user_info.user_name or user_info.user_mail
+
+            async def send_reply(ctx):
+                activity = Activity(
+                    type="message",
+                    text=f"↩️ 來自 **{user_name}** 的回覆：\n\n{reply_text}",
+                )
+                await ctx.send_activity(activity)
+
+            await adapter.adapter.continue_conversation(ref, send_reply, bot_app_id)
+
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="✅ 回覆已送出！")
+            )
+
+        except Exception as e:
+            self.logger.error(f"Reply to IT failed: {str(e)}")
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 回覆時發生例外：{str(e)}")
+            )
 
     async def _show_upload_card(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
