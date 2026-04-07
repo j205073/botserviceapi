@@ -151,6 +151,98 @@ def build_it_issue_card(
     return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
 
 
+def build_send_message_card(language: str, user_choices: list) -> Activity:
+    """Build an Adaptive Card for IT staff to send a message (with optional image) to a specific user.
+
+    Parameters
+    ----------
+    language : str
+        UI language code (``"zh"`` / ``"en"`` / ``"ja"``).
+    user_choices : list[dict]
+        Each item must have ``{"title": "單位-姓名", "value": "email"}``.
+    """
+
+    texts = {
+        "zh": {
+            "title": "發送訊息給使用者",
+            "target": "選擇收件人",
+            "message": "訊息內容",
+            "message_placeholder": "請輸入要發送的訊息",
+            "image_url": "圖片網址（選填）",
+            "image_placeholder": "https://... 貼上圖片連結",
+            "submit": "發送",
+            "no_user": "目前沒有可發送的對象，請等待使用者與 Bot 互動後再試。",
+        },
+        "en": {
+            "title": "Send Message to User",
+            "target": "Select Recipient",
+            "message": "Message",
+            "message_placeholder": "Enter the message to send",
+            "image_url": "Image URL (optional)",
+            "image_placeholder": "https://... paste image link",
+            "submit": "Send",
+            "no_user": "No available recipients. Please wait until users interact with the Bot.",
+        },
+        "ja": {
+            "title": "ユーザーへメッセージ送信",
+            "target": "宛先を選択",
+            "message": "メッセージ",
+            "message_placeholder": "送信するメッセージを入力してください",
+            "image_url": "画像 URL（任意）",
+            "image_placeholder": "https://... 画像リンクを貼り付け",
+            "submit": "送信",
+            "no_user": "送信可能な相手がいません。ユーザーが Bot と対話した後に再試行してください。",
+        },
+    }
+
+    t = texts.get(language, texts["zh"])
+
+    if not user_choices:
+        return Activity(
+            type=ActivityTypes.message,
+            text=f"⚠️ {t['no_user']}",
+        )
+
+    card_content: Dict[str, Any] = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+            {"type": "TextBlock", "text": f"💬 {t['title']}", "weight": "Bolder", "size": "Medium"},
+            {
+                "type": "Input.ChoiceSet",
+                "id": "targetUserEmail",
+                "label": t["target"],
+                "choices": user_choices,
+                "isRequired": True,
+                "style": "filtered",
+            },
+            {
+                "type": "Input.Text",
+                "id": "sendMessageText",
+                "label": t["message"],
+                "isMultiline": True,
+                "maxLength": 2000,
+                "placeholder": t["message_placeholder"],
+                "height": "stretch",
+                "isRequired": True,
+            },
+            {
+                "type": "Input.Text",
+                "id": "sendMessageImageUrl",
+                "label": t["image_url"],
+                "placeholder": t["image_placeholder"],
+                "maxLength": 2000,
+            },
+        ],
+        "actions": [
+            {"type": "Action.Submit", "title": f"🚀 {t['submit']}", "data": {"action": "submitSendMessage"}}
+        ],
+    }
+
+    return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
+
+
 def build_my_tickets_card(incomplete: List[Dict], recent_completed: List[Dict]) -> Activity:
     """Build an Adaptive Card showing user's IT tickets."""
 

@@ -254,6 +254,8 @@ class TeamsMessageHandler:
             await self._handle_upload_option(turn_context, user_info)
         elif card_action == "submitBroadcast":
             await self._handle_submit_broadcast(turn_context, user_info)
+        elif card_action == "submitSendMessage":
+            await self._handle_submit_send_message(turn_context, user_info)
         elif card_action == "confirmAttachIT":
             await self._handle_confirm_attach_it(turn_context, user_info)
         elif card_action == "skipAttachIT":
@@ -646,6 +648,110 @@ class TeamsMessageHandler:
             self.logger.error(f"Broadcast submission failed: {str(e)}")
             await turn_context.send_activity(
                 Activity(type=ActivityTypes.message, text=f"❌ 處理廣播時發生例外：{str(e)}")
+            )
+
+    async def _handle_submit_send_message(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """處理 @t 發送訊息給指定使用者"""
+        try:
+            target_email = (turn_context.activity.value.get("targetUserEmail") or "").strip()
+            message_text = (turn_context.activity.value.get("sendMessageText") or "").strip()
+            image_url = (turn_context.activity.value.get("sendMessageImageUrl") or "").strip()
+
+            if not target_email:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 請選擇收件人")
+                )
+                return
+            if not message_text:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 訊息內容不能為空")
+                )
+                return
+
+            from core.container import get_container
+            from domain.repositories.user_repository import UserRepository
+
+            container = get_container()
+            user_repo: UserRepository = container.get(UserRepository)
+
+            ref = await user_repo.get_conversation_reference(target_email)
+            if not ref:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=f"❌ 找不到 {target_email} 的連線資訊，該使用者可能尚未與 Bot 互動。")
+                )
+                return
+
+            bot_adapter = container.get("bot_adapter")
+            if not bot_adapter:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="❌ 無法取得 Bot Adapter。")
+                )
+                return
+
+            bot_app_id = self.config.bot.app_id
+            sender_name = user_info.user_name or user_info.user_mail
+
+            # 組裝要發送的內容
+            if image_url:
+                # 含圖片：使用 Adaptive Card 呈現
+                card_content = {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "body": [
+                        {
+                            "type": "TextBlock",
+                            "text": f"💬 來自 {sender_name} 的訊息",
+                            "weight": "Bolder",
+                            "size": "Medium",
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": message_text,
+                            "wrap": True,
+                        },
+                        {
+                            "type": "Image",
+                            "url": image_url,
+                            "size": "Auto",
+                            "altText": "附件圖片",
+                        },
+                    ],
+                }
+
+                async def send_card(ctx):
+                    from botbuilder.schema import Attachment
+                    attachment = Attachment(
+                        content_type="application/vnd.microsoft.card.adaptive",
+                        content=card_content,
+                    )
+                    activity = Activity(type="message", attachments=[attachment])
+                    await ctx.send_activity(activity)
+
+                await bot_adapter.adapter.continue_conversation(ref, send_card, bot_app_id)
+            else:
+                # 純文字
+                async def send_text(ctx):
+                    activity = Activity(
+                        type="message",
+                        text=f"💬 來自 **{sender_name}** 的訊息：\n\n{message_text}",
+                    )
+                    await ctx.send_activity(activity)
+
+                await bot_adapter.adapter.continue_conversation(ref, send_text, bot_app_id)
+
+            # 取得目標使用者顯示名稱
+            target_name = await user_repo.get_display_name(target_email) or target_email
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"✅ 訊息已成功發送給 {target_name}！")
+            )
+
+        except Exception as e:
+            self.logger.error(f"Send message failed: {str(e)}")
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 發送訊息時發生例外：{str(e)}")
             )
 
     async def _show_upload_card(

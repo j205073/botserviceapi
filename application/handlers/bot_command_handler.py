@@ -49,6 +49,7 @@ class BotCommandHandler:
             "it": self._handle_it_command,
             "itt": self._handle_itt_command,
             "itls": self._handle_itls_command,
+            "t": self._handle_t_command,
         }
     
     async def handle_command(self, turn_context: TurnContext, user_info: BotInteractionDTO) -> None:
@@ -497,6 +498,47 @@ class BotCommandHandler:
                 Activity(
                     type=ActivityTypes.message,
                     text=f"❌ 查詢 IT 工單失敗：{str(e)}",
+                )
+            )
+
+    async def _handle_t_command(
+        self,
+        turn_context: TurnContext,
+        user_info: BotInteractionDTO,
+        command_dto: CommandExecutionDTO,
+    ) -> None:
+        """處理 @t 命令：顯示發送訊息給使用者的卡片"""
+        try:
+            language = determine_language(user_info.user_mail)
+            from core.container import get_container
+            from domain.repositories.user_repository import UserRepository
+
+            container = get_container()
+            user_repo: UserRepository = container.get(UserRepository)
+
+            # 建立可發送對象清單（有 conversation_reference 的使用者）
+            user_choices = []
+            for email, session in user_repo._sessions.items():
+                if not session.conversation_reference:
+                    continue
+                profile = await user_repo.get_profile(email)
+                dept = profile.department if profile and profile.department else ""
+                name = (profile.display_name if profile and profile.display_name
+                        else user_repo._display_names.get(email, email.split("@")[0]))
+                title = f"{dept}-{name}" if dept else name
+                user_choices.append({"title": title, "value": email})
+
+            # 依 title 排序
+            user_choices.sort(key=lambda c: c["title"])
+
+            from features.it_support.cards import build_send_message_card
+            card = build_send_message_card(language, user_choices)
+            await turn_context.send_activity(card)
+        except Exception as e:
+            await turn_context.send_activity(
+                Activity(
+                    type=ActivityTypes.message,
+                    text=f"❌ 無法顯示發送訊息卡片：{str(e)}",
                 )
             )
 

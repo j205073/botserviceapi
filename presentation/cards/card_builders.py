@@ -383,6 +383,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "desc": "幫其他同仁提交 IT 單",
                     },
                     {
+                        "title": "💬 發送訊息",
+                        "value": "@t",
+                        "desc": "發送訊息或圖片給指定使用者",
+                    },
+                    {
                         "title": "🏢 預約會議室",
                         "value": "@book-room",
                         "desc": "預約會議室",
@@ -432,6 +437,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "desc": "Submit IT ticket on behalf of others",
                     },
                     {
+                        "title": "💬 Send Message",
+                        "value": "@t",
+                        "desc": "Send message or image to a user",
+                    },
+                    {
                         "title": "🏢 Book Room",
                         "value": "@book-room",
                         "desc": "Book meeting room",
@@ -479,6 +489,11 @@ class HelpCardBuilder(BaseCardBuilder):
                         "title": "🛠️ IT代理申請",
                         "value": "@itt",
                         "desc": "他の人のためにIT申請を代理",
+                    },
+                    {
+                        "title": "💬 メッセージ送信",
+                        "value": "@t",
+                        "desc": "指定ユーザーにメッセージや画像を送信",
                     },
                     {
                         "title": "🏢 会議室予約",
