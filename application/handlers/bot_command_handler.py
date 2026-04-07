@@ -512,20 +512,21 @@ class BotCommandHandler:
             language = determine_language(user_info.user_mail)
             from core.container import get_container
             from domain.repositories.user_repository import UserRepository
+            from app import user_conversation_refs, user_display_names
 
             container = get_container()
             user_repo: UserRepository = container.get(UserRepository)
 
-            # 建立可發送對象清單（有 conversation_reference 的使用者）
+            # 建立可發送對象清單（從全域 user_conversation_refs 取得有連線的使用者）
             user_choices = []
-            for email, session in user_repo._sessions.items():
-                if not session.conversation_reference:
+            for email, ref in user_conversation_refs.items():
+                if not ref:
                     continue
                 profile = await user_repo.get_profile(email)
                 dept = profile.department if profile and profile.department else ""
-                name = (profile.display_name if profile and profile.display_name
-                        else user_repo._display_names.get(email, email.split("@")[0]))
-                title = f"{dept}-{name}" if dept else name
+                display = (profile.display_name if profile and profile.display_name
+                           else user_display_names.get(email, email.split("@")[0]))
+                title = f"{dept}-{display}" if dept else display
                 user_choices.append({"title": title, "value": email})
 
             # 依 title 排序

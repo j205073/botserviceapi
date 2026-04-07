@@ -672,11 +672,12 @@ class TeamsMessageHandler:
 
             from core.container import get_container
             from domain.repositories.user_repository import UserRepository
+            from app import user_conversation_refs, user_display_names
 
             container = get_container()
             user_repo: UserRepository = container.get(UserRepository)
 
-            ref = await user_repo.get_conversation_reference(target_email)
+            ref = user_conversation_refs.get(target_email)
             if not ref:
                 await turn_context.send_activity(
                     Activity(type=ActivityTypes.message, text=f"❌ 找不到 {target_email} 的連線資訊，該使用者可能尚未與 Bot 互動。")
@@ -743,7 +744,7 @@ class TeamsMessageHandler:
                 await bot_adapter.adapter.continue_conversation(ref, send_text, bot_app_id)
 
             # 取得目標使用者顯示名稱
-            target_name = await user_repo.get_display_name(target_email) or target_email
+            target_name = await user_repo.get_display_name(target_email) or user_display_names.get(target_email, target_email)
             await turn_context.send_activity(
                 Activity(type=ActivityTypes.message, text=f"✅ 訊息已成功發送給 {target_name}！")
             )
