@@ -302,12 +302,12 @@ class EmailNotifier:
             if m:
                 author = m.group(1)
                 text = html_mod.escape(m.group(2))
-                initials = author[0] if author else "?"
+                initials = author[0] if author else "ℹ"
             else:
                 line = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)
                 author = ""
                 text = line
-                initials = "?"
+                initials = "ℹ"
 
             is_last = (i == len(lines) - 1)
             border = "" if is_last else f"border-bottom: 1px solid {_CLR_BORDER_LIGHT};"

@@ -510,6 +510,8 @@ class BotCommandHandler:
         """處理 @t 命令：顯示發送訊息給使用者的卡片（僅 IT 人員可用）"""
         try:
             # 權限檢查
+            self.logger.info("@t 權限檢查: user_mail=%s, lower=%s, it_staff=%s",
+                             user_info.user_mail, user_info.user_mail.lower(), self.config.it_staff_emails)
             if user_info.user_mail.lower() not in self.config.it_staff_emails:
                 await turn_context.send_activity(
                     Activity(type=ActivityTypes.message, text="❌ 此功能僅限 IT 人員使用。")
