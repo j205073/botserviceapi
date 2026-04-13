@@ -1484,10 +1484,10 @@ class TeamsMessageHandler:
             url = getattr(a, "content_url", None) or getattr(a, "contentUrl", None)
 
             # Teams file info attachments
-            if not url and ctype == "application/vnd.microsoft.teams.file.download.info":
+            if ctype == "application/vnd.microsoft.teams.file.download.info":
                 content = getattr(a, "content", None) or {}
                 if isinstance(content, dict):
-                    url = content.get("downloadUrl")
+                    url = content.get("downloadUrl") or url
                     if not name:
                         name = content.get("name") or name
                     ft = content.get("fileType")
@@ -1495,6 +1495,25 @@ class TeamsMessageHandler:
                         from datetime import datetime
                         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                         name = f"upload_{ts}.{ft}"
+                    # 根據 fileType 或檔名推斷正確的 MIME type
+                    ext = (ft or "").lower() if ft else ""
+                    if not ext and name:
+                        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+                    mime_map = {
+                        "pdf": "application/pdf",
+                        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "doc": "application/msword",
+                        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "xls": "application/vnd.ms-excel",
+                        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        "ppt": "application/vnd.ms-powerpoint",
+                        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                        "gif": "image/gif", "bmp": "image/bmp", "webp": "image/webp",
+                        "txt": "text/plain", "csv": "text/csv", "json": "application/json",
+                        "xml": "text/xml", "md": "text/markdown", "log": "text/plain",
+                    }
+                    if ext in mime_map:
+                        ctype = mime_map[ext]
 
             # Skip card attachments and HTML previews
             if ctype.startswith("application/vnd.microsoft.card"):
@@ -1514,6 +1533,7 @@ class TeamsMessageHandler:
                         if data_bytes.startswith(b"\x89PNG\r\n\x1a\n"): mime = "image/png"
                         elif data_bytes.startswith(b"\xff\xd8"): mime = "image/jpeg"
                         elif data_bytes.startswith(b"GIF8"): mime = "image/gif"
+                        elif data_bytes.startswith(b"BM"): mime = "image/bmp"
                         elif data_bytes.startswith(b"%PDF"): mime = "application/pdf"
                     files.append({"data": data_bytes, "name": name or "file", "ctype": mime})
                     continue
@@ -1577,6 +1597,7 @@ class TeamsMessageHandler:
                             elif data.startswith(b"\xff\xd8"): ctype = "image/jpeg"
                             elif data.startswith(b"GIF8"): ctype = "image/gif"
                             elif data.startswith(b"RIFF") and b"WEBP" in data[:16]: ctype = "image/webp"
+                            elif data.startswith(b"BM"): ctype = "image/bmp"
                             elif data.startswith(b"%PDF"): ctype = "application/pdf"
                         results.append({"bytes": data, "mime_type": ctype, "name": name})
                     else:
@@ -1635,7 +1656,7 @@ class TeamsMessageHandler:
                 if unsupported:
                     await turn_context.send_activity(Activity(
                         type=ActivityTypes.message,
-                        text=f"⚠️ 無法解析：{', '.join(unsupported)}。目前支援圖片、PDF、Word、Excel、純文字檔。",
+                        text=f"⚠️ 無法解析：{', '.join(unsupported)}。目前支援圖片（PNG/JPG/BMP/GIF/WebP）、PDF、Word(.docx)、Excel(.xlsx/.xls)、PowerPoint(.pptx)、純文字檔。",
                     ))
 
                 if all_texts:
@@ -1652,6 +1673,11 @@ class TeamsMessageHandler:
                         Activity(type=ActivityTypes.message, text=response)
                     )
 
+            # 附件分析完成後顯示支援格式提示
+            tip = ("💡 支援格式：圖片（PNG/JPG/BMP/GIF/WebP）、PDF、Word(.docx)、"
+                   "Excel(.xlsx/.xls)、PowerPoint(.pptx)、純文字（TXT/CSV/JSON/XML/MD）")
+            await turn_context.send_activity(Activity(type=ActivityTypes.message, text=tip))
+
         except Exception:
             names = ", ".join(a["name"] for a in attachments)
             self.logger.exception("附件解析失敗 user_mail=%s files=%s", user_info.user_mail, names)
@@ -1659,11 +1685,23 @@ class TeamsMessageHandler:
                 type=ActivityTypes.message, text="❌ 檔案解析失敗，請稍後再試。",
             ))
 
+    # 不支援的舊格式，提示使用者另存新版
+    _LEGACY_FORMATS = {
+        ".doc": ".docx", ".xls": ".xlsx", ".ppt": ".pptx",
+    }
+
     def _extract_text_from_file(self, data: bytes, mime: str, name: str) -> Optional[str]:
         """從檔案 bytes 中擷取文字內容"""
+        lower_name = name.lower()
+
+        # 舊格式提示另存新版
+        for old_ext, new_ext in self._LEGACY_FORMATS.items():
+            if lower_name.endswith(old_ext) and not lower_name.endswith(new_ext):
+                return f"⚠️ 不支援舊版 {old_ext} 格式，請另存為 {new_ext} 後重新上傳。"
+
         try:
             # PDF
-            if mime == "application/pdf" or name.lower().endswith(".pdf"):
+            if mime == "application/pdf" or lower_name.endswith(".pdf"):
                 from PyPDF2 import PdfReader
                 import io
                 reader = PdfReader(io.BytesIO(data))
@@ -1671,14 +1709,14 @@ class TeamsMessageHandler:
                 return "\n".join(pages).strip() or None
 
             # Word (.docx)
-            if "wordprocessingml" in mime or name.lower().endswith(".docx"):
+            if "wordprocessingml" in mime or lower_name.endswith(".docx"):
                 from docx import Document
                 import io
                 doc = Document(io.BytesIO(data))
                 return "\n".join(p.text for p in doc.paragraphs).strip() or None
 
             # Excel (.xlsx)
-            if "spreadsheetml" in mime or name.lower().endswith(".xlsx"):
+            if "spreadsheetml" in mime or lower_name.endswith(".xlsx"):
                 import openpyxl
                 import io
                 wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
@@ -1690,8 +1728,41 @@ class TeamsMessageHandler:
                         lines.append("\t".join(cells))
                 return "\n".join(lines).strip() or None
 
-            # 純文字
-            if mime.startswith("text/") or name.lower().endswith((".txt", ".csv", ".log", ".json", ".xml")):
+            # Excel (.xls 舊格式)
+            if "ms-excel" in mime or lower_name.endswith(".xls"):
+                import xlrd
+                import io
+                wb = xlrd.open_workbook(file_contents=data)
+                lines = []
+                for ws in wb.sheets()[:3]:
+                    lines.append(f"[Sheet: {ws.name}]")
+                    for row_idx in range(min(ws.nrows, 100)):
+                        cells = [str(ws.cell_value(row_idx, col)) for col in range(ws.ncols)]
+                        lines.append("\t".join(cells))
+                return "\n".join(lines).strip() or None
+
+            # PowerPoint (.pptx)
+            if "presentationml" in mime or lower_name.endswith(".pptx"):
+                from pptx import Presentation
+                import io
+                prs = Presentation(io.BytesIO(data))
+                lines = []
+                for i, slide in enumerate(prs.slides[:50], 1):
+                    texts = []
+                    for shape in slide.shapes:
+                        if shape.has_text_frame:
+                            for paragraph in shape.text_frame.paragraphs:
+                                t = paragraph.text.strip()
+                                if t:
+                                    texts.append(t)
+                    if texts:
+                        lines.append(f"[Slide {i}]")
+                        lines.extend(texts)
+                return "\n".join(lines).strip() or None
+
+            # 純文字（含 .md）
+            if (mime.startswith("text/") or "json" in mime or "xml" in mime
+                    or lower_name.endswith((".txt", ".csv", ".log", ".json", ".xml", ".md"))):
                 return data.decode("utf-8", errors="replace").strip() or None
 
         except Exception as e:

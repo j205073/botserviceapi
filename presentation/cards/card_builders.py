@@ -587,6 +587,18 @@ class HelpCardBuilder(BaseCardBuilder):
                     "choices": choices,
                     "value": choices[0]["value"] if choices else "",
                 },
+                {
+                    "type": "TextBlock",
+                    "text": {
+                        "zh": "📎 支援上傳：圖片（PNG/JPG/BMP/GIF/WebP）、PDF、Word(.docx)、Excel(.xlsx/.xls)、PowerPoint(.pptx)、純文字（TXT/CSV/JSON/XML/MD）",
+                        "en": "📎 Supported uploads: Images (PNG/JPG/BMP/GIF/WebP), PDF, Word(.docx), Excel(.xlsx/.xls), PowerPoint(.pptx), Text (TXT/CSV/JSON/XML/MD)",
+                        "ja": "📎 対応形式：画像（PNG/JPG/BMP/GIF/WebP）、PDF、Word(.docx)、Excel(.xlsx/.xls)、PowerPoint(.pptx)、テキスト（TXT/CSV/JSON/XML/MD）",
+                    }.get(language, "📎 支援上傳：圖片（PNG/JPG/BMP/GIF/WebP）、PDF、Word(.docx)、Excel(.xlsx/.xls)、PowerPoint(.pptx)、純文字（TXT/CSV/JSON/XML/MD）"),
+                    "wrap": True,
+                    "size": "Small",
+                    "color": "Accent",
+                    "spacing": "Medium",
+                },
             ],
             "actions": [
                 {

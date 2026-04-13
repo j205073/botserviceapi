@@ -76,6 +76,8 @@ def _wrap_email(header_html: str, body_html: str) -> str:
             <p style="font-family: {_FONT}; color: {_CLR_MUTED}; font-size: 11px; margin: 0; line-height: 1.6;">
               此為系統自動發送郵件，請勿直接回覆。</p>
             <p style="font-family: {_FONT}; color: {_CLR_MUTED}; font-size: 11px; margin: 6px 0 0;">
+              📎 TR GPT 支援上傳：圖片（PNG/JPG/BMP/GIF/WebP）、PDF、Word(.docx)、Excel(.xlsx/.xls)、PowerPoint(.pptx)、純文字檔</p>
+            <p style="font-family: {_FONT}; color: {_CLR_MUTED}; font-size: 11px; margin: 6px 0 0;">
               台灣林內 &middot; 資訊課 &middot; TR GPT</p>
           </td>
           <td align="right" valign="top">
