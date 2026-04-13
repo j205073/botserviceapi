@@ -975,17 +975,59 @@ class TeamsMessageHandler:
             )
             return
 
-        # 還原原始 activity 的 attachments，走 AI 解析流程
+        # 立即回應，避免 Teams 卡片互動逾時
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text="⏳ 正在解析檔案內容，請稍候...")
+        )
+
+        # 還原原始 activity 的 attachments，解析檔案清單
         original_activity = pending["activity"]
         turn_context.activity.attachments = original_activity.attachments
         files = self._parse_attachment_files(turn_context)
-        downloaded = await self._download_parsed_files(files) if files else []
-        if downloaded:
-            await self._handle_attachment_analysis(turn_context, pending["user_info"], downloaded)
-        else:
-            await turn_context.send_activity(
-                Activity(type=ActivityTypes.message, text="⚠️ 無法解析附件，請重新上傳。")
+
+        # 取得 conversation reference 供背景推播
+        conversation_ref = TurnContext.get_conversation_reference(turn_context.activity)
+
+        # 背景執行下載 + AI 解析，避免逾時
+        import asyncio
+        asyncio.create_task(
+            self._skip_attach_it_background(files, pending["user_info"], conversation_ref)
+        )
+
+    async def _skip_attach_it_background(
+        self, files: list, user_info: BotInteractionDTO, conversation_ref,
+    ) -> None:
+        """背景執行附件下載與 AI 解析，完成後透過 proactive message 回傳結果"""
+        try:
+            downloaded = await self._download_parsed_files(files) if files else []
+            if not downloaded:
+                await self._send_proactive_message(
+                    conversation_ref, "⚠️ 無法解析附件，請重新上傳。"
+                )
+                return
+
+            # 用 proactive message context 執行附件分析
+            import os
+            from core.container import get_container
+            from infrastructure.bot.bot_adapter import CustomBotAdapter
+
+            bot_adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+            bot_app_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID") or ""
+
+            async def do_analysis(turn_context):
+                await self._handle_attachment_analysis(turn_context, user_info, downloaded)
+
+            await bot_adapter.adapter.continue_conversation(
+                conversation_ref, do_analysis, bot_app_id
             )
+        except Exception as e:
+            self.logger.exception("AI 解析附件背景處理失敗: %s", e)
+            try:
+                await self._send_proactive_message(
+                    conversation_ref, "❌ 檔案解析失敗，請稍後再試。"
+                )
+            except Exception:
+                pass
 
     async def _handle_text_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
@@ -2257,6 +2299,24 @@ class TeamsMessageHandler:
                     text=f"✅ 已切換到模型：{selected_model}\n{model_info.get('use_case', '')}",
                 )
             )
+
+    async def _send_proactive_message(self, conversation_ref, text: str) -> None:
+        """透過 proactive message 發送文字訊息"""
+        import os
+        from core.container import get_container
+        from infrastructure.bot.bot_adapter import CustomBotAdapter
+
+        bot_adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+        bot_app_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID") or ""
+
+        async def send(turn_context):
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=text)
+            )
+
+        await bot_adapter.adapter.continue_conversation(
+            conversation_ref, send, bot_app_id
+        )
 
     async def _send_error_response(self, turn_context: TurnContext) -> None:
         """發送錯誤回應"""
