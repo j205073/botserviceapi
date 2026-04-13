@@ -31,7 +31,7 @@ cryptography==42.0.0
 
 # Azure / Microsoft Auth
 msrest==0.7.1
-azure-core==1.29.5
+azure-core>=1.30.0
 msal~=1.33.0
 
 # Production WSGI server (Azure fallback)
