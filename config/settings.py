@@ -99,13 +99,24 @@ class ITSupportConfig:
 
 
 @dataclass
+class DocIntelligenceConfig:
+    """Azure Document Intelligence 配置"""
+    endpoint: str
+    key: str
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.endpoint and self.key)
+
+
+@dataclass
 class AppConfig:
     """應用程式總配置"""
     debug_mode: bool
     debug_account: Optional[str]
     enable_ai_intent_analysis: bool
     it_staff_emails: List[str]
-    
+
     # 各模組配置
     bot: BotConfig
     openai: OpenAIConfig
@@ -114,6 +125,7 @@ class AppConfig:
     graph_api: GraphAPIConfig
     tasks: TaskConfig
     it_support: ITSupportConfig
+    doc_intelligence: DocIntelligenceConfig
     
     @classmethod
     def from_env(cls) -> 'AppConfig':
@@ -170,7 +182,12 @@ class AppConfig:
                 todo_reminder_interval_seconds=int(os.getenv("TODO_REMINDER_INTERVAL_SECONDS", "3600"))
             ),
 
-            it_support=ITSupportConfig.from_env()
+            it_support=ITSupportConfig.from_env(),
+
+            doc_intelligence=DocIntelligenceConfig(
+                endpoint=os.getenv("DOC_INTELLIGENCE_ENDPOINT", ""),
+                key=os.getenv("DOC_INTELLIGENCE_KEY", ""),
+            ),
         )
     
     def validate(self) -> list[str]:

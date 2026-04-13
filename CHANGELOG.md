@@ -1,6 +1,29 @@
 # CHANGELOG
 
-TR GPT Bot 變更紀錄（2026-03-01 ~ 2026-04-04）
+TR GPT Bot 變更紀錄（2026-03-01 ~）
+
+---
+
+## 2026-04-13
+
+### 新功能
+
+- **Azure Document Intelligence 整合** — 掃描型 PDF（圖片型）自動透過 OCR 擷取文字，不再回傳空白。大型 PDF 自動截取前 20 頁處理
+- **PDF 格式類型回報** — 上傳 PDF 時第一行顯示「PDF格式: 文字」或「PDF格式: 圖片（已透過 OCR 辨識）」
+- **擴充多模態檔案支援** — 新增 PPTX（python-pptx）、XLS（xlrd）、BMP 圖片支援
+- **支援格式提示** — 四處顯示支援格式清單：附件分析回覆、@help 功能選單、歡迎訊息、Email footer
+- **階段 2 規劃文件** — `docs/phase2_natural_language_skills.md`：自然語言 SKILL.md + Handler plugin 架構設計
+
+### 改進
+
+- **Email 評論 icon** — 無作者名的補充資訊 icon 從 `?` 改為 `ℹ`
+- **舊格式檔案提示** — 上傳 .doc/.xls/.ppt 時提示使用者另存為新版格式
+- **@t 權限 debug log** — 加入 user_mail 與 it_staff_emails 對照 log
+
+### 修復
+
+- **PDF 解析失敗** — Teams 傳檔時 content_type 為 `application/vnd.microsoft.teams.file.download.info`，未正確推斷 MIME type 導致 PDF 無法解析。加入 fileType/副檔名 → MIME 映射表修正
+- **Azure 環境變數補齊** — `IT_STAFF_EMAILS`、`DOC_INTELLIGENCE_ENDPOINT`、`DOC_INTELLIGENCE_KEY` 透過 az cli 推上 Azure App Service
 
 ---
 

@@ -1706,7 +1706,14 @@ class TeamsMessageHandler:
                 import io
                 reader = PdfReader(io.BytesIO(data))
                 pages = [p.extract_text() or "" for p in reader.pages[:20]]
-                return "\n".join(pages).strip() or None
+                text = "\n".join(pages).strip()
+                if text:
+                    return f"📄 PDF格式: 文字\n\n{text}"
+                # 文字擷取失敗 → 嘗試 Document Intelligence OCR
+                ocr_text = self._ocr_with_doc_intelligence(data, name)
+                if ocr_text:
+                    return f"📄 PDF格式: 圖片（已透過 OCR 辨識）\n\n{ocr_text}"
+                return f"📄 PDF格式: 圖片\n\n⚠️ 此 PDF 為掃描檔，文字擷取為空。請確認 Document Intelligence 服務已設定，或改傳文字型 PDF。"
 
             # Word (.docx)
             if "wordprocessingml" in mime or lower_name.endswith(".docx"):
@@ -1769,6 +1776,56 @@ class TeamsMessageHandler:
             self.logger.warning("擷取檔案文字失敗 name=%s: %s", name, e)
 
         return None
+
+    _OCR_MAX_PAGES = 20  # OCR 最多處理頁數，避免超時
+
+    def _ocr_with_doc_intelligence(self, data: bytes, name: str) -> Optional[str]:
+        """使用 Azure Document Intelligence OCR 擷取掃描型 PDF 文字"""
+        if not self.config.doc_intelligence.enabled:
+            self.logger.debug("Document Intelligence 未設定，跳過 OCR: %s", name)
+            return None
+        try:
+            from azure.ai.documentintelligence import DocumentIntelligenceClient
+            from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+            from azure.core.credentials import AzureKeyCredential
+            import io
+
+            # 大型 PDF 截取前 N 頁
+            ocr_data = data
+            truncated = False
+            try:
+                from PyPDF2 import PdfReader, PdfWriter
+                reader = PdfReader(io.BytesIO(data))
+                total_pages = len(reader.pages)
+                if total_pages > self._OCR_MAX_PAGES:
+                    writer = PdfWriter()
+                    for i in range(self._OCR_MAX_PAGES):
+                        writer.add_page(reader.pages[i])
+                    buf = io.BytesIO()
+                    writer.write(buf)
+                    ocr_data = buf.getvalue()
+                    truncated = True
+                    self.logger.info("OCR 截取前 %d/%d 頁: %s", self._OCR_MAX_PAGES, total_pages, name)
+            except Exception:
+                pass  # 截取失敗就用原始資料
+
+            client = DocumentIntelligenceClient(
+                endpoint=self.config.doc_intelligence.endpoint,
+                credential=AzureKeyCredential(self.config.doc_intelligence.key),
+            )
+            poller = client.begin_analyze_document(
+                "prebuilt-read",
+                AnalyzeDocumentRequest(bytes_source=ocr_data),
+            )
+            result = poller.result()
+            text = result.content or ""
+            if truncated:
+                text += f"\n\n...（僅 OCR 前 {self._OCR_MAX_PAGES} 頁，共 {total_pages} 頁）"
+            self.logger.info("Document Intelligence OCR 完成: name=%s, chars=%d", name, len(text))
+            return text.strip() or None
+        except Exception as e:
+            self.logger.warning("Document Intelligence OCR 失敗 name=%s: %s", name, e)
+            return None
 
     async def _send_welcome_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
