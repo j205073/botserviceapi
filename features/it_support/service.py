@@ -186,14 +186,15 @@ class ITSupportService:
             return {"success": False, "error": "需求/問題說明不得為空"}
 
         # 從 Microsoft Graph 取得提出人的詳細資訊（姓名、部門）
+        from core.container import get_container
+        from infrastructure.external.graph_api_client import GraphAPIClient
+
+        container = get_container()
+        graph_client: GraphAPIClient = container.get(GraphAPIClient)
+
         user_display_name = reporter_name
         user_department = "未指定部門"
         try:
-            from core.container import get_container
-            from infrastructure.external.graph_api_client import GraphAPIClient
-
-            container = get_container()
-            graph_client: GraphAPIClient = container.get(GraphAPIClient)
             user_info = await graph_client.get_user_info(reporter_email)
             if user_info:
                 user_display_name = user_info.get("displayName") or reporter_name
@@ -239,14 +240,27 @@ class ITSupportService:
                 parts.append(line)
             kb_section = "\n".join(parts)
 
-        # 代提單模式：區分代理人與提出人
+        # 代提單模式：區分提出人與代理提出人
         if requester_email:
             requester_email = requester_email.strip()
+            # 從 Graph API 取得提出人（被代理者）的姓名與部門
+            requester_display_name = requester_email
+            requester_department = "未指定部門"
+            try:
+                requester_info = await graph_client.get_user_info(requester_email)
+                if requester_info:
+                    requester_display_name = requester_info.get("displayName") or requester_email
+                    requester_department = requester_info.get("department") or "未指定部門"
+                    logger.info("✅ 從 Graph API 取得代提單提出人資訊: %s, 部門: %s", requester_display_name, requester_department)
+            except Exception as e:
+                logger.warning("⚠️ 無法從 Graph API 取得代提單提出人資訊: %s", e)
+
             notes = (
                 f"單號: {issue_id}\n"
-                f"提出人: {requester_email}\n"
-                f"代理提報人: {user_display_name} <{reporter_email}>\n"
-                f"代理人部門: {user_department}\n"
+                f"提出人: {requester_display_name} <{requester_email}>\n"
+                f"提出人部門: {requester_department}\n"
+                f"代理提出人: {user_display_name} <{reporter_email}>\n"
+                f"代理提出人部門: {user_department}\n"
                 f"分類: {category_label} ({category_code})\n"
                 f"優先順序: {priority}\n"
                 f"建立來源: TR GPT bot（代提單 @itt）\n"
@@ -317,7 +331,7 @@ class ITSupportService:
                 # 儲存反向映射供 webhook 回呼使用
                 # 代提單模式：webhook 通知對象改為提出人
                 notify_email = requester_email if requester_email else reporter_email
-                notify_name = requester_email if requester_email else reporter_name
+                notify_name = requester_display_name if requester_email else reporter_name
                 self._task_to_reporter[gid] = {
                     "email": notify_email,
                     "issue_id": issue_id,
@@ -812,8 +826,8 @@ class ITSupportService:
             if m_name:
                 result["reporter_name"] = m_name.group(1).strip()
 
-            # 提取部門資訊（支援 "提出人部門" 或 "代理人部門"）
-            m_dept = re.search(r"(?:提出人|代理人)部門[:：]\s*(.+?)(?:\n|$)", notes)
+            # 提取部門資訊（支援 "提出人部門" 或 "代理提出人部門"）
+            m_dept = re.search(r"提出人部門[:：]\s*(.+?)(?:\n|$)", notes)
             if m_dept:
                 result["reporter_department"] = m_dept.group(1).strip()
 
