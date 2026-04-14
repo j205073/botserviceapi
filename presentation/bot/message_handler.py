@@ -1649,12 +1649,31 @@ class TeamsMessageHandler:
 
         return results
 
+    _ATTACHMENT_MAX_SIZE_MB = 20  # 單一附件大小上限
+
     async def _handle_attachment_analysis(
         self, turn_context: TurnContext, user_info: BotInteractionDTO,
         attachments: List[dict],
     ) -> None:
         """用 AI 解析使用者上傳的附件（圖片用 Vision，文件用文字擷取）。支援多筆附件。"""
         import base64
+
+        # 檔案大小檢查：超過上限的檔案給予友善提示
+        max_bytes = int(self._ATTACHMENT_MAX_SIZE_MB * 1024 * 1024)
+        oversized = [a for a in attachments if len(a.get("bytes", b"")) > max_bytes]
+        attachments = [a for a in attachments if len(a.get("bytes", b"")) <= max_bytes]
+
+        if oversized:
+            names = ", ".join(a["name"] for a in oversized)
+            sizes = ", ".join(f"{len(a['bytes'])/1024/1024:.1f}MB" for a in oversized)
+            await turn_context.send_activity(Activity(
+                type=ActivityTypes.message,
+                text=f"⚠️ 檔案過大無法解析：{names}（{sizes}）。\n"
+                     f"目前支援的檔案大小上限為 {self._ATTACHMENT_MAX_SIZE_MB}MB。\n"
+                     f"💡 建議：可將大型 PDF 拆分為較小的檔案後重新上傳，或僅上傳需要解析的部分頁面。",
+            ))
+            if not attachments:
+                return
 
         user_text = (user_info.message_text or "").strip()
         openai_client = self.conversation_service.openai_client
@@ -1819,7 +1838,8 @@ class TeamsMessageHandler:
 
         return None
 
-    _OCR_MAX_PAGES = 20  # OCR 最多處理頁數，避免超時
+    _OCR_MAX_SIZE_MB = 3.5  # Document Intelligence 檔案大小上限（預留 buffer，Free tier 4MB）
+    _OCR_MAX_PAGES = 50  # OCR 最多處理頁數上限
 
     def _ocr_with_doc_intelligence(self, data: bytes, name: str) -> Optional[str]:
         """使用 Azure Document Intelligence OCR 擷取掃描型 PDF 文字"""
@@ -1832,22 +1852,40 @@ class TeamsMessageHandler:
             from azure.core.credentials import AzureKeyCredential
             import io
 
-            # 大型 PDF 截取前 N 頁
+            # 大型 PDF 截取：以檔案大小為主要限制，頁數為次要限制
             ocr_data = data
             truncated = False
+            ocr_pages = 0
             try:
                 from PyPDF2 import PdfReader, PdfWriter
                 reader = PdfReader(io.BytesIO(data))
                 total_pages = len(reader.pages)
-                if total_pages > self._OCR_MAX_PAGES:
+                max_bytes = int(self._OCR_MAX_SIZE_MB * 1024 * 1024)
+
+                if len(data) > max_bytes or total_pages > self._OCR_MAX_PAGES:
+                    # 逐頁加入，直到接近檔案大小上限
                     writer = PdfWriter()
-                    for i in range(self._OCR_MAX_PAGES):
+                    for i in range(min(total_pages, self._OCR_MAX_PAGES)):
                         writer.add_page(reader.pages[i])
-                    buf = io.BytesIO()
-                    writer.write(buf)
+                        buf = io.BytesIO()
+                        writer.write(buf)
+                        if buf.tell() > max_bytes:
+                            # 超過大小限制，移除最後一頁
+                            if i > 0:
+                                writer = PdfWriter()
+                                for j in range(i):
+                                    writer.add_page(reader.pages[j])
+                                buf = io.BytesIO()
+                                writer.write(buf)
+                            break
                     ocr_data = buf.getvalue()
-                    truncated = True
-                    self.logger.info("OCR 截取前 %d/%d 頁: %s", self._OCR_MAX_PAGES, total_pages, name)
+                    ocr_pages = min(i, total_pages)  # 實際 OCR 頁數
+                    if ocr_pages < total_pages:
+                        truncated = True
+                    self.logger.info(
+                        "OCR 截取前 %d/%d 頁 (%.1f MB): %s",
+                        ocr_pages, total_pages, len(ocr_data) / 1024 / 1024, name,
+                    )
             except Exception:
                 pass  # 截取失敗就用原始資料
 
@@ -1862,7 +1900,7 @@ class TeamsMessageHandler:
             result = poller.result()
             text = result.content or ""
             if truncated:
-                text += f"\n\n...（僅 OCR 前 {self._OCR_MAX_PAGES} 頁，共 {total_pages} 頁）"
+                text += f"\n\n...（僅 OCR 前 {ocr_pages} 頁，共 {total_pages} 頁）"
             self.logger.info("Document Intelligence OCR 完成: name=%s, chars=%d", name, len(text))
             return text.strip() or None
         except Exception as e:
