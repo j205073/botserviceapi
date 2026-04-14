@@ -1071,7 +1071,7 @@ class TeamsMessageHandler:
             from features.it_support.cards import build_kb_result_card
 
             kb_client = KBVectorClient()
-            result = await kb_client.ask(question, role="user", kb_name=kb_slug, timeout=30)
+            result = await kb_client.ask(question, role="kb", kb_name=kb_slug, timeout=30)
 
             answer = (result.get("answer") or "").strip()
             sources = result.get("sources") or []

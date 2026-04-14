@@ -559,49 +559,132 @@ class BotCommandHandler:
         user_info: BotInteractionDTO,
         command_dto: CommandExecutionDTO,
     ) -> None:
-        """處理 @kb 命令：知識庫查詢（需密碼驗證）"""
+        """處理 @kb 命令：知識庫查詢
+        - @kb：依使用者部門自動匹配可用知識庫
+        - @kb <密碼>：管理員模式，列出所有知識庫
+        """
         import os
+        import json
         kb_password = os.getenv("KB_ACCESS_PASSWORD", "rinnai")
+        language = determine_language(user_info.user_mail)
 
-        # 檢查是否提供密碼
-        if not command_dto.parameters:
-            language = determine_language(user_info.user_mail)
-            hint = {
-                "zh": "🔐 請輸入查詢密碼。\n用法：`@kb <密碼>`",
-                "en": "🔐 Please enter the access password.\nUsage: `@kb <password>`",
-                "ja": "🔐 アクセスパスワードを入力してください。\n使用法：`@kb <パスワード>`",
-            }.get(language, "🔐 請輸入查詢密碼。\n用法：`@kb <密碼>`")
-            await turn_context.send_activity(
-                Activity(type=ActivityTypes.message, text=hint)
-            )
-            return
-
-        # 驗證密碼
-        provided_password = command_dto.parameters[0].strip()
-        if provided_password != kb_password:
-            await turn_context.send_activity(
-                Activity(type=ActivityTypes.message, text="❌ 密碼錯誤，請重新輸入。")
-            )
-            return
-
-        # 密碼正確 → 取得知識庫清單並顯示查詢卡片
-        try:
-            language = determine_language(user_info.user_mail)
-            from features.it_support.kb_client import KBVectorClient
-            kb_client = KBVectorClient()
-
-            kb_list = await kb_client.list_kbs()
-            if not kb_list:
+        if command_dto.parameters:
+            # 有參數 → 驗證密碼，顯示所有知識庫
+            provided_password = command_dto.parameters[0].strip()
+            if provided_password != kb_password:
                 await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text="⚠️ 目前無可用的知識庫，請稍後再試。")
+                    Activity(type=ActivityTypes.message, text="❌ 密碼錯誤，請重新輸入。")
                 )
                 return
 
+            try:
+                from features.it_support.kb_client import KBVectorClient
+                kb_client = KBVectorClient()
+                kb_list = await kb_client.list_kbs()
+                if not kb_list:
+                    await turn_context.send_activity(
+                        Activity(type=ActivityTypes.message, text="⚠️ 目前無可用的知識庫，請稍後再試。")
+                    )
+                    return
+
+                from features.it_support.cards import build_kb_query_card
+                card = build_kb_query_card(language, kb_list)
+                await turn_context.send_activity(card)
+            except Exception as e:
+                logger.exception("KB 查詢卡片顯示失敗: %s", e)
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text=f"❌ 無法載入知識庫：{str(e)}")
+                )
+            return
+
+        # 無參數 → 依使用者部門自動匹配知識庫
+        try:
+            from core.container import get_container
+            from infrastructure.external.graph_api_client import GraphAPIClient
+            from features.it_support.kb_client import KBVectorClient
+
+            container = get_container()
+            graph_client: GraphAPIClient = container.get(GraphAPIClient)
+
+            # 取得使用者部門
+            user_department = ""
+            try:
+                user_profile = await graph_client.get_user_info(user_info.user_mail)
+                if user_profile:
+                    user_department = (user_profile.get("department") or "").strip()
+            except Exception as e:
+                logger.warning("⚠️ KB: 無法取得使用者部門: %s", e)
+
+            if not user_department:
+                await turn_context.send_activity(
+                    Activity(
+                        type=ActivityTypes.message,
+                        text="⚠️ 您的帳號尚未設定所屬單位，無法自動匹配知識庫。\n請聯繫 IT 人員於 Azure AD 設定您的部門資訊。",
+                    )
+                )
+                return
+
+            # 從 KB_DEPARTMENT_MAP 匹配部門對應的知識庫 slug
+            dept_map_raw = os.getenv("KB_DEPARTMENT_MAP", "{}")
+            try:
+                dept_map: dict = json.loads(dept_map_raw)
+            except json.JSONDecodeError:
+                dept_map = {}
+
+            matched_slugs: list = []
+            matched = dept_map.get(user_department)
+            if not matched:
+                # 模糊匹配
+                for key, slugs in dept_map.items():
+                    if key in user_department or user_department in key:
+                        matched = slugs
+                        break
+            if matched:
+                if isinstance(matched, str):
+                    matched_slugs.append(matched)
+                elif isinstance(matched, list):
+                    matched_slugs.extend(matched)
+
+            # 加入個人專屬 KB（KB_USER_MAP）
+            user_map_raw = os.getenv("KB_USER_MAP", "{}")
+            try:
+                user_map: dict = json.loads(user_map_raw)
+            except json.JSONDecodeError:
+                user_map = {}
+            user_kbs = user_map.get(user_info.user_mail) or user_map.get(user_info.user_mail.lower()) or []
+            if isinstance(user_kbs, str):
+                user_kbs = [user_kbs]
+            for slug in user_kbs:
+                if slug not in matched_slugs:
+                    matched_slugs.append(slug)
+
+            if not matched_slugs:
+                await turn_context.send_activity(
+                    Activity(
+                        type=ActivityTypes.message,
+                        text=f"⚠️ 您的單位「{user_department}」尚未設定對應的知識庫。\n請聯繫 IT 人員為您的部門開通知識庫服務。",
+                    )
+                )
+                return
+
+            # 取得完整 KB 清單（含 displayName），篩選出使用者有權的
+            kb_client = KBVectorClient()
+            all_kbs = await kb_client.list_kbs()
+            all_kb_map = {kb.get("slug"): kb for kb in all_kbs}
+
+            user_kb_list = []
+            for slug in matched_slugs:
+                if slug in all_kb_map:
+                    user_kb_list.append(all_kb_map[slug])
+                else:
+                    # API 沒回傳但有設定，用 slug 當 displayName
+                    user_kb_list.append({"slug": slug, "displayName": slug})
+
             from features.it_support.cards import build_kb_query_card
-            card = build_kb_query_card(language, kb_list)
+            card = build_kb_query_card(language, user_kb_list)
             await turn_context.send_activity(card)
         except Exception as e:
-            logger.exception("KB 查詢卡片顯示失敗: %s", e)
+            logger.exception("KB 部門匹配查詢失敗: %s", e)
             await turn_context.send_activity(
                 Activity(type=ActivityTypes.message, text=f"❌ 無法載入知識庫：{str(e)}")
             )
