@@ -1785,11 +1785,16 @@ class TeamsMessageHandler:
             # --- 有文件：逐一擷取文字，合併後送 AI ---
             if files:
                 all_texts = []
+                scanned_pdfs = []  # 掃描型 PDF，需用 Vision 處理
                 unsupported = []
                 for f in files:
+                    # 判斷是否為 PDF（掃描型會回傳 None）
+                    is_pdf = (f["mime_type"] == "application/pdf" or f["name"].lower().endswith(".pdf"))
                     file_text = self._extract_text_from_file(f["bytes"], f["mime_type"], f["name"])
                     if file_text:
                         all_texts.append(f"📄 **{f['name']}**\n{file_text}")
+                    elif is_pdf:
+                        scanned_pdfs.append(f)
                     else:
                         unsupported.append(f["name"])
 
@@ -1812,6 +1817,67 @@ class TeamsMessageHandler:
                     await turn_context.send_activity(
                         Activity(type=ActivityTypes.message, text=response)
                     )
+
+                # --- 掃描型 PDF：分批轉圖片 → Vision 辨識 → 合併摘要 ---
+                for pdf_file in scanned_pdfs:
+                    pdf_images, total_pages = self._pdf_to_images(pdf_file["bytes"], pdf_file["name"])
+                    if not pdf_images:
+                        await turn_context.send_activity(Activity(
+                            type=ActivityTypes.message,
+                            text=f"⚠️ 無法解析掃描型 PDF：{pdf_file['name']}",
+                        ))
+                        continue
+
+                    # 分批送 Vision（每批 _VISION_CHUNK_SIZE 頁）
+                    chunk_size = self._VISION_CHUNK_SIZE
+                    chunks = [pdf_images[i:i + chunk_size] for i in range(0, len(pdf_images), chunk_size)]
+                    chunk_texts = []
+
+                    for idx, chunk in enumerate(chunks):
+                        page_start = idx * chunk_size + 1
+                        page_end = page_start + len(chunk) - 1
+                        ocr_prompt = (
+                            f"以下是 PDF「{pdf_file['name']}」第 {page_start}~{page_end} 頁的圖片，"
+                            f"請完整辨識其中的所有文字內容，保留原始結構。"
+                        )
+                        content_parts: list = [{"type": "text", "text": ocr_prompt}]
+                        for img_b64 in chunk:
+                            content_parts.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                            })
+
+                        messages = [{"role": "user", "content": content_parts}]
+                        chunk_result = await openai_client.chat_completion(
+                            messages=messages, model=vision_model, max_tokens=4000,
+                        )
+                        chunk_texts.append(f"【第 {page_start}~{page_end} 頁】\n{chunk_result}")
+
+                    # 合併所有 chunk 結果
+                    combined_ocr = "\n\n---\n\n".join(chunk_texts)
+                    truncate_note = ""
+                    if len(pdf_images) < total_pages:
+                        truncate_note = f"\n\n...（僅辨識前 {len(pdf_images)} 頁，共 {total_pages} 頁）"
+
+                    # 如果只有一個 chunk，直接回傳辨識結果
+                    if len(chunks) == 1:
+                        await turn_context.send_activity(Activity(
+                            type=ActivityTypes.message,
+                            text=chunk_texts[0] + truncate_note,
+                        ))
+                    else:
+                        # 多個 chunk → 再送一次 AI 做總結摘要
+                        summary_prompt = user_text if user_text else (
+                            f"以下是 PDF「{pdf_file['name']}」經 OCR 辨識後的文字內容（共 {len(pdf_images)} 頁），"
+                            f"請分析並摘要重點。"
+                        )
+                        summary_messages = [{"role": "user", "content": f"{summary_prompt}\n\n---\n{combined_ocr}{truncate_note}"}]
+                        summary = await openai_client.chat_completion(
+                            messages=summary_messages, max_tokens=4000,
+                        )
+                        await turn_context.send_activity(
+                            Activity(type=ActivityTypes.message, text=summary)
+                        )
 
             # 附件分析完成後顯示支援格式提示
             tip = ("💡 支援格式：圖片（PNG/JPG/BMP/GIF/WebP）、PDF、Word(.docx)、"
@@ -1849,11 +1915,8 @@ class TeamsMessageHandler:
                 text = "\n".join(pages).strip()
                 if text:
                     return f"📄 PDF格式: 文字\n\n{text}"
-                # 文字擷取失敗 → 嘗試 Document Intelligence OCR
-                ocr_text = self._ocr_with_doc_intelligence(data, name)
-                if ocr_text:
-                    return f"📄 PDF格式: 圖片（已透過 OCR 辨識）\n\n{ocr_text}"
-                return f"📄 PDF格式: 圖片\n\n⚠️ 此 PDF 為掃描檔，文字擷取為空。請確認 Document Intelligence 服務已設定，或改傳文字型 PDF。"
+                # 文字擷取失敗 → 標記為掃描型 PDF，由 _handle_attachment_analysis 用 Vision 處理
+                return None
 
             # Word (.docx)
             if "wordprocessingml" in mime or lower_name.endswith(".docx"):
@@ -1917,74 +1980,44 @@ class TeamsMessageHandler:
 
         return None
 
-    _OCR_MAX_SIZE_MB = 3.5  # Document Intelligence 檔案大小上限（預留 buffer，Free tier 4MB）
-    _OCR_MAX_PAGES = 50  # OCR 最多處理頁數上限
+    _VISION_PDF_MAX_PAGES = 20  # Vision OCR 最多處理頁數
+    _VISION_CHUNK_SIZE = 5  # 每批送 Vision 的頁數
+    _VISION_PDF_DPI = 150  # PDF 轉圖片的 DPI
 
-    def _ocr_with_doc_intelligence(self, data: bytes, name: str) -> Optional[str]:
-        """使用 Azure Document Intelligence OCR 擷取掃描型 PDF 文字"""
-        if not self.config.doc_intelligence.enabled:
-            self.logger.debug("Document Intelligence 未設定，跳過 OCR: %s", name)
-            return None
+    def _pdf_to_images(self, data: bytes, name: str) -> tuple:
+        """將掃描型 PDF 轉換為 base64 PNG 圖片清單，供 Vision 辨識。
+
+        Returns:
+            (images: list[str], total_pages: int) — images 為 base64 PNG 字串清單
+        """
+        import base64
         try:
-            from azure.ai.documentintelligence import DocumentIntelligenceClient
-            from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
-            from azure.core.credentials import AzureKeyCredential
-            import io
+            import fitz  # PyMuPDF
 
-            # 大型 PDF 截取：以檔案大小為主要限制，頁數為次要限制
-            ocr_data = data
-            truncated = False
-            ocr_pages = 0
-            try:
-                from PyPDF2 import PdfReader, PdfWriter
-                reader = PdfReader(io.BytesIO(data))
-                total_pages = len(reader.pages)
-                max_bytes = int(self._OCR_MAX_SIZE_MB * 1024 * 1024)
+            doc = fitz.open(stream=data, filetype="pdf")
+            total_pages = len(doc)
+            max_pages = min(total_pages, self._VISION_PDF_MAX_PAGES)
+            images = []
 
-                if len(data) > max_bytes or total_pages > self._OCR_MAX_PAGES:
-                    # 逐頁加入，直到接近檔案大小上限
-                    writer = PdfWriter()
-                    for i in range(min(total_pages, self._OCR_MAX_PAGES)):
-                        writer.add_page(reader.pages[i])
-                        buf = io.BytesIO()
-                        writer.write(buf)
-                        if buf.tell() > max_bytes:
-                            # 超過大小限制，移除最後一頁
-                            if i > 0:
-                                writer = PdfWriter()
-                                for j in range(i):
-                                    writer.add_page(reader.pages[j])
-                                buf = io.BytesIO()
-                                writer.write(buf)
-                            break
-                    ocr_data = buf.getvalue()
-                    ocr_pages = min(i, total_pages)  # 實際 OCR 頁數
-                    if ocr_pages < total_pages:
-                        truncated = True
-                    self.logger.info(
-                        "OCR 截取前 %d/%d 頁 (%.1f MB): %s",
-                        ocr_pages, total_pages, len(ocr_data) / 1024 / 1024, name,
-                    )
-            except Exception:
-                pass  # 截取失敗就用原始資料
+            for i in range(max_pages):
+                page = doc[i]
+                pix = page.get_pixmap(dpi=self._VISION_PDF_DPI)
+                img_bytes = pix.tobytes("png")
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                images.append(b64)
 
-            client = DocumentIntelligenceClient(
-                endpoint=self.config.doc_intelligence.endpoint,
-                credential=AzureKeyCredential(self.config.doc_intelligence.key),
-            )
-            poller = client.begin_analyze_document(
-                "prebuilt-read",
-                AnalyzeDocumentRequest(bytes_source=ocr_data),
-            )
-            result = poller.result()
-            text = result.content or ""
-            if truncated:
-                text += f"\n\n...（僅 OCR 前 {ocr_pages} 頁，共 {total_pages} 頁）"
-            self.logger.info("Document Intelligence OCR 完成: name=%s, chars=%d", name, len(text))
-            return text.strip() or None
+            doc.close()
+
+            if total_pages > max_pages:
+                self.logger.info(
+                    "Vision PDF 截取前 %d/%d 頁: %s", max_pages, total_pages, name,
+                )
+
+            self.logger.info("PDF 轉圖片完成: name=%s, pages=%d/%d", name, len(images), total_pages)
+            return images, total_pages
         except Exception as e:
-            self.logger.warning("Document Intelligence OCR 失敗 name=%s: %s", name, e)
-            return None
+            self.logger.warning("PDF 轉圖片失敗 name=%s: %s", name, e)
+            return [], 0
 
     async def _send_welcome_message(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
