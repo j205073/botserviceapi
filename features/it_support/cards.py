@@ -584,3 +584,115 @@ def build_broadcast_card(language: str) -> Activity:
     }
 
     return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
+
+
+def build_kb_query_card(language: str, kb_list: List[Dict[str, str]]) -> Activity:
+    """Build an Adaptive Card for knowledge base query.
+
+    Args:
+        language: user language code (zh/en/ja)
+        kb_list: list of dicts with 'slug' and 'displayName' from KB API
+    """
+    texts = {
+        "zh": {
+            "title": "知識庫查詢",
+            "select_kb": "選擇知識庫",
+            "question": "請輸入您的問題",
+            "placeholder": "請用自然語言描述您想查詢的問題...",
+            "submit": "查詢",
+        },
+        "en": {
+            "title": "Knowledge Base Query",
+            "select_kb": "Select Knowledge Base",
+            "question": "Enter your question",
+            "placeholder": "Describe your question in natural language...",
+            "submit": "Search",
+        },
+        "ja": {
+            "title": "ナレッジベース検索",
+            "select_kb": "ナレッジベースを選択",
+            "question": "質問を入力してください",
+            "placeholder": "自然言語で質問を記述してください...",
+            "submit": "検索",
+        },
+    }
+    t = texts.get(language, texts["zh"])
+
+    # Build dropdown choices from KB list
+    kb_choices = [
+        {"title": kb.get("displayName") or kb.get("slug", ""), "value": kb.get("slug", "")}
+        for kb in kb_list
+    ]
+
+    card_content: Dict[str, Any] = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+            {"type": "TextBlock", "text": f"📚 {t['title']}", "weight": "Bolder", "size": "Medium"},
+            {
+                "type": "Input.ChoiceSet",
+                "id": "kbSlug",
+                "label": t["select_kb"],
+                "choices": kb_choices,
+                "value": kb_choices[0]["value"] if kb_choices else "",
+                "style": "filtered",
+                "isRequired": True,
+            },
+            {
+                "type": "Input.Text",
+                "id": "kbQuestion",
+                "label": t["question"],
+                "isMultiline": True,
+                "maxLength": 2000,
+                "placeholder": t["placeholder"],
+                "isRequired": True,
+            },
+        ],
+        "actions": [
+            {"type": "Action.Submit", "title": f"🔍 {t['submit']}", "data": {"action": "submitKB"}}
+        ],
+    }
+
+    return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])
+
+
+def build_kb_result_card(language: str, kb_name: str, question: str, answer: str, sources: list) -> Activity:
+    """Build an Adaptive Card to display KB query results."""
+    texts = {
+        "zh": {"title": "知識庫查詢結果", "kb": "知識庫", "q": "問題", "ref": "參考來源"},
+        "en": {"title": "Knowledge Base Result", "kb": "Knowledge Base", "q": "Question", "ref": "References"},
+        "ja": {"title": "ナレッジベース検索結果", "kb": "ナレッジベース", "q": "質問", "ref": "参考情報"},
+    }
+    t = texts.get(language, texts["zh"])
+
+    body: list = [
+        {"type": "TextBlock", "text": f"📚 {t['title']}", "weight": "Bolder", "size": "Medium"},
+        {"type": "FactSet", "facts": [
+            {"title": t["kb"], "value": kb_name},
+            {"title": t["q"], "value": question[:100]},
+        ]},
+        {"type": "TextBlock", "text": answer, "wrap": True, "spacing": "Medium"},
+    ]
+
+    # Add source references if available
+    if sources:
+        body.append({"type": "TextBlock", "text": f"📎 {t['ref']}", "weight": "Bolder", "spacing": "Medium", "size": "Small"})
+        for src in sources[:5]:
+            title = src.get("title", "")
+            score = src.get("score")
+            preview = src.get("contentPreview", "")
+            score_str = f"（{score:.0%}）" if score is not None else ""
+            line = f"• {title}{score_str}"
+            if preview:
+                line += f"\n  {preview[:120]}"
+            body.append({"type": "TextBlock", "text": line, "wrap": True, "spacing": "Small", "size": "Small"})
+
+    card_content: Dict[str, Any] = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": body,
+    }
+
+    return Activity(type=ActivityTypes.message, attachments=[_adaptive_attachment(card_content)])

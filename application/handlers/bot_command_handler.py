@@ -50,6 +50,7 @@ class BotCommandHandler:
             "itt": self._handle_itt_command,
             "itls": self._handle_itls_command,
             "t": self._handle_t_command,
+            "kb": self._handle_kb_command,
         }
     
     async def handle_command(self, turn_context: TurnContext, user_info: BotInteractionDTO) -> None:
@@ -550,6 +551,59 @@ class BotCommandHandler:
                     type=ActivityTypes.message,
                     text=f"❌ 無法顯示發送訊息卡片：{str(e)}",
                 )
+            )
+
+    async def _handle_kb_command(
+        self,
+        turn_context: TurnContext,
+        user_info: BotInteractionDTO,
+        command_dto: CommandExecutionDTO,
+    ) -> None:
+        """處理 @kb 命令：知識庫查詢（需密碼驗證）"""
+        import os
+        kb_password = os.getenv("KB_ACCESS_PASSWORD", "rinnai")
+
+        # 檢查是否提供密碼
+        if not command_dto.parameters:
+            language = determine_language(user_info.user_mail)
+            hint = {
+                "zh": "🔐 請輸入查詢密碼。\n用法：`@kb <密碼>`",
+                "en": "🔐 Please enter the access password.\nUsage: `@kb <password>`",
+                "ja": "🔐 アクセスパスワードを入力してください。\n使用法：`@kb <パスワード>`",
+            }.get(language, "🔐 請輸入查詢密碼。\n用法：`@kb <密碼>`")
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=hint)
+            )
+            return
+
+        # 驗證密碼
+        provided_password = command_dto.parameters[0].strip()
+        if provided_password != kb_password:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="❌ 密碼錯誤，請重新輸入。")
+            )
+            return
+
+        # 密碼正確 → 取得知識庫清單並顯示查詢卡片
+        try:
+            language = determine_language(user_info.user_mail)
+            from features.it_support.kb_client import KBVectorClient
+            kb_client = KBVectorClient()
+
+            kb_list = await kb_client.list_kbs()
+            if not kb_list:
+                await turn_context.send_activity(
+                    Activity(type=ActivityTypes.message, text="⚠️ 目前無可用的知識庫，請稍後再試。")
+                )
+                return
+
+            from features.it_support.cards import build_kb_query_card
+            card = build_kb_query_card(language, kb_list)
+            await turn_context.send_activity(card)
+        except Exception as e:
+            logger.exception("KB 查詢卡片顯示失敗: %s", e)
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text=f"❌ 無法載入知識庫：{str(e)}")
             )
 
     async def _handle_unknown_command(

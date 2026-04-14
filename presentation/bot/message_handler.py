@@ -289,6 +289,8 @@ class TeamsMessageHandler:
             await self._handle_confirm_attach_it(turn_context, user_info)
         elif card_action == "skipAttachIT":
             await self._handle_skip_attach_it(turn_context, user_info)
+        elif card_action == "submitKB":
+            await self._handle_submit_kb_query(turn_context, user_info)
 
     async def _handle_submit_it_issue(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
@@ -1025,6 +1027,83 @@ class TeamsMessageHandler:
             try:
                 await self._send_proactive_message(
                     conversation_ref, "❌ 檔案解析失敗，請稍後再試。"
+                )
+            except Exception:
+                pass
+
+    async def _handle_submit_kb_query(
+        self, turn_context: TurnContext, user_info: BotInteractionDTO
+    ) -> None:
+        """處理知識庫查詢卡片提交"""
+        kb_slug = (turn_context.activity.value.get("kbSlug") or "").strip()
+        question = (turn_context.activity.value.get("kbQuestion") or "").strip()
+
+        if not question:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="❌ 請輸入查詢問題。")
+            )
+            return
+
+        if not kb_slug:
+            await turn_context.send_activity(
+                Activity(type=ActivityTypes.message, text="❌ 請選擇知識庫。")
+            )
+            return
+
+        # 立即回應避免 Teams 卡片互動逾時
+        await turn_context.send_activity(
+            Activity(type=ActivityTypes.message, text=f"⏳ 正在查詢知識庫，請稍候...")
+        )
+
+        # 背景執行 KB 查詢
+        conversation_ref = TurnContext.get_conversation_reference(turn_context.activity)
+        import asyncio
+        asyncio.create_task(
+            self._submit_kb_query_background(kb_slug, question, user_info, conversation_ref)
+        )
+
+    async def _submit_kb_query_background(
+        self, kb_slug: str, question: str, user_info: BotInteractionDTO, conversation_ref,
+    ) -> None:
+        """背景執行知識庫查詢，完成後透過 proactive message 回傳結果"""
+        try:
+            from features.it_support.kb_client import KBVectorClient
+            from features.it_support.cards import build_kb_result_card
+
+            kb_client = KBVectorClient()
+            result = await kb_client.ask(question, role="user", kb_name=kb_slug, timeout=30)
+
+            answer = (result.get("answer") or "").strip()
+            sources = result.get("sources") or []
+
+            if not answer:
+                await self._send_proactive_message(
+                    conversation_ref, "⚠️ 知識庫未找到相關資料，請嘗試換個方式描述您的問題。"
+                )
+                return
+
+            # 用 proactive message 發送結果卡片
+            import os
+            from core.container import get_container
+            from infrastructure.bot.bot_adapter import CustomBotAdapter
+
+            bot_adapter: CustomBotAdapter = get_container().get(CustomBotAdapter)
+            bot_app_id = os.getenv("BOT_APP_ID") or os.getenv("MICROSOFT_APP_ID") or ""
+
+            language = determine_language(user_info.user_mail)
+            card = build_kb_result_card(language, kb_slug, question, answer, sources)
+
+            async def send_card(turn_context):
+                await turn_context.send_activity(card)
+
+            await bot_adapter.adapter.continue_conversation(
+                conversation_ref, send_card, bot_app_id
+            )
+        except Exception as e:
+            self.logger.exception("KB 知識庫查詢背景處理失敗: %s", e)
+            try:
+                await self._send_proactive_message(
+                    conversation_ref, "❌ 知識庫查詢失敗，請稍後再試。"
                 )
             except Exception:
                 pass
