@@ -23,7 +23,6 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-from domain.services.todo_service import TodoService
 from domain.services.conversation_service import ConversationService
 from domain.services.meeting_service import MeetingService
 from domain.services.intent_service import IntentService
@@ -58,7 +57,6 @@ class ApplicationService:
     def __init__(
         self,
         config: AppConfig,
-        todo_service: TodoService,
         conversation_service: ConversationService,
         meeting_service: MeetingService,
         intent_service: IntentService,
@@ -68,7 +66,6 @@ class ApplicationService:
         s3_client: S3Client
     ):
         self.config = config
-        self.todo_service = todo_service
         self.conversation_service = conversation_service
         self.meeting_service = meeting_service
         self.intent_service = intent_service
@@ -115,16 +112,7 @@ class ApplicationService:
                 response_data["intent"] = intent_result
                 
                 # 根據意圖執行相應操作
-                if intent_result.action == "add" and intent_result.category == "todo":
-                    content = intent_result.content or message
-                    todo_result = await self.todo_service.smart_create_todo(user_mail, content)
-                    response_data["todo_result"] = todo_result
-                
-                elif intent_result.action == "query" and intent_result.category == "todo":
-                    todos = await self.todo_service.get_user_todos(user_mail, include_completed=False)
-                    response_data["todos"] = [todo.to_dict() for todo in todos]
-                
-                elif intent_result.action == "book" and intent_result.category == "meeting":
+                if intent_result.action == "book" and intent_result.category == "meeting":
                     # 顯示會議室預約選項
                     response_data["action"] = "show_booking_options"
                 
@@ -160,74 +148,6 @@ class ApplicationService:
             return {
                 "success": False,
                 "error": error_msg
-            }
-    
-    async def execute_todo_workflow(
-        self,
-        user_mail: str,
-        action: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """執行待辦事項工作流程（應用層統一入口）
-
-        功能
-        - 封裝 Todo 的常見操作（create/list/complete/stats），讓 API/CLI/排程/其他 Bot 直接使用。
-
-        參數
-        - user_mail: 使用者 Email
-        - action: 操作類型（create/list/complete/stats）
-        - kwargs: 各操作所需參數，例如 create 需要 content；complete 需要 todo_indices
-
-        回傳
-        - Dict，含成功旗標與對應結果資料
-
-        範例
-        - await execute_todo_workflow(user, "create", content="開會前準備投影片")
-        - await execute_todo_workflow(user, "complete", todo_indices=[1,3])
-        """
-        try:
-            if action == "create":
-                content = kwargs.get("content")
-                if not content:
-                    raise BusinessLogicError("待辦事項內容不能為空")
-                
-                todo, similar_todos = await self.todo_service.smart_create_todo(user_mail, content)
-                return {
-                    "success": True,
-                    "todo": todo.to_dict() if todo else None,
-                    "similar_todos": similar_todos
-                }
-            
-            elif action == "list":
-                include_completed = kwargs.get("include_completed", False)
-                todos = await self.todo_service.get_user_todos(user_mail, include_completed)
-                return {
-                    "success": True,
-                    "todos": [todo.to_dict() for todo in todos]
-                }
-            
-            elif action == "complete":
-                todo_indices = kwargs.get("todo_indices", [])
-                completed_todos = await self.todo_service.batch_complete_todos(todo_indices, user_mail)
-                return {
-                    "success": True,
-                    "completed_todos": [todo.to_dict() for todo in completed_todos]
-                }
-            
-            elif action == "stats":
-                stats = await self.todo_service.get_user_stats(user_mail)
-                return {
-                    "success": True,
-                    "stats": stats
-                }
-            
-            else:
-                raise BusinessLogicError(f"不支援的待辦事項操作: {action}")
-                
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
             }
     
     async def execute_meeting_workflow(
@@ -303,27 +223,21 @@ class ApplicationService:
             import asyncio
             
             tasks = [
-                self.todo_service.get_user_stats(user_mail),
-                self.todo_service.get_user_todos(user_mail, include_completed=False),
                 self.meeting_service.get_user_meetings(user_mail),
                 self.conversation_service.get_conversation_summary(user_mail)
             ]
-            
+
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             # 處理結果
-            todo_stats = results[0] if not isinstance(results[0], Exception) else {}
-            pending_todos = results[1] if not isinstance(results[1], Exception) else []
-            meetings = results[2] if not isinstance(results[2], Exception) else []
-            conversation_summary = results[3] if not isinstance(results[3], Exception) else {}
-            
+            meetings = results[0] if not isinstance(results[0], Exception) else []
+            conversation_summary = results[1] if not isinstance(results[1], Exception) else {}
+
             return {
                 "success": True,
                 "user_mail": user_mail,
                 "dashboard": {
-                    "todo_stats": todo_stats,
-                    "pending_todos": [todo.to_dict() for todo in pending_todos[:5]],  # 最多 5 個
-                    "upcoming_meetings": meetings[:3],  # 最多 3 個
+                    "upcoming_meetings": meetings[:3],
                     "conversation_summary": conversation_summary
                 },
                 "timestamp": get_taiwan_time().isoformat()
@@ -339,13 +253,6 @@ class ApplicationService:
         """執行系統維護任務"""
         try:
             maintenance_results = {}
-            
-            # 清理舊的待辦事項
-            try:
-                cleanup_result = await self.todo_service.clean_old_todos()
-                maintenance_results["todo_cleanup"] = cleanup_result
-            except Exception as e:
-                maintenance_results["todo_cleanup"] = {"error": str(e)}
             
             # 上傳稽核日誌到 S3
             try:

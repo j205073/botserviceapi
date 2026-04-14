@@ -49,13 +49,11 @@ class RepositoryServiceProvider(ServiceProvider):
     
     def configure_services(self, container: Container) -> None:
         """配置 Repository 服務"""
-        from domain.repositories.todo_repository import TodoRepository, InMemoryTodoRepository
-        from domain.repositories.audit_repository import AuditRepository, InMemoryAuditRepository  
+        from domain.repositories.audit_repository import AuditRepository, InMemoryAuditRepository
         from domain.repositories.conversation_repository import ConversationRepository, InMemoryConversationRepository
         from domain.repositories.user_repository import UserRepository, InMemoryUserRepository
-        
+
         # 註冊 Repository 實現
-        container.register_singleton(TodoRepository, InMemoryTodoRepository)
         container.register_singleton(AuditRepository, InMemoryAuditRepository)
         container.register_singleton(ConversationRepository, InMemoryConversationRepository)
         container.register_singleton(UserRepository, InMemoryUserRepository)
@@ -67,14 +65,12 @@ class DomainServiceProvider(ServiceProvider):
     def configure_services(self, container: Container) -> None:
         """配置領域服務"""
         from domain.services.intent_service import IntentService
-        from domain.services.todo_service import TodoService
         from domain.services.meeting_service import MeetingService
         from domain.services.audit_service import AuditService
         from domain.services.conversation_service import ConversationService
         
         # 註冊領域服務
         container.register_singleton(IntentService)
-        container.register_singleton(TodoService)
         container.register_singleton(MeetingService)
         
         # AuditService 需要特殊處理，因為它需要S3客戶端

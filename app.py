@@ -152,7 +152,6 @@ class TRGPTApp:
                 
                 # 啟動定時任務
                 asyncio.create_task(self._daily_maintenance_task())
-                asyncio.create_task(self._hourly_reminder_task())
                 
                 logger.info("背景任務已啟動")
             
@@ -197,20 +196,6 @@ class TRGPTApp:
             logger.error("每日維護任務異常: %s", e)
             from shared.utils.error_notifier import notify_critical_error
             notify_critical_error("每日維護任務崩潰", e)
-    
-    async def _hourly_reminder_task(self):
-        """每小時提醒任務"""
-        try:
-            while True:
-                await asyncio.sleep(self.config.tasks.todo_reminder_interval_seconds)
-                
-                # 執行提醒邏輯（暫時跳過，保持簡單）
-                logger.info("執行提醒檢查...")
-                
-        except Exception as e:
-            logger.error("提醒任務異常: %s", e)
-            from shared.utils.error_notifier import notify_critical_error
-            notify_critical_error("提醒任務崩潰", e)
     
     def get_app(self) -> Quart:
         """獲取 Quart 應用程式實例"""

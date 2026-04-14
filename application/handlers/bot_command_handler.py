@@ -10,11 +10,10 @@ from botbuilder.schema import Activity, ActivityTypes
 logger = logging.getLogger(__name__)
 
 from application.dtos.bot_dtos import BotInteractionDTO, CommandExecutionDTO
-from domain.services.todo_service import TodoService
 from domain.services.conversation_service import ConversationService
 from domain.services.meeting_service import MeetingService
 from config.settings import AppConfig
-from shared.utils.helpers import determine_language, get_suggested_replies
+from shared.utils.helpers import determine_language
 
 
 class BotCommandHandler:
@@ -23,21 +22,16 @@ class BotCommandHandler:
     def __init__(
         self,
         config: AppConfig,
-        todo_service: TodoService,
         conversation_service: ConversationService,
         meeting_service: MeetingService
     ):
         self.config = config
-        self.todo_service = todo_service
         self.conversation_service = conversation_service
         self.meeting_service = meeting_service
         
         # 命令映射
         self.command_handlers: Dict[str, Callable[[TurnContext, BotInteractionDTO, CommandExecutionDTO], Awaitable[None]]] = {
             "help": self._handle_help_command,
-            "ls": self._handle_list_todos_command,
-            "add": self._handle_add_todo_command,
-            "done": self._handle_complete_todo_command,
             "book-room": self._handle_book_room_command,
             "check-booking": self._handle_check_booking_command,
             "cancel-booking": self._handle_cancel_booking_command,
@@ -107,140 +101,6 @@ class BotCommandHandler:
         card = help_card_builder.build_help_card(language, welcome_msg, include_model_option=include_model)
         await turn_context.send_activity(card)
     
-    async def _handle_list_todos_command(
-        self, 
-        turn_context: TurnContext, 
-        user_info: BotInteractionDTO, 
-        command_dto: CommandExecutionDTO
-    ) -> None:
-        """處理 @ls 命令"""
-        todos = await self.todo_service.get_user_todos(user_info.user_mail, include_completed=False)
-        language = determine_language(user_info.user_mail)
-        
-        if todos:
-            from presentation.cards.card_builders import TodoCardBuilder
-            todo_card_builder = TodoCardBuilder()
-            card = todo_card_builder.build_todo_list_card(todos, language)
-            await turn_context.send_activity(card)
-        else:
-            suggested_actions = get_suggested_replies("無待辦事項", user_info.user_mail)
-            from botbuilder.schema import SuggestedActions
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message,
-                    text="🎉 目前沒有待辦事項",
-                    suggested_actions=SuggestedActions(actions=suggested_actions) if suggested_actions else None,
-                )
-            )
-    
-    async def _handle_add_todo_command(
-        self, 
-        turn_context: TurnContext, 
-        user_info: BotInteractionDTO, 
-        command_dto: CommandExecutionDTO
-    ) -> None:
-        """處理 @add 命令"""
-        if not command_dto.parameters:
-            # 沒有參數，顯示新增待辦事項卡片
-            language = determine_language(user_info.user_mail)
-            from presentation.cards.card_builders import TodoCardBuilder
-            todo_card_builder = TodoCardBuilder()
-            card = todo_card_builder.build_add_todo_card(language)
-            await turn_context.send_activity(card)
-            return
-        
-        # 有參數，直接新增待辦事項
-        content = " ".join(command_dto.parameters)
-        try:
-            todo, similar_todos = await self.todo_service.smart_create_todo(user_info.user_mail, content)
-            
-            if similar_todos:
-                # 有相似的待辦事項
-                language = determine_language(user_info.user_mail)
-                from presentation.cards.card_builders import TodoCardBuilder
-                todo_card_builder = TodoCardBuilder()
-                card = todo_card_builder.build_similar_todos_confirmation_card(
-                    content, similar_todos, language
-                )
-                await turn_context.send_activity(card)
-            elif todo:
-                # 成功新增
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text=f"✅ 已新增待辦事項：{todo.content}"
-                    )
-                )
-        except Exception as e:
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message,
-                    text=f"❌ 新增待辦事項失敗：{str(e)}"
-                )
-            )
-    
-    async def _handle_complete_todo_command(
-        self, 
-        turn_context: TurnContext, 
-        user_info: BotInteractionDTO, 
-        command_dto: CommandExecutionDTO
-    ) -> None:
-        """處理 @done 命令"""
-        if not command_dto.parameters:
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message,
-                    text="❌ 請指定要完成的待辦事項編號，例如：@done 1,2,3"
-                )
-            )
-            return
-        
-        try:
-            # 解析待辦事項索引
-            indices_str = ",".join(command_dto.parameters)
-            indices = [int(idx.strip()) - 1 for idx in indices_str.split(",") if idx.strip().isdigit()]  # 轉換為 0-based 索引
-            
-            if not indices:
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text="❌ 請提供有效的待辦事項編號"
-                    )
-                )
-                return
-            
-            completed_todos = await self.todo_service.batch_complete_todos(indices, user_info.user_mail)
-            
-            if completed_todos:
-                completed_text = "\n".join([f"• {todo.content}" for todo in completed_todos])
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text=f"✅ 已完成 {len(completed_todos)} 項待辦事項：\n{completed_text}"
-                    )
-                )
-            else:
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text="❌ 無法完成指定的待辦事項"
-                    )
-                )
-        except ValueError:
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message,
-                    text="❌ 請提供有效的數字編號，例如：@done 1,2,3"
-                )
-            )
-        except Exception as e:
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message,
-                    text=f"❌ 完成待辦事項時發生錯誤：{str(e)}"
-                )
-            )
-    
     async def _handle_book_room_command(
         self, 
         turn_context: TurnContext, 
@@ -307,9 +167,7 @@ class BotCommandHandler:
         command_dto: CommandExecutionDTO
     ) -> None:
         """處理 @info 命令"""
-        # 獲取用戶統計信息
         try:
-            todo_stats = await self.todo_service.get_user_stats(user_info.user_mail)
             # 取得模型現況（優先顯示使用者偏好於 OpenAI 模式）
             if self.config.openai.use_azure:
                 mode_text = "Azure OpenAI"
@@ -321,7 +179,7 @@ class BotCommandHandler:
                     model_text = user_model_preferences.get(user_info.user_mail, self.config.openai.model)
                 except Exception:
                     model_text = self.config.openai.model
-            
+
             info_text = f"""
 👤 **用戶資訊**
 • 姓名: {user_info.user_name or '未知'}
@@ -331,16 +189,7 @@ class BotCommandHandler:
 • 模式: {mode_text}
 • 模型: {model_text}
 • AI 意圖分析: {"啟用" if self.config.enable_ai_intent_analysis else "停用"}
-
-📊 **統計資訊**
-• 待辦事項總數: {todo_stats.get('total_count', 0)}
-• 已完成: {todo_stats.get('completed_count', 0)}
-• 待處理: {todo_stats.get('pending_count', 0)}
-• 本周新增: {todo_stats.get('recent_week_count', 0)}
 """
-            
-            if todo_stats.get('average_completion_hours'):
-                info_text += f"• 平均完成時間: {todo_stats['average_completion_hours']:.1f} 小時"
             
             await turn_context.send_activity(
                 Activity(

@@ -8,8 +8,6 @@ from typing import Dict, Any, List, Optional
 from botbuilder.core import TurnContext
 from botbuilder.schema import Activity, ActivityTypes, SuggestedActions
 
-from domain.models.user import UserProfile
-from domain.services.todo_service import TodoService
 from domain.services.conversation_service import ConversationService
 from domain.services.meeting_service import MeetingService
 from domain.services.intent_service import IntentService
@@ -17,7 +15,6 @@ from application.handlers.bot_command_handler import BotCommandHandler
 from application.dtos.bot_dtos import BotInteractionDTO
 from config.settings import AppConfig
 from presentation.cards.card_builders import (
-    TodoCardBuilder,
     HelpCardBuilder,
     MeetingCardBuilder,
     ModelSelectionCardBuilder,
@@ -38,21 +35,18 @@ class TeamsMessageHandler:
     def __init__(
         self,
         config: AppConfig,
-        todo_service: TodoService,
         conversation_service: ConversationService,
         meeting_service: MeetingService,
         intent_service: IntentService,
         command_handler: BotCommandHandler,
     ):
         self.config = config
-        self.todo_service = todo_service
         self.conversation_service = conversation_service
         self.meeting_service = meeting_service
         self.intent_service = intent_service
         self.command_handler = command_handler
 
         # Card builders
-        self.todo_card_builder = TodoCardBuilder()
         self.help_card_builder = HelpCardBuilder()
         self.meeting_card_builder = MeetingCardBuilder()
         self.model_card_builder = ModelSelectionCardBuilder()
@@ -263,10 +257,6 @@ class TeamsMessageHandler:
 
         if card_action == "selectFunction":
             await self._handle_function_selection(turn_context, user_info)
-        elif card_action == "addTodo":
-            await self._handle_add_todo_card(turn_context, user_info)
-        elif card_action == "completeTodos":
-            await self._handle_complete_todos(turn_context, user_info)
         elif card_action == "bookRoom":
             await self._handle_book_room(turn_context, user_info)
         elif card_action == "cancelBooking":
@@ -531,8 +521,6 @@ class TeamsMessageHandler:
 
         # 映射功能到處理器
         function_handlers = {
-            "@addTodo": self._show_add_todo_card,
-            "@ls": self._show_todo_list,
             "@it": self._show_it_issue_card,
             "@itt": self._show_itt_issue_card,
             "@upload": self._show_upload_card,
@@ -2028,49 +2016,6 @@ class TeamsMessageHandler:
         help_card = self.help_card_builder.build_help_card(language, welcome_msg, include_model_option=include_model)
         await turn_context.send_activity(help_card)
 
-    async def _show_add_todo_card(
-        self, turn_context: TurnContext, user_info: BotInteractionDTO
-    ) -> None:
-        """顯示新增待辦事項卡片"""
-        language = determine_language(user_info.user_mail)
-        card = self.todo_card_builder.build_add_todo_card(language)
-        await turn_context.send_activity(card)
-
-    async def _show_todo_list(
-        self, turn_context: TurnContext, user_info: BotInteractionDTO
-    ) -> None:
-        """顯示待辦事項清單"""
-        todos = await self.todo_service.get_user_todos(
-            user_info.user_mail, include_completed=False
-        )
-        language = determine_language(user_info.user_mail)
-
-        if todos:
-            card = self.todo_card_builder.build_todo_list_card(todos, language)
-            await turn_context.send_activity(card)
-            # 小提示（對齊 app_bak 互動風格）
-            hint_msg = (
-                "💡 小提示：下次可以直接輸入 `@ls` 快速查看待辦清單"
-                if language == "zh-TW"
-                else "💡 ヒント：次回は `@ls` で素早くTODOリストを確認できます"
-            )
-            await turn_context.send_activity(
-                Activity(type=ActivityTypes.message, text=hint_msg)
-            )
-        else:
-            suggested_actions = get_suggested_replies("無待辦事項", user_info.user_mail)
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message,
-                    text="🎉 目前沒有待辦事項",
-                    suggested_actions=(
-                        SuggestedActions(actions=suggested_actions)
-                        if suggested_actions
-                        else None
-                    ),
-                )
-            )
-
     async def _show_room_booking_options(
         self, turn_context: TurnContext, user_info: BotInteractionDTO
     ) -> None:
@@ -2254,101 +2199,6 @@ class TeamsMessageHandler:
         # OpenAI 模式：顯示模型選擇卡片
         card = self.model_card_builder.build_model_selection_card(user_info.user_mail)
         await turn_context.send_activity(card)
-
-    async def _handle_add_todo_card(
-        self, turn_context: TurnContext, user_info: BotInteractionDTO
-    ) -> None:
-        """處理新增待辦事項卡片"""
-        content = turn_context.activity.value.get("todoContent", "").strip()
-        if content:
-            await self._handle_smart_todo_add(turn_context, user_info, content)
-
-    async def _handle_smart_todo_add(
-        self, turn_context: TurnContext, user_info: BotInteractionDTO, content: str
-    ) -> None:
-        """智能新增待辦事項"""
-        try:
-            todo, similar_todos = await self.todo_service.smart_create_todo(
-                user_info.user_mail, content
-            )
-
-            if similar_todos:
-                # 有相似的待辦事項，顯示確認卡片
-                language = determine_language(user_info.user_mail)
-                card = self.todo_card_builder.build_similar_todos_confirmation_card(
-                    content, similar_todos, language
-                )
-                await turn_context.send_activity(card)
-            elif todo:
-                # 成功新增
-                await turn_context.send_activity(
-                    Activity(
-                        type=ActivityTypes.message,
-                        text=f"✅ 已新增待辦事項：{todo.content}",
-                    )
-                )
-                # 小提示
-                language = determine_language(user_info.user_mail)
-                hint_msg = (
-                    "💡 小提示：下次可以使用 `@add 內容` 快速新增待辦"
-                    if language == "zh-TW"
-                    else "💡 ヒント：次回は `@add 内容` で素早くTODOを追加できます"
-                )
-                await turn_context.send_activity(
-                    Activity(type=ActivityTypes.message, text=hint_msg)
-                )
-        except Exception as e:
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message, text=f"❌ 新增待辦事項失敗：{str(e)}"
-                )
-            )
-
-    async def _handle_complete_todos(
-        self, turn_context: TurnContext, user_info: BotInteractionDTO
-    ) -> None:
-        """處理完成待辦事項"""
-        completed_indices_str = turn_context.activity.value.get("completedTodos", "")
-
-        if not completed_indices_str:
-            return
-
-        try:
-            # 解析完成的待辦事項索引
-            completed_indices = [
-                int(idx.strip())
-                for idx in completed_indices_str.split(",")
-                if idx.strip()
-            ]
-
-            if completed_indices:
-                completed_todos = await self.todo_service.batch_complete_todos(
-                    completed_indices, user_info.user_mail
-                )
-
-                if completed_todos:
-                    completed_text = "\n".join(
-                        [f"• {todo.content}" for todo in completed_todos]
-                    )
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message,
-                            text=f"✅ 已完成 {len(completed_todos)} 項待辦事項：\n{completed_text}",
-                        )
-                    )
-                else:
-                    await turn_context.send_activity(
-                        Activity(
-                            type=ActivityTypes.message, text="❌ 無法完成指定的待辦事項"
-                        )
-                    )
-        except Exception as e:
-            await turn_context.send_activity(
-                Activity(
-                    type=ActivityTypes.message,
-                    text=f"❌ 完成待辦事項時發生錯誤：{str(e)}",
-                )
-            )
 
     async def _handle_book_room(
         self, turn_context: TurnContext, user_info: BotInteractionDTO

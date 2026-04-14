@@ -363,16 +363,6 @@ class HelpCardBuilder(BaseCardBuilder):
             "zh": {
                 "functions": [
                     {
-                        "title": "📋 查看待辦",
-                        "value": "@ls",
-                        "desc": "查看目前的待辦事項",
-                    },
-                    {
-                        "title": "➕ 新增待辦",
-                        "value": "@addTodo",
-                        "desc": "新增待辦事項",
-                    },
-                    {
                         "title": "🛠️ 提交IT",
                         "value": "@it",
                         "desc": "建立 IT 需求/問題單",
@@ -417,16 +407,6 @@ class HelpCardBuilder(BaseCardBuilder):
             "en": {
                 "functions": [
                     {
-                        "title": "📋 List Todos",
-                        "value": "@ls",
-                        "desc": "View current todo items",
-                    },
-                    {
-                        "title": "➕ Add Todo",
-                        "value": "@addTodo",
-                        "desc": "Add new todo item",
-                    },
-                    {
                         "title": "🛠️ Submit IT",
                         "value": "@it",
                         "desc": "Create an IT issue/request",
@@ -470,16 +450,6 @@ class HelpCardBuilder(BaseCardBuilder):
             },
             "ja": {
                 "functions": [
-                    {
-                        "title": "📋 タスク表示",
-                        "value": "@ls",
-                        "desc": "現在のタスクを表示",
-                    },
-                    {
-                        "title": "➕ タスク追加",
-                        "value": "@addTodo",
-                        "desc": "新しいタスクを追加",
-                    },
                     {
                         "title": "🛠️ IT 申請",
                         "value": "@it",
@@ -618,7 +588,6 @@ class HelpCardBuilder(BaseCardBuilder):
                 "title": "🤖 台灣林內 GPT",
                 "description": "我是您的智能助手，專為台灣林內公司設計，提供以下服務：",
                 "features": [
-                    "📋 待辦事項管理 - 新增、查看、完成待辦事項",
                     "🏢 會議室預約 - 預約、查看、取消會議室",
                     "💬 智能對話 - AI 驅動的問答系統",
                     "📊 個人統計 - 查看您的使用統計資訊",
@@ -630,7 +599,6 @@ class HelpCardBuilder(BaseCardBuilder):
                 "title": "🤖 Taiwan Rinnai GPT",
                 "description": "I'm your intelligent assistant designed for Taiwan Rinnai, providing:",
                 "features": [
-                    "📋 Todo Management - Add, view, complete todos",
                     "🏢 Room Booking - Book, view, cancel meeting rooms",
                     "💬 Smart Chat - AI-powered Q&A system",
                     "📊 Personal Stats - View your usage statistics",
@@ -642,7 +610,6 @@ class HelpCardBuilder(BaseCardBuilder):
                 "title": "🤖 台湾リンナイ GPT",
                 "description": "台湾リンナイ向けに設計されたインテリジェントアシスタントです：",
                 "features": [
-                    "📋 タスク管理 - タスクの追加、表示、完了",
                     "🏢 会議室予約 - 会議室の予約、確認、キャンセル",
                     "💬 スマートチャット - AI搭載のQ&Aシステム",
                     "📊 個人統計 - 使用統計の確認",
