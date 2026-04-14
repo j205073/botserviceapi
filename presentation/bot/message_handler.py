@@ -1980,7 +1980,6 @@ class TeamsMessageHandler:
 
         return None
 
-    _VISION_PDF_MAX_PAGES = 20  # Vision OCR 最多處理頁數
     _VISION_CHUNK_SIZE = 5  # 每批送 Vision 的頁數
     _VISION_PDF_DPI = 150  # PDF 轉圖片的 DPI
 
@@ -1996,7 +1995,7 @@ class TeamsMessageHandler:
 
             doc = fitz.open(stream=data, filetype="pdf")
             total_pages = len(doc)
-            max_pages = min(total_pages, self._VISION_PDF_MAX_PAGES)
+            max_pages = total_pages
             images = []
 
             for i in range(max_pages):
@@ -2008,12 +2007,7 @@ class TeamsMessageHandler:
 
             doc.close()
 
-            if total_pages > max_pages:
-                self.logger.info(
-                    "Vision PDF 截取前 %d/%d 頁: %s", max_pages, total_pages, name,
-                )
-
-            self.logger.info("PDF 轉圖片完成: name=%s, pages=%d/%d", name, len(images), total_pages)
+            self.logger.info("PDF 轉圖片完成: name=%s, pages=%d", name, len(images))
             return images, total_pages
         except Exception as e:
             self.logger.warning("PDF 轉圖片失敗 name=%s: %s", name, e)
