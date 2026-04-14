@@ -624,33 +624,52 @@ def build_kb_query_card(language: str, kb_list: List[Dict[str, str]]) -> Activit
         for kb in kb_list
     ]
 
+    body: list = [
+        {"type": "TextBlock", "text": f"📚 {t['title']}", "weight": "Bolder", "size": "Medium"},
+    ]
+
+    if len(kb_list) == 1:
+        # 單一知識庫：直接顯示名稱，不用下拉選單
+        kb_display = kb_choices[0]["title"]
+        kb_slug_val = kb_choices[0]["value"]
+        body.append({
+            "type": "TextBlock",
+            "text": f"📖 {kb_display}",
+            "wrap": True,
+            "spacing": "Small",
+            "weight": "Bolder",
+        })
+        submit_data = {"action": "submitKB", "kbSlug": kb_slug_val}
+    else:
+        # 多個知識庫：顯示下拉選單
+        body.append({
+            "type": "Input.ChoiceSet",
+            "id": "kbSlug",
+            "label": t["select_kb"],
+            "choices": kb_choices,
+            "value": kb_choices[0]["value"] if kb_choices else "",
+            "style": "filtered",
+            "isRequired": True,
+        })
+        submit_data = {"action": "submitKB"}
+
+    body.append({
+        "type": "Input.Text",
+        "id": "kbQuestion",
+        "label": t["question"],
+        "isMultiline": True,
+        "maxLength": 2000,
+        "placeholder": t["placeholder"],
+        "isRequired": True,
+    })
+
     card_content: Dict[str, Any] = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",
         "version": "1.4",
-        "body": [
-            {"type": "TextBlock", "text": f"📚 {t['title']}", "weight": "Bolder", "size": "Medium"},
-            {
-                "type": "Input.ChoiceSet",
-                "id": "kbSlug",
-                "label": t["select_kb"],
-                "choices": kb_choices,
-                "value": kb_choices[0]["value"] if kb_choices else "",
-                "style": "filtered",
-                "isRequired": True,
-            },
-            {
-                "type": "Input.Text",
-                "id": "kbQuestion",
-                "label": t["question"],
-                "isMultiline": True,
-                "maxLength": 2000,
-                "placeholder": t["placeholder"],
-                "isRequired": True,
-            },
-        ],
+        "body": body,
         "actions": [
-            {"type": "Action.Submit", "title": f"🔍 {t['submit']}", "data": {"action": "submitKB"}}
+            {"type": "Action.Submit", "title": f"🔍 {t['submit']}", "data": submit_data}
         ],
     }
 
