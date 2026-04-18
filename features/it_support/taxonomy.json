@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "categories": [
     {
       "code": "account_access",
@@ -42,7 +42,9 @@
         "office",
         "teams",
         "outlook",
-        "軟體異常"
+        "軟體異常",
+        "無法存檔",
+        "無法上傳"
       ]
     },
     {
@@ -132,17 +134,14 @@
       "label": "系統異常",
       "keywords": [
         "系統異常",
-        "系統錯誤",
         "服務異常",
         "服務中斷",
-        "中斷",
         "不可用",
         "維護",
         "發生錯誤",
         "exception",
         "error",
         "500",
-        "故障",
         "當機",
         "outage",
         "incident",
@@ -160,6 +159,26 @@
         "帳號設定",
         "新進人員",
         "onboarding"
+      ]
+    },
+    {
+      "code": "business_data",
+      "label": "業務單據/資料修正",
+      "keywords": [
+        "發票",
+        "中獎",
+        "兌獎",
+        "補印",
+        "QR CODE",
+        "QR碼",
+        "訂單",
+        "SORD",
+        "管理編號",
+        "單據修改",
+        "資料修正",
+        "刪除",
+        "invoice",
+        "order"
       ]
     },
     {

@@ -200,3 +200,15 @@ AzureChatBot/
   - `cards.py` — 新增 `build_my_tickets_card()` Adaptive Card（顯示單號、摘要、狀態、優先序）
   - `bot_command_handler.py` — 註冊 `@my-it` 指令
 - **查詢邏輯**：搜尋 Asana project 中 notes 包含使用者 email 的任務，涵蓋自提與代提兩種情境
+
+#### 4. IT 分類 taxonomy 自動優化（2026-04-18 暫緩）
+- **需求**：`taxonomy.json` 寫死、不彈性，實務上常出現誤判（例：「ERP 領退料出錯」被歸到 `software`），希望隨 KB 累積自動找出分類缺口並建議調整
+- **狀態**：🔁 構想已完成設計討論，暫緩實作（使用者評估先在外部程式處理）
+- **核心構想**：
+  - 新增 API `POST /api/it-taxonomy/analyze?days=90`（Bearer token 認證）
+  - Azure OpenAI `text-embedding-3-small` 將最近 N 天 Asana 工單 + KB 內容向量化（用完即丟，不建新向量 DB）
+  - HDBSCAN clustering 找群集 → 統計比對現有類別分布 → 找出「結構缺口」候選
+  - LLM 僅對候選群集命名一次 → 產出新類別建議 + keywords 補充 + 每類 5 張代表範例
+  - n8n 定時呼叫 API → email 使用者含可直接複製貼上的新版 `taxonomy.json`
+- **Schema 擴充**：taxonomy.json 每類新增 `examples` 欄位（few-shot 範例）
+- **詳細設計**：見 memory `project_it_taxonomy_auto_optimization.md`
