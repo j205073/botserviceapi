@@ -43,7 +43,13 @@ jobs:
             -x ".git/*" \
             -x ".github/*" \
             -x "**/__pycache__/*" \
-            -x "et --soft*"
+            -x "et --soft*" \
+            -x "程式打包路徑*" \
+            -x "*.docx" \
+            -x "*.postman_collection.json" \
+            -x "test_email.py" \
+            -x "test_webhook.py" \
+            -x "git_commit.sh"
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4

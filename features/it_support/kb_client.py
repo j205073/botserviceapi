@@ -11,8 +11,8 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# KB API 的 Azure AD scope（對應 INTEGRATION_GUIDE.md）
-_KB_DEFAULT_SCOPE = "api://de281045-d27f-4549-972a-0b331178668a/.default"
+# KB API 的 Azure AD scope（對應 app registration 的 identifier URI）
+_KB_DEFAULT_SCOPE = "de281045-d27f-4549-972a-0b331178668a/.default"
 
 
 class KBVectorClient:
