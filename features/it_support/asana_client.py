@@ -75,7 +75,7 @@ class AsanaClient:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(
                 url, headers=self._headers(),
-                params={"opt_fields": "name,completed,notes,assignee,permalink_url"}
+                params={"opt_fields": "name,completed,notes,assignee,permalink_url,external,created_at,custom_fields"}
             )
             resp.raise_for_status()
             return resp.json()

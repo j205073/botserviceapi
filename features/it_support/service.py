@@ -214,36 +214,29 @@ class ITSupportService:
 
         # Localize created time to Taiwan time
         taipei = pytz.timezone("Asia/Taipei")
-        created_at = datetime.now(taipei).strftime("%Y-%m-%d %H:%M 台北時間")
-        # Try AI analysis for triage（受 enable_ai_analysis 開關控制）
-        analysis_text = ""
+        now_taipei = datetime.now(taipei)
+        created_at = now_taipei.strftime("%Y-%m-%d %H:%M 台北時間")
+        created_at_iso = now_taipei.isoformat()
+
+        # AI 分析（取結構化 dict 給 formatter 用，純文字 fallback 用同一份）
+        analysis_dict: Optional[Dict[str, Any]] = None
         if self.enable_ai_analysis:
-            analysis_text = await self._try_analyze_issue(description, category_label, priority)
+            analysis_dict = await self._analyze_issue_dict(description, category_label, priority)
         else:
             print("ℹ️ AI 分析已關閉 (ENABLE_IT_AI_ANALYSIS=false)")
 
-        # 查詢知識庫（KB-Vector-Service），取得相關歷史工單與建議
-        kb_section = ""
+        # 查詢知識庫（KB-Vector-Service）
         kb_result = await self.kb_client.ask_safe(description, role="it", kb_name="it-kb")
         kb_answer = (kb_result.get("answer") or "").strip()
         kb_sources = kb_result.get("sources") or []
-        if kb_answer and kb_answer != "No relevant knowledge base articles found.":
-            parts = [f"- AI 建議：{kb_answer}"]
-            for src in kb_sources:
-                title = src.get("title", "")
-                score = src.get("score")
-                preview = src.get("contentPreview", "")
-                score_str = f"（相似度: {score:.0%}）" if score is not None else ""
-                line = f"  - {title}{score_str}"
-                if preview:
-                    line += f"\n    {preview[:120]}"
-                parts.append(line)
-            kb_section = "\n".join(parts)
+        if kb_answer == "No relevant knowledge base articles found.":
+            kb_answer = ""
 
-        # 代提單模式：區分提出人與代理提出人
+        # 代提單模式：先解析提出人資訊（不論是否走 AI 整理都需要）
+        requester_display_name = ""
+        requester_department = ""
         if requester_email:
             requester_email = requester_email.strip()
-            # 從 Graph API 取得提出人（被代理者）的姓名與部門
             requester_display_name = requester_email
             requester_department = "未指定部門"
             try:
@@ -255,33 +248,87 @@ class ITSupportService:
             except Exception as e:
                 logger.warning("⚠️ 無法從 Graph API 取得代提單提出人資訊: %s", e)
 
-            notes = (
-                f"單號: {issue_id}\n"
-                f"提出人: {requester_display_name} <{requester_email}>\n"
-                f"提出人部門: {requester_department}\n"
-                f"代理提出人: {user_display_name} <{reporter_email}>\n"
-                f"代理提出人部門: {user_department}\n"
-                f"分類: {category_label} ({category_code})\n"
-                f"優先順序: {priority}\n"
-                f"建立來源: TR GPT bot（代提單 @itt）\n"
-                f"建立時間: {created_at}\n\n"
-                f"【需求/問題說明】\n{description}\n"
-                + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
-                + ("\n【知識庫參考（KB-Vector-Service）】\n\n" + kb_section + "\n" if kb_section else "")
-            )
+        # 用 AI 整理 notes (Markdown) + structured JSON (一次呼叫)
+        reporter_obj = {
+            "name": user_display_name,
+            "email": reporter_email,
+            "department": user_department,
+        }
+        requester_obj = (
+            {
+                "name": requester_display_name,
+                "email": requester_email,
+                "department": requester_department,
+            }
+            if requester_email
+            else None
+        )
+        ai_format = await self._format_issue_for_asana(
+            issue_id=issue_id,
+            description=description,
+            category_code=category_code,
+            category_label=category_label,
+            priority=priority,
+            reporter=reporter_obj,
+            requester=requester_obj,
+            created_at_iso=created_at_iso,
+            ai_analysis=analysis_dict,
+            kb_answer=kb_answer,
+            kb_sources=kb_sources,
+        )
+
+        external_data_str: Optional[str] = None
+        if ai_format:
+            notes = ai_format["notes"]
+            try:
+                external_data_str = self._trim_external_data(ai_format["structured"])
+            except Exception as e:
+                logger.warning("external.data 序列化失敗: %s", e)
+                external_data_str = None
         else:
-            notes = (
-                f"單號: {issue_id}\n"
-                f"提出人: {user_display_name} <{reporter_email}>\n"
-                f"提出人部門: {user_department}\n"
-                f"分類: {category_label} ({category_code})\n"
-                f"優先順序: {priority}\n"
-                f"建立來源: TR GPT bot\n"
-                f"建立時間: {created_at}\n\n"
-                f"【需求/問題說明】\n{description}\n"
-                + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
-                + ("\n【知識庫參考（KB-Vector-Service）】\n\n" + kb_section + "\n" if kb_section else "")
-            )
+            # AI 失敗 → 降級成原本純文字 notes 拼接
+            analysis_text = self._format_analysis_text(analysis_dict)
+            kb_section = ""
+            if kb_answer:
+                parts = [f"- AI 建議：{kb_answer}"]
+                for src in kb_sources:
+                    title = src.get("title", "")
+                    score = src.get("score")
+                    preview = src.get("contentPreview", "")
+                    score_str = f"（相似度: {score:.0%}）" if score is not None else ""
+                    line = f"  - {title}{score_str}"
+                    if preview:
+                        line += f"\n    {preview[:120]}"
+                    parts.append(line)
+                kb_section = "\n".join(parts)
+            if requester_email:
+                notes = (
+                    f"單號: {issue_id}\n"
+                    f"提出人: {requester_display_name} <{requester_email}>\n"
+                    f"提出人部門: {requester_department}\n"
+                    f"代理提出人: {user_display_name} <{reporter_email}>\n"
+                    f"代理提出人部門: {user_department}\n"
+                    f"分類: {category_label} ({category_code})\n"
+                    f"優先順序: {priority}\n"
+                    f"建立來源: TR GPT bot（代提單 @itt）\n"
+                    f"建立時間: {created_at}\n\n"
+                    f"【需求/問題說明】\n{description}\n"
+                    + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
+                    + ("\n【知識庫參考（KB-Vector-Service）】\n\n" + kb_section + "\n" if kb_section else "")
+                )
+            else:
+                notes = (
+                    f"單號: {issue_id}\n"
+                    f"提出人: {user_display_name} <{reporter_email}>\n"
+                    f"提出人部門: {user_department}\n"
+                    f"分類: {category_label} ({category_code})\n"
+                    f"優先順序: {priority}\n"
+                    f"建立來源: TR GPT bot\n"
+                    f"建立時間: {created_at}\n\n"
+                    f"【需求/問題說明】\n{description}\n"
+                    + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
+                    + ("\n【知識庫參考（KB-Vector-Service）】\n\n" + kb_section + "\n" if kb_section else "")
+                )
 
         # 決定 assignee：報到開通指派給指定人員
         assignee = self.assignee_gid
@@ -319,6 +366,13 @@ class ITSupportService:
         tag_gid = self.priority_tag_map.get(priority) or self.default_priority_tag_gid
         if tag_gid:
             data["data"]["tags"] = [tag_gid]
+
+        # 結構化資料寫入 external.data，供後續分析（KB / 統計）使用
+        if external_data_str:
+            data["data"]["external"] = {
+                "gid": issue_id,
+                "data": external_data_str,
+            }
 
         try:
             result = await self.asana.create_task(data)
@@ -430,19 +484,17 @@ class ITSupportService:
         issue_id = f"IT{dt_str}{counter:04d}"
         return issue_id, now
 
-    async def _try_analyze_issue(self, description: str, category_label: str, priority: str) -> str:
-        """Call OpenAI to analyze the issue. Return a concise multiline text.
-        On failure, return empty string.
+    async def _analyze_issue_dict(self, description: str, category_label: str, priority: str) -> Optional[Dict[str, Any]]:
+        """Call OpenAI to analyze issue, return raw dict {recommendation, time_estimate, related_areas}.
+        Returns None on failure or when description is empty.
         """
         try:
             if not description:
-                return ""
-            # Lazy import to avoid hard dependency cycles
+                return None
             from core.container import get_container
             from infrastructure.external.openai_client import OpenAIClient
 
-            container = get_container()
-            oa: OpenAIClient = container.get(OpenAIClient)
+            oa: OpenAIClient = get_container().get(OpenAIClient)
 
             system = (
                 "你是一位企業 IT 服務台資深工程師，請針對使用者的 IT 問題"
@@ -454,65 +506,52 @@ class ITSupportService:
                 f"優先順序: {priority}\n"
                 f"描述: {description}"
             )
-            prompt = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ]
             raw = await oa.chat_completion(
-                prompt,
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 model=(self.analysis_model or None),
                 max_tokens=600,
                 temperature=0.2,
             )
 
-            # Parse JSON
             import json as _json
-            data = None
             try:
                 data = _json.loads(raw)
             except Exception:
-                # Try extract JSON block
                 import re
                 m = re.search(r"\{[\s\S]*\}", raw)
-                if m:
-                    try:
-                        data = _json.loads(m.group(0))
-                    except Exception:
-                        data = None
-            if isinstance(data, dict):
-                rec = str(data.get("recommendation", "")).strip()
-                t = str(data.get("time_estimate", "")).strip()
-                areas = data.get("related_areas")
-                parts = []
-                if rec:
-                    import re as _re
-                    _rec = rec.strip()
-                    if _re.search(r"\b1\)", _rec):
-                        _rec = _re.sub(r"\s*(\d+\))", r"\n  \1 ", _rec).strip()
-                        parts.append("- 建議：\n  " + _rec)
-                    else:
-                        parts.append(f"- 建議：{_rec}")
-                if t:
-                    parts.append(f"- 時間估計：{t}")
-                # 相關面向分行列點
-                if isinstance(areas, list):
-                    cleaned = [str(a).strip() for a in areas if str(a).strip()]
-                    if cleaned:
-                        area_lines = "\n".join([f"  - {a}" for a in cleaned])
-                        parts.append("- 相關面向：\n" + area_lines)
-                else:
-                    single_area = str(areas or "").strip()
-                    if single_area:
-                        parts.append(f"- 相關面向：{single_area}")
-                return "\n".join(parts).strip()
-            else:
-                # Fallback to raw text
-                cleaned = str(raw).strip()
-                if cleaned:
-                    return cleaned
+                data = _json.loads(m.group(0)) if m else None
+            return data if isinstance(data, dict) else None
         except Exception:
-            pass
-        return ""
+            return None
+
+    def _format_analysis_text(self, data: Optional[Dict[str, Any]]) -> str:
+        """Format analysis dict to multiline text for plain-text notes fallback."""
+        if not isinstance(data, dict):
+            return ""
+        parts = []
+        rec = str(data.get("recommendation", "")).strip()
+        if rec:
+            import re as _re
+            if _re.search(r"\b1\)", rec):
+                rec = _re.sub(r"\s*(\d+\))", r"\n  \1 ", rec).strip()
+                parts.append("- 建議：\n  " + rec)
+            else:
+                parts.append(f"- 建議：{rec}")
+        t = str(data.get("time_estimate", "")).strip()
+        if t:
+            parts.append(f"- 時間估計：{t}")
+        areas = data.get("related_areas")
+        if isinstance(areas, list):
+            cleaned = [str(a).strip() for a in areas if str(a).strip()]
+            if cleaned:
+                parts.append("- 相關面向：\n" + "\n".join([f"  - {a}" for a in cleaned]))
+        elif areas:
+            parts.append(f"- 相關面向：{str(areas).strip()}")
+        return "\n".join(parts).strip()
+
+    async def _try_analyze_issue(self, description: str, category_label: str, priority: str) -> str:
+        """Backward-compatible wrapper returning formatted text."""
+        return self._format_analysis_text(await self._analyze_issue_dict(description, category_label, priority))
 
     async def _classify_issue_ai(self, description: str) -> tuple[str, str]:
         """Classify issue category via OpenAI using IT_ANALYSIS_MODEL.
@@ -579,6 +618,148 @@ class ITSupportService:
 
         # Fallback to keyword classifier
         return self.classifier.classify(description)
+
+    async def _format_issue_for_asana(
+        self,
+        issue_id: str,
+        description: str,
+        category_code: str,
+        category_label: str,
+        priority: str,
+        reporter: Dict[str, str],
+        requester: Optional[Dict[str, str]],
+        created_at_iso: str,
+        ai_analysis: Optional[Dict[str, Any]],
+        kb_answer: str,
+        kb_sources: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Single OpenAI call producing both Markdown notes and structured JSON v1.0.
+
+        Returns {"notes": str, "structured": dict} on success; None on failure
+        (caller should fall back to plain-text notes assembly).
+        """
+        try:
+            from core.container import get_container
+            from infrastructure.external.openai_client import OpenAIClient
+
+            oa: OpenAIClient = get_container().get(OpenAIClient)
+
+            is_proxy = requester is not None
+            context = {
+                "issue_id": issue_id,
+                "created_at": created_at_iso,
+                "source": "TR GPT bot（代提單 @itt）" if is_proxy else "TR GPT bot",
+                "priority": priority,
+                "category": {"code": category_code, "label": category_label},
+                "is_proxy": is_proxy,
+                "reporter": reporter,
+                "requester": requester,
+                "raw_description": description,
+                "ai_analysis": ai_analysis,
+                "kb_answer": (kb_answer or "").strip(),
+                "kb_sources": [
+                    {
+                        "title": s.get("title", ""),
+                        "score": s.get("score"),
+                        "preview": (s.get("contentPreview") or "")[:200],
+                    }
+                    for s in (kb_sources or [])[:5]
+                ],
+            }
+
+            system = (
+                "你是 IT 提單資料整理助手。根據輸入的 IT 提單資料（JSON），同時產出兩份產物：\n\n"
+                "1. notes：給 Asana task 的 notes 欄位，Markdown 格式（H2/H3 標題、bullet list、適度 emoji），"
+                "讓 IT 工程師一眼看懂問題核心、現象、重現步驟、影響、AI 建議、相關歷史工單。"
+                "請用清楚分區呈現，不要逐字複製大段原文，要重新組織。\n\n"
+                "2. structured：結構化 JSON，固定 schema_version 為 \"1.0\"，欄位定義：\n"
+                "{\n"
+                "  \"schema_version\": \"1.0\",\n"
+                "  \"issue_id\": str,                 // 直接用輸入的 issue_id\n"
+                "  \"created_at\": str,               // 直接用輸入的 created_at（ISO 8601 + 台北時區）\n"
+                "  \"source\": str,                   // 直接用輸入的 source\n"
+                "  \"priority\": \"P1\"|\"P2\"|\"P3\"|\"P4\",  // 直接用輸入的 priority\n"
+                "  \"category\": {\"code\": str, \"label\": str},  // 直接用輸入的 category\n"
+                "  \"is_proxy\": bool,\n"
+                "  \"reporter\": {\"name\": str, \"email\": str, \"department\": str},\n"
+                "  \"requester\": {...} | null,        // is_proxy=false 時為 null\n"
+                "  \"description\": {\n"
+                "    \"raw\": str,                    // 直接用輸入的 raw_description 全文\n"
+                "    \"summary\": str,                // 一句話摘要 ≤50 字\n"
+                "    \"symptom\": str,                // 觀察到的現象（錯誤訊息、異常行為）\n"
+                "    \"steps_to_reproduce\": [str],   // 重現步驟，依序；無法判斷則空陣列\n"
+                "    \"expected\": str,               // 預期結果；無則空字串\n"
+                "    \"impact\": str,                 // 影響範圍；無則空字串\n"
+                "    \"affected_systems\": [str],     // 涉及的系統/軟體；無則空陣列\n"
+                "    \"keywords\": [str]              // 分析用關鍵字 5-10 個\n"
+                "  },\n"
+                "  \"ai_analysis\": {...} | null,     // 直接用輸入的 ai_analysis（保留 recommendation/time_estimate/related_areas）\n"
+                "  \"kb_references\": [{title, score, preview}]  // 直接用輸入的 kb_sources\n"
+                "}\n\n"
+                "請只回傳純 JSON 物件（不要 markdown 包裝、不要 ```json``` 區塊），格式為：\n"
+                "{\"notes\": \"...Markdown 字串...\", \"structured\": {...}}\n\n"
+                "語言一律繁體中文。原文沒提到的欄位請從上下文推論或留空，不要捏造資訊。"
+            )
+
+            import json as _json
+            user_msg = _json.dumps(context, ensure_ascii=False)
+
+            raw = await oa.chat_completion(
+                [{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
+                model=(self.analysis_model or None),
+                max_tokens=3000,
+                temperature=0.3,
+            )
+
+            data = None
+            try:
+                data = _json.loads(raw)
+            except Exception:
+                import re
+                m = re.search(r"\{[\s\S]*\}", raw)
+                if m:
+                    try:
+                        data = _json.loads(m.group(0))
+                    except Exception:
+                        data = None
+            if not isinstance(data, dict):
+                return None
+            notes = str(data.get("notes", "")).strip()
+            structured = data.get("structured")
+            if not notes or not isinstance(structured, dict):
+                return None
+            structured.setdefault("schema_version", "1.0")
+            return {"notes": notes, "structured": structured}
+        except Exception as e:
+            logger.warning("AI 整理 notes/structured 失敗，將降級到純文字 notes: %s", e)
+            return None
+
+    @staticmethod
+    def _trim_external_data(structured: Dict[str, Any], limit: int = 32768) -> str:
+        """Serialize structured to JSON string within Asana external.data 32K limit.
+        Trim heavy fields progressively if too large.
+        """
+        import json as _json
+        s = _json.dumps(structured, ensure_ascii=False)
+        if len(s.encode("utf-8")) <= limit:
+            return s
+        # 1) 移除 kb_references[].preview
+        for ref in structured.get("kb_references") or []:
+            ref.pop("preview", None)
+        s = _json.dumps(structured, ensure_ascii=False)
+        if len(s.encode("utf-8")) <= limit:
+            return s
+        # 2) 清掉 ai_analysis 細節
+        structured["ai_analysis"] = None
+        s = _json.dumps(structured, ensure_ascii=False)
+        if len(s.encode("utf-8")) <= limit:
+            return s
+        # 3) 截掉 description.raw（保留前 1500 字 + 標記）
+        desc = structured.get("description")
+        if isinstance(desc, dict) and isinstance(desc.get("raw"), str):
+            desc["raw"] = desc["raw"][:1500] + "...(truncated)"
+        s = _json.dumps(structured, ensure_ascii=False)
+        return s
 
     def get_recent_task_gid(self, user_email: str, max_age_minutes: int = 10) -> str | None:
         """取得使用者最近建立的 IT 工單 GID。

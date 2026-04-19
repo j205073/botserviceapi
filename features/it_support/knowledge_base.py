@@ -22,13 +22,16 @@ class ITKnowledgeBase:
         self.root_path = os.getenv("SHAREPOINT_ROOT_PATH", "IT/Knowledge_Base")
 
     def create_entry(self, task: Dict[str, Any], reporter_info: Dict[str, str], stories: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """從 Asana 任務資料建立 AI-Ready 的 JSON 知識條目。"""
+        """從 Asana 任務資料建立 AI-Ready 的 JSON 知識條目。
+        若 Asana task 帶有 external.data（提單時 AI 寫入的 structured JSON v1.0），
+        則加入頂層 structured 欄位供後續分析使用（schema v2.0 加欄位、不破壞舊結構）。
+        """
         taipei = pytz.timezone("Asia/Taipei")
         now = datetime.now(taipei)
 
         issue_id = reporter_info.get("issue_id", "UNKNOWN")
         resolution = self._extract_resolution(task)
-        
+
         # 建立對話紀錄 (Dialogue)
         dialogue = []
         if stories:
@@ -61,6 +64,18 @@ class ITKnowledgeBase:
                 "keywords": self._generate_keywords(task.get("name", ""), resolution)
             }
         }
+
+        # 從 Asana external.data 還原提單時的 structured JSON（若有）
+        external = task.get("external") or {}
+        external_data = external.get("data")
+        if external_data:
+            try:
+                structured = json.loads(external_data)
+                if isinstance(structured, dict):
+                    entry["structured"] = structured
+            except Exception as e:
+                logger.warning("解析 Asana external.data 失敗（issue_id=%s）：%s", issue_id, e)
+
         return entry
 
     async def save_to_sharepoint(self, entry: Dict[str, Any]) -> Dict[str, Any]:

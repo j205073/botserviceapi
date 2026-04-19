@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rinnai.com.tw/schemas/it-kb/sharepoint-entry/v2.0.json",
+  "title": "IT Knowledge Base SharePoint Entry",
+  "description": "存放於 SharePoint /sites/IT/IT/Knowledge_Base/{YYYY}/{MM}/{issue_id}.json 的 IT 工單知識條目。新檔（從 Bot 改版日起）會多 structured 區塊；舊檔不會有，KB 端請以 entry.get('structured', {}).get('schema_version') 是否等於 '1.0' 判斷。",
+  "type": "object",
+  "required": ["metadata", "content"],
+  "additionalProperties": false,
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "description": "結案時補進的工單摘要（v1.0 既有，KB 現行索引依賴此區）",
+      "required": ["entry_id", "asana_task_gid", "resolved_at", "category"],
+      "properties": {
+        "entry_id":            { "type": "string", "description": "工單編號 IT{YYYYMMDDHHMM}{seq:04d}" },
+        "asana_task_gid":      { "type": "string" },
+        "created_at":          { "type": "string", "description": "Asana task 建立時間（ISO 8601 UTC）" },
+        "resolved_at":         { "type": "string", "format": "date-time", "description": "結案時間（ISO 8601 + 台北時區）" },
+        "priority":            { "type": "string", "enum": ["P1", "P2", "P3", "P4"] },
+        "reporter":            { "type": "string", "description": "提單人姓名" },
+        "reporter_email":      { "type": "string", "format": "email" },
+        "reporter_department": { "type": "string" },
+        "category":            { "type": "string", "description": "中文分類名稱" }
+      }
+    },
+    "content": {
+      "type": "object",
+      "description": "v1.0 既有，KB 現行 indexing 主要用這塊",
+      "required": ["title", "description"],
+      "properties": {
+        "title":       { "type": "string", "description": "Asana task name，例如 IT2026041914300001 - 業務資料" },
+        "description": { "type": "string", "description": "整段 Asana task notes 純文字（含單號/提出人/分類/AI 分析等樣板）" },
+        "resolution":  { "type": "string", "description": "處理結果，從 Asana custom field『處理結果』取；沒填則『（詳見 Asana 任務內容）』" },
+        "dialogue": {
+          "type": "array",
+          "description": "Asana 對話評論",
+          "items": {
+            "type": "object",
+            "required": ["role", "text", "time"],
+            "properties": {
+              "role": { "type": "string", "description": "留言者姓名" },
+              "text": { "type": "string" },
+              "time": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "正則切詞產出（≤10 個）"
+        }
+      }
+    },
+    "structured": {
+      "type": "object",
+      "description": "★新增★ 提單時 AI 從使用者自由文字解析出的結構化資料，舊檔（改版前）不會有此欄位。判斷方式：entry.get('structured', {}).get('schema_version') == '1.0'。建議用於向量化與 facet filtering。",
+      "required": [
+        "schema_version", "issue_id", "created_at", "source",
+        "priority", "category", "is_proxy", "reporter", "description"
+      ],
+      "properties": {
+        "schema_version": { "type": "string", "const": "1.0" },
+        "issue_id":       { "type": "string", "pattern": "^IT\\d{16}$", "description": "IT{YYYYMMDDHHMM}{seq:04d}" },
+        "created_at":     { "type": "string", "format": "date-time", "description": "提單時間（ISO 8601 + 台北時區）" },
+        "source":         { "type": "string", "enum": ["TR GPT bot", "TR GPT bot（代提單 @itt）"] },
+        "priority":       { "type": "string", "enum": ["P1", "P2", "P3", "P4"] },
+        "category": {
+          "type": "object",
+          "required": ["code", "label"],
+          "properties": {
+            "code":  { "type": "string", "description": "taxonomy code，例如 software / hardware / network / account / onboarding / business_data / other" },
+            "label": { "type": "string", "description": "中文分類名稱" }
+          }
+        },
+        "is_proxy": { "type": "boolean", "description": "true=代提單(@itt) / false=本人自提(@it)" },
+        "reporter": {
+          "type": "object",
+          "description": "實際填表人（自提=本人；代提=IT 人員）",
+          "required": ["name", "email"],
+          "properties": {
+            "name":       { "type": "string" },
+            "email":      { "type": "string", "format": "email" },
+            "department": { "type": "string" }
+          }
+        },
+        "requester": {
+          "type": ["object", "null"],
+          "description": "被代理的提出人；is_proxy=false 時為 null",
+          "properties": {
+            "name":       { "type": "string" },
+            "email":      { "type": "string", "format": "email" },
+            "department": { "type": "string" }
+          }
+        },
+        "description": {
+          "type": "object",
+          "required": ["raw", "summary"],
+          "properties": {
+            "raw":     { "type": "string", "description": "使用者原始輸入全文" },
+            "summary": { "type": "string", "maxLength": 100, "description": "一句話摘要 ≤50 字（建議作為 KB 預覽）" },
+            "symptom": { "type": "string", "description": "現象（建議作為主索引 chunk 文字的一部分）" },
+            "steps_to_reproduce": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "expected": { "type": "string" },
+            "impact":   { "type": "string" },
+            "affected_systems": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "涉及的系統/軟體；建議作為 facet/filter，例：ERP、Outlook、Excel"
+            },
+            "keywords": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "AI 產出的關鍵字（比 content.keywords 精準）"
+            }
+          }
+        },
+        "ai_analysis": {
+          "type": ["object", "null"],
+          "description": "ENABLE_IT_AI_ANALYSIS=true 時才會有",
+          "properties": {
+            "recommendation": { "type": "string" },
+            "time_estimate":  { "type": "string" },
+            "related_areas": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "kb_references": {
+          "type": "array",
+          "description": "提單時查 KB 找到的歷史相關工單（自我參照，僅供 trace）",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title":   { "type": "string" },
+              "score":   { "type": "number", "minimum": 0, "maximum": 1 },
+              "preview": { "type": "string", "maxLength": 200 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

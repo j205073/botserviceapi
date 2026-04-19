@@ -1,0 +1,64 @@
+{
+  "metadata": {
+    "entry_id": "IT2026041914300001",
+    "asana_task_gid": "1208999000000001",
+    "created_at": "2026-04-19T06:30:00.000Z",
+    "resolved_at": "2026-04-19T15:20:00+08:00",
+    "priority": "P2",
+    "reporter": "王小明",
+    "reporter_email": "sales@rinnai.com.tw",
+    "reporter_department": "業務一課",
+    "category": "業務資料"
+  },
+  "content": {
+    "title": "IT2026041914300001 - 業務資料",
+    "description": "（AI 整理後的 Markdown notes 字串，由 Bot 寫入 Asana task notes 欄位；此處保留原樣）",
+    "resolution": "已重啟 ERP application pool，序號產生器恢復正常。後續監控 24h 無異常。",
+    "dialogue": [
+      { "role": "張小華", "text": "請先重新登入試試", "time": "2026-04-19T07:00:00.000Z" },
+      { "role": "王小明", "text": "重登一樣 QQ",       "time": "2026-04-19T07:05:00.000Z" }
+    ],
+    "keywords": ["ERP", "領退料", "單據"]
+  },
+  "structured": {
+    "schema_version": "1.0",
+    "issue_id": "IT2026041914300001",
+    "created_at": "2026-04-19T14:30:00+08:00",
+    "source": "TR GPT bot",
+    "priority": "P2",
+    "category": { "code": "business_data", "label": "業務資料" },
+    "is_proxy": false,
+    "reporter": {
+      "name": "王小明",
+      "email": "sales@rinnai.com.tw",
+      "department": "業務一課"
+    },
+    "requester": null,
+    "description": {
+      "raw": "ERP 領退料出錯，今天下午 3 點按確認後跳出『單據號碼不存在』，但明明剛建完。重開系統也一樣。影響整個課的出貨。",
+      "summary": "ERP 領退料建單後確認即報「單據號碼不存在」",
+      "symptom": "按確認後跳出「單據號碼不存在」錯誤訊息，重開系統無效",
+      "steps_to_reproduce": [
+        "建立領退料單據",
+        "按「確認」送出",
+        "系統跳出錯誤訊息"
+      ],
+      "expected": "單據正常送出並由 ERP 認列單號",
+      "impact": "業務一課整課無法出貨",
+      "affected_systems": ["ERP"],
+      "keywords": ["ERP", "領退料", "單據號碼不存在", "確認失敗"]
+    },
+    "ai_analysis": {
+      "recommendation": "檢查 ERP 單據序號產生器、Session 快取、資料庫交易回滾紀錄",
+      "time_estimate": "2-4 小時",
+      "related_areas": ["資料庫交易", "Session 管理", "ERP 後端日誌"]
+    },
+    "kb_references": [
+      {
+        "title": "IT2025120500030001",
+        "score": 0.82,
+        "preview": "類似 ERP 單號消失問題，當時重啟服務恢復..."
+      }
+    ]
+  }
+}
