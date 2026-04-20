@@ -218,11 +218,7 @@ class ITSupportService:
         created_at = now_taipei.strftime("%Y-%m-%d %H:%M 台北時間")
         created_at_iso = now_taipei.isoformat()
 
-        # AI 分析（取結構化 dict 給 formatter 用，純文字 fallback 用同一份）
-        analysis_dict: Optional[Dict[str, Any]] = None
-        if self.enable_ai_analysis:
-            analysis_dict = await self._analyze_issue_dict(description, category_label, priority)
-        else:
+        if not self.enable_ai_analysis:
             print("ℹ️ AI 分析已關閉 (ENABLE_IT_AI_ANALYSIS=false)")
 
         # 查詢知識庫（KB-Vector-Service）
@@ -273,7 +269,7 @@ class ITSupportService:
             requester=requester_obj,
             created_at_iso=created_at_iso,
             created_at_display=created_at,
-            ai_analysis=analysis_dict,
+            enable_ai_analysis=self.enable_ai_analysis,
             kb_answer=kb_answer,
             kb_sources=kb_sources,
         )
@@ -287,8 +283,13 @@ class ITSupportService:
                 logger.warning("external.data 序列化失敗: %s", e)
                 external_data_str = None
         else:
-            # AI 失敗 → 降級成原本純文字 notes 拼接
-            analysis_text = self._format_analysis_text(analysis_dict)
+            # AI format 失敗 → 降級到純文字 notes；lazy 呼叫 analyze 補上 AI 建議區塊
+            fallback_analysis = (
+                await self._analyze_issue_dict(description, category_label, priority)
+                if self.enable_ai_analysis
+                else None
+            )
+            analysis_text = self._format_analysis_text(fallback_analysis)
             kb_section = ""
             if kb_answer:
                 parts = [f"- AI 建議：{kb_answer}"]
@@ -631,11 +632,15 @@ class ITSupportService:
         requester: Optional[Dict[str, str]],
         created_at_iso: str,
         created_at_display: str,
-        ai_analysis: Optional[Dict[str, Any]],
+        enable_ai_analysis: bool,
         kb_answer: str,
         kb_sources: List[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        """Single OpenAI call producing both Markdown notes and structured JSON v1.0.
+        """Single OpenAI call producing notes + structured JSON v1.0.
+
+        合併原本的 _analyze_issue_dict：若 enable_ai_analysis=True，
+        AI 同時扮演資深工程師角色自行產出 recommendation/time_estimate/related_areas
+        並寫入 structured.ai_analysis 與 notes 的【AI 建議】區塊。
 
         Returns {"notes": str, "structured": dict} on success; None on failure
         (caller should fall back to plain-text notes assembly).
@@ -658,7 +663,7 @@ class ITSupportService:
                 "reporter": reporter,
                 "requester": requester,
                 "raw_description": description,
-                "ai_analysis": ai_analysis,
+                "enable_ai_analysis": enable_ai_analysis,
                 "kb_answer": (kb_answer or "").strip(),
                 "kb_sources": [
                     {
@@ -671,7 +676,12 @@ class ITSupportService:
             }
 
             system = (
-                "你是 IT 提單資料整理助手。根據輸入的 IT 提單資料（JSON），同時產出兩份產物：\n\n"
+                "你同時扮演兩個角色：\n"
+                "A. 資深 IT 服務台工程師：若輸入 enable_ai_analysis=true，請自己針對此 IT 問題產出"
+                "recommendation（簡短處理建議）、time_estimate（估計處理時間，如『2-4 小時』）、"
+                "related_areas（可能相關面向陣列，如『帳號權限』『網路』『軟硬體』『系統設定』『資料庫』"
+                "『API』『身分認證』等）。若 enable_ai_analysis=false，則 ai_analysis 設為 null 且 notes 不含【AI 建議】區塊。\n"
+                "B. IT 提單資料整理助手：根據輸入的 IT 提單資料（JSON），同時產出兩份產物：\n\n"
                 "1. notes：給 Asana task 的 notes 欄位（**Asana 的 notes 是純文字、不支援 Markdown**，"
                 "不能用 ##、**bold**、---、`code` 等 Markdown 語法，會直接顯示為字面字元）。\n"
                 "請用以下固定格式（注意每個欄位獨立一行，段落用【】標題區隔）：\n\n"
@@ -709,10 +719,10 @@ class ITSupportService:
                 "【涉及系統】\n"
                 "{affected_systems 用頓號或逗號串接，若空就省略整段}\n"
                 "\n"
-                "【AI 建議】                                       ← 只有 ai_analysis 非 null 才出現\n"
-                "- 處理建議：{recommendation}\n"
-                "- 估計時間：{time_estimate}\n"
-                "- 相關面向：{related_areas 用、串接}\n"
+                "【AI 建議】                                       ← 只有 enable_ai_analysis=true 才出現（內容由你自己產，見角色 A）\n"
+                "- 處理建議：{你產的 recommendation}\n"
+                "- 估計時間：{你產的 time_estimate}\n"
+                "- 相關面向：{你產的 related_areas 用、串接}\n"
                 "\n"
                 "【相關歷史工單（KB 參考）】                        ← 只有 kb_sources 非空才出現\n"
                 "- {kb_answer 整段（若有）}\n"
@@ -746,7 +756,7 @@ class ITSupportService:
                 "    \"affected_systems\": [str],     // 涉及的系統/軟體；無則空陣列\n"
                 "    \"keywords\": [str]              // 分析用關鍵字 5-10 個\n"
                 "  },\n"
-                "  \"ai_analysis\": {...} | null,     // 直接用輸入的 ai_analysis（保留 recommendation/time_estimate/related_areas）\n"
+                "  \"ai_analysis\": {\"recommendation\": str, \"time_estimate\": str, \"related_areas\": [str]} | null,  // enable_ai_analysis=true 時由你（角色 A）自行產出；false 時為 null\n"
                 "  \"kb_references\": [{title, score, preview}]  // 直接用輸入的 kb_sources\n"
                 "}\n\n"
                 "請只回傳純 JSON 物件（不要 markdown 包裝、不要 ```json``` 區塊），格式為：\n"
