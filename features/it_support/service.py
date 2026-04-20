@@ -221,12 +221,17 @@ class ITSupportService:
         if not self.enable_ai_analysis:
             print("ℹ️ AI 分析已關閉 (ENABLE_IT_AI_ANALYSIS=false)")
 
-        # 查詢知識庫（KB-Vector-Service）
-        kb_result = await self.kb_client.ask_safe(description, role="it", kb_name="it-kb")
-        kb_answer = (kb_result.get("answer") or "").strip()
-        kb_sources = kb_result.get("sources") or []
-        if kb_answer == "No relevant knowledge base articles found.":
-            kb_answer = ""
+        # 查詢知識庫（報到開通類別跳過，新人帳號開通通常不匹配歷史工單）
+        kb_answer = ""
+        kb_sources: List[Dict[str, Any]] = []
+        if category_code == "onboarding":
+            logger.info("報到開通案件 → 跳過 KB 查詢")
+        else:
+            kb_result = await self.kb_client.ask_safe(description, role="it", kb_name="it-kb")
+            kb_answer = (kb_result.get("answer") or "").strip()
+            kb_sources = kb_result.get("sources") or []
+            if kb_answer == "No relevant knowledge base articles found.":
+                kb_answer = ""
 
         # 代提單模式：先解析提出人資訊（不論是否走 AI 整理都需要）
         requester_display_name = ""
