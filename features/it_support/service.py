@@ -272,6 +272,7 @@ class ITSupportService:
             reporter=reporter_obj,
             requester=requester_obj,
             created_at_iso=created_at_iso,
+            created_at_display=created_at,
             ai_analysis=analysis_dict,
             kb_answer=kb_answer,
             kb_sources=kb_sources,
@@ -629,6 +630,7 @@ class ITSupportService:
         reporter: Dict[str, str],
         requester: Optional[Dict[str, str]],
         created_at_iso: str,
+        created_at_display: str,
         ai_analysis: Optional[Dict[str, Any]],
         kb_answer: str,
         kb_sources: List[Dict[str, Any]],
@@ -648,6 +650,7 @@ class ITSupportService:
             context = {
                 "issue_id": issue_id,
                 "created_at": created_at_iso,
+                "created_at_display": created_at_display,
                 "source": "TR GPT bot（代提單 @itt）" if is_proxy else "TR GPT bot",
                 "priority": priority,
                 "category": {"code": category_code, "label": category_label},
@@ -669,9 +672,59 @@ class ITSupportService:
 
             system = (
                 "你是 IT 提單資料整理助手。根據輸入的 IT 提單資料（JSON），同時產出兩份產物：\n\n"
-                "1. notes：給 Asana task 的 notes 欄位，Markdown 格式（H2/H3 標題、bullet list、適度 emoji），"
-                "讓 IT 工程師一眼看懂問題核心、現象、重現步驟、影響、AI 建議、相關歷史工單。"
-                "請用清楚分區呈現，不要逐字複製大段原文，要重新組織。\n\n"
+                "1. notes：給 Asana task 的 notes 欄位（**Asana 的 notes 是純文字、不支援 Markdown**，"
+                "不能用 ##、**bold**、---、`code` 等 Markdown 語法，會直接顯示為字面字元）。\n"
+                "請用以下固定格式（注意每個欄位獨立一行，段落用【】標題區隔）：\n\n"
+                "```\n"
+                "單號: {issue_id}\n"
+                "提出人: {reporter.name} <{reporter.email}>\n"
+                "提出人部門: {reporter.department}\n"
+                "代理提出人: {requester.name} <{requester.email}>      ← 僅 is_proxy=true 時加這兩行\n"
+                "代理提出人部門: {requester.department}                ← \n"
+                "分類: {category.label} ({category.code})\n"
+                "優先順序: {priority}\n"
+                "建立來源: {source}\n"
+                "建立時間: {created_at_display}   ← 使用輸入的 created_at_display 欄位（人類可讀），不要用 ISO 格式的 created_at\n"
+                "\n"
+                "【需求摘要】\n"
+                "{一句話摘要 ≤50 字}\n"
+                "\n"
+                "【需求/問題說明】\n"
+                "{description.raw 原文}\n"
+                "\n"
+                "【現象】\n"
+                "- {symptom 條列，每點一行}\n"
+                "\n"
+                "【重現步驟】\n"
+                "1. {step}\n"
+                "2. {step}\n"
+                "（若使用者沒提到步驟，整段 if 空陣列就省略整個【重現步驟】區塊）\n"
+                "\n"
+                "【預期結果】\n"
+                "{expected，若空就省略整段}\n"
+                "\n"
+                "【影響】\n"
+                "{impact，若空就省略整段}\n"
+                "\n"
+                "【涉及系統】\n"
+                "{affected_systems 用頓號或逗號串接，若空就省略整段}\n"
+                "\n"
+                "【AI 建議】                                       ← 只有 ai_analysis 非 null 才出現\n"
+                "- 處理建議：{recommendation}\n"
+                "- 估計時間：{time_estimate}\n"
+                "- 相關面向：{related_areas 用、串接}\n"
+                "\n"
+                "【相關歷史工單（KB 參考）】                        ← 只有 kb_sources 非空才出現\n"
+                "- {kb_answer 整段（若有）}\n"
+                "- {title}（相似度 {score:.0%}）\n"
+                "  {preview 截前 80 字}\n"
+                "```\n\n"
+                "規則：\n"
+                "- 每個欄位獨立一行，不要併排\n"
+                "- 不要用任何 Markdown 語法（##、**、---、```、表格、超連結等都禁止）\n"
+                "- 段落之間用一個空行分隔\n"
+                "- 沒資料的【】區塊整段不要輸出（不要顯示「無」）\n"
+                "- 不要捏造原文沒有的資訊\n\n"
                 "2. structured：結構化 JSON，固定 schema_version 為 \"1.0\"，欄位定義：\n"
                 "{\n"
                 "  \"schema_version\": \"1.0\",\n"
