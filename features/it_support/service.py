@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 from base64 import urlsafe_b64encode
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -829,6 +830,32 @@ class ITSupportService:
         s = _json.dumps(structured, ensure_ascii=False)
         return s
 
+    # ── 評論前綴可見性規則 ─────────────────────────────────────
+    # IT 人員在 Asana 評論前加標籤控制這則評論的傳播：
+    #   [內部] / [private] / [internal]  → 只進 SharePoint KB，不通知使用者
+    #   [略]   / [skip]                   → 完全忽略（不通知、不進 KB）
+    #   無前綴                            → 通知使用者 + 進 KB（既有行為）
+    # 實例：「[內部] 金鑰在 \\fs-it\secrets\office.txt」使用者看不到，但會被 KB 學到
+    _COMMENT_PREFIX_PATTERNS = [
+        ("skip", re.compile(r"^\s*\[\s*(略|skip)\s*\]\s*", re.IGNORECASE)),
+        ("internal", re.compile(r"^\s*\[\s*(內部|private|internal)\s*\]\s*", re.IGNORECASE)),
+    ]
+
+    @classmethod
+    def _classify_comment_visibility(cls, text: str) -> tuple[str, str]:
+        """Classify an Asana comment by prefix tag.
+        Returns (visibility, cleaned_text).
+          visibility ∈ {"public", "internal", "skip"}
+          cleaned_text：已去除前綴的文字（public 情況即原文 strip 後）
+        """
+        if not text:
+            return ("public", "")
+        for label, pattern in cls._COMMENT_PREFIX_PATTERNS:
+            m = pattern.match(text)
+            if m:
+                return (label, text[m.end():].strip())
+        return ("public", text.strip())
+
     def get_recent_task_gid(self, user_email: str, max_age_minutes: int = 10) -> str | None:
         """取得使用者最近建立的 IT 工單 GID。
         超過 max_age_minutes 分鐘的工單不視為「最近」，避免一般對話附件被誤攔。
@@ -928,21 +955,33 @@ class ITSupportService:
                         desc_end = marker_pos
             original_description = task_notes[desc_start:desc_end].strip()
 
-        # 1) 抓取對話評論內容
+        # 1) 抓取對話評論內容（前綴規則：[內部] 只進 KB、[略] 完全忽略、無前綴正常）
         comments_str = ""
+        stories_for_kb: List[Dict[str, Any]] = []  # 給 SharePoint KB 用的 dialogue，含 internal、排除 skip、前綴已 strip
         try:
             stories_data = await self.asana.get_task_stories(task_gid)
             stories = stories_data.get("data", [])
-            
+
             comment_list = []
             for s in stories:
-                # 僅紀錄有文字內容的評論(comment)，排除系統自動產生的訊息
-                if s.get("type") == "comment" or s.get("resource_subtype") == "comment_added":
-                    author = s.get("created_by", {}).get("name", "Unknown")
-                    text = s.get("text", "").strip()
-                    if text:
-                        comment_list.append(f"**{author}**: {text}")
-            
+                # 僅處理有文字內容的評論(comment)，排除系統自動產生的訊息
+                if not (s.get("type") == "comment" or s.get("resource_subtype") == "comment_added"):
+                    continue
+                author = s.get("created_by", {}).get("name", "Unknown")
+                text = (s.get("text") or "").strip()
+                if not text:
+                    continue
+                visibility, cleaned = self._classify_comment_visibility(text)
+                if visibility == "skip":
+                    continue  # 完全忽略，不進 KB、不通知
+                # 內部 + 對外 都進 KB（前綴已 strip）
+                s_for_kb = dict(s)
+                s_for_kb["text"] = cleaned
+                stories_for_kb.append(s_for_kb)
+                # 只有對外才列入給使用者看的 comments_str
+                if visibility == "public" and cleaned:
+                    comment_list.append(f"**{author}**: {cleaned}")
+
             if comment_list:
                 comments_str = "\n" + "\n".join([f"  - {c}" for c in comment_list])
         except Exception as e:
@@ -985,7 +1024,7 @@ class ITSupportService:
         if self.knowledge_base:
             try:
                 # 使用剛才抓取的 stories (如果有的話)
-                entry = self.knowledge_base.create_entry(task, reporter_info, stories if 'stories' in locals() else None)
+                entry = self.knowledge_base.create_entry(task, reporter_info, stories_for_kb if 'stories_for_kb' in locals() else None)
                 await self.knowledge_base.save_to_sharepoint(entry)
                 logger.info("IT 知識庫處理完成: %s", issue_id)
             except Exception as kb_err:
@@ -1011,9 +1050,19 @@ class ITSupportService:
                             target_story.get("type"), target_story.get("resource_subtype"))
                 return
 
-            comment_text = target_story.get("text", "")
+            comment_text = target_story.get("text", "") or ""
             author_name = target_story.get("created_by", {}).get("name", "").strip()
             logger.info("檢測到留言: [%s] %s...", author_name, comment_text[:20])
+
+            # 前綴規則判斷：[內部] / [略] 不推播使用者
+            visibility, cleaned_text = self._classify_comment_visibility(comment_text)
+            if visibility != "public":
+                logger.info(
+                    "評論標記為 %s，跳過 Teams/Email 通知 (Task=%s, Story=%s)",
+                    visibility, task_gid, story_gid,
+                )
+                return
+            comment_text = cleaned_text  # 用去除前綴的文字後續推播（public 時等同原文 strip）
 
             # 獲取提單人資訊 (優先從緩存拿，拿不到才解析 notes)
             reporter_info = self._task_to_reporter.get(task_gid)
