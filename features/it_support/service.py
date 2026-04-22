@@ -830,15 +830,16 @@ class ITSupportService:
         s = _json.dumps(structured, ensure_ascii=False)
         return s
 
-    # ── 評論前綴可見性規則 ─────────────────────────────────────
+    # ── 評論前綴可見性規則（Secure by default：預設不推播使用者）──────
     # IT 人員在 Asana 評論前加標籤控制這則評論的傳播：
-    #   [內部] / [private] / [internal]  → 只進 SharePoint KB，不通知使用者
-    #   [略]   / [skip]                   → 完全忽略（不通知、不進 KB）
-    #   無前綴                            → 通知使用者 + 進 KB（既有行為）
-    # 實例：「[內部] 金鑰在 \\fs-it\secrets\office.txt」使用者看不到，但會被 KB 學到
+    #   [對外] / [reply] / [public]       → 推播使用者 + 進 KB（要再經 AI 消毒）
+    #   [略]   / [skip]                    → 完全忽略（不通知、不進 KB）
+    #   無前綴                             → 只進 SharePoint KB，不通知使用者
+    # 設計意圖：漏加前綴只會「使用者沒看到進度」，不會漏密。
+    # KB 存的是原文（除 [略] 外），以保留內部知識養分；推播給使用者前會再經 AI 消毒。
     _COMMENT_PREFIX_PATTERNS = [
         ("skip", re.compile(r"^\s*\[\s*(略|skip)\s*\]\s*", re.IGNORECASE)),
-        ("internal", re.compile(r"^\s*\[\s*(內部|private|internal)\s*\]\s*", re.IGNORECASE)),
+        ("public", re.compile(r"^\s*\[\s*(對外|對外回覆|reply|public)\s*\]\s*", re.IGNORECASE)),
     ]
 
     @classmethod
@@ -846,15 +847,64 @@ class ITSupportService:
         """Classify an Asana comment by prefix tag.
         Returns (visibility, cleaned_text).
           visibility ∈ {"public", "internal", "skip"}
-          cleaned_text：已去除前綴的文字（public 情況即原文 strip 後）
+          cleaned_text：已去除前綴的文字。
         """
         if not text:
-            return ("public", "")
+            return ("internal", "")
         for label, pattern in cls._COMMENT_PREFIX_PATTERNS:
             m = pattern.match(text)
             if m:
                 return (label, text[m.end():].strip())
-        return ("public", text.strip())
+        return ("internal", text.strip())
+
+    async def _redact_sensitive_info(self, text: str) -> Optional[str]:
+        """AI 消毒：把對使用者顯示前的文字去除敏感資訊（路徑/密碼/IP/內部系統位址等）。
+        Returns 消毒後文字；失敗時回傳 None 由呼叫端決定 fail-safe 策略（通常：不推播）。
+        """
+        try:
+            if not text or not text.strip():
+                return text or ""
+            from core.container import get_container
+            from infrastructure.external.openai_client import OpenAIClient
+
+            oa: OpenAIClient = get_container().get(OpenAIClient)
+
+            system = (
+                "你是 IT 支援回覆的資訊安全過濾器。輸入是一段要回覆給「一般使用者」的 IT 回覆文字。\n"
+                "你的任務是把可能洩漏內部機敏資訊的片段改寫為使用者仍能理解、但不含具體機敏值的版本，並保留原意。\n"
+                "要移除或改寫的敏感類別（舉例但不限於）：\n"
+                "- 內部伺服器 UNC / 路徑（如 \\\\fs-it\\secrets、\\\\nas\\share）\n"
+                "- 密碼、API key、Token、序號、憑證指紋\n"
+                "- 內部 IP、Port、內部 DNS 名稱\n"
+                "- 特定系統/檔案位置（如 D:\\ERP\\config）\n"
+                "- 內部服務帳號/系統帳號（如 sa / root / svc_xxx）\n"
+                "- 明確指向內部人員的私人聯絡方式（分機/Email/手機）\n"
+                "改寫原則：\n"
+                "- 具體路徑/位址 → 改成「請聯絡 IT 取得」「由 IT 提供」「內部檔案位置（已透過其他管道傳送）」等等\n"
+                "- 密碼/金鑰值 → 絕對不要輸出；改成「已另行寄送至您的信箱」或「請透過 IT 面交」\n"
+                "- 保留可公開的語境與結論（例如「帳號已重開」「權限已調整」）\n"
+                "- 若整段通篇都是內部技術細節、沒有對使用者的有意義訊息，回傳空字串（表示略過）\n"
+                "- 語言維持與原文相同（中文在原文是中文則維持中文）\n"
+                "請直接回傳消毒後的純文字，不要包 markdown、不要加任何說明。"
+            )
+
+            raw = await oa.chat_completion(
+                [{"role": "system", "content": system}, {"role": "user", "content": text}],
+                model=(self.analysis_model or None),
+                max_tokens=1200,
+                temperature=0.1,
+            )
+            if raw is None:
+                return None
+            cleaned = str(raw).strip()
+            # 去除可能的 markdown 包裝
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", cleaned)
+                cleaned = re.sub(r"\n?```$", "", cleaned)
+            return cleaned.strip()
+        except Exception as e:
+            logger.warning("AI 消毒失敗，fail-safe：不推播此內容: %s", e)
+            return None
 
     def get_recent_task_gid(self, user_email: str, max_age_minutes: int = 10) -> str | None:
         """取得使用者最近建立的 IT 工單 GID。
@@ -955,16 +1005,17 @@ class ITSupportService:
                         desc_end = marker_pos
             original_description = task_notes[desc_start:desc_end].strip()
 
-        # 1) 抓取對話評論內容（前綴規則：[內部] 只進 KB、[略] 完全忽略、無前綴正常）
+        # 1) 抓取對話評論內容（Secure by default：預設不推播、[對外] 才推播、[略] 完全忽略）
+        #    - KB 保存原文（internal + public），作為 IT 知識養分
+        #    - 給使用者的彙整（comments_str）僅含 [對外] 評論，彙整完再過一次 AI 消毒
         comments_str = ""
-        stories_for_kb: List[Dict[str, Any]] = []  # 給 SharePoint KB 用的 dialogue，含 internal、排除 skip、前綴已 strip
+        stories_for_kb: List[Dict[str, Any]] = []
         try:
             stories_data = await self.asana.get_task_stories(task_gid)
             stories = stories_data.get("data", [])
 
-            comment_list = []
+            comment_list_public = []
             for s in stories:
-                # 僅處理有文字內容的評論(comment)，排除系統自動產生的訊息
                 if not (s.get("type") == "comment" or s.get("resource_subtype") == "comment_added"):
                     continue
                 author = s.get("created_by", {}).get("name", "Unknown")
@@ -973,17 +1024,27 @@ class ITSupportService:
                     continue
                 visibility, cleaned = self._classify_comment_visibility(text)
                 if visibility == "skip":
-                    continue  # 完全忽略，不進 KB、不通知
-                # 內部 + 對外 都進 KB（前綴已 strip）
+                    continue
+                # 內部 + 對外都進 KB（前綴已 strip）
                 s_for_kb = dict(s)
                 s_for_kb["text"] = cleaned
                 stories_for_kb.append(s_for_kb)
-                # 只有對外才列入給使用者看的 comments_str
+                # 只有 [對外] 會給使用者看
                 if visibility == "public" and cleaned:
-                    comment_list.append(f"**{author}**: {cleaned}")
+                    comment_list_public.append(f"**{author}**: {cleaned}")
 
-            if comment_list:
-                comments_str = "\n" + "\n".join([f"  - {c}" for c in comment_list])
+            if comment_list_public:
+                raw_public_str = "\n".join(comment_list_public)
+                # AI 雙保險：整段 public 彙整後再過一次 AI 消毒
+                redacted = await self._redact_sensitive_info(raw_public_str)
+                if redacted and redacted.strip():
+                    comments_str = "\n" + "\n".join(
+                        [f"  - {line}" for line in redacted.splitlines() if line.strip()]
+                    )
+                elif redacted is None:
+                    # AI 失敗 → fail-safe：不附溝通摘要（避免漏密）
+                    logger.warning("結案溝通摘要 AI 消毒失敗，fail-safe：不附對使用者的 comments_str")
+                # AI 回傳空字串：全段都被判為內部資訊，comments_str 保持 ""
         except Exception as e:
             logger.warning("抓取任務評論失敗: %s", e)
 
@@ -1054,7 +1115,7 @@ class ITSupportService:
             author_name = target_story.get("created_by", {}).get("name", "").strip()
             logger.info("檢測到留言: [%s] %s...", author_name, comment_text[:20])
 
-            # 前綴規則判斷：[內部] / [略] 不推播使用者
+            # 前綴規則判斷（Secure by default：預設不推播，加 [對外] 才推播）
             visibility, cleaned_text = self._classify_comment_visibility(comment_text)
             if visibility != "public":
                 logger.info(
@@ -1062,7 +1123,20 @@ class ITSupportService:
                     visibility, task_gid, story_gid,
                 )
                 return
-            comment_text = cleaned_text  # 用去除前綴的文字後續推播（public 時等同原文 strip）
+
+            # AI 雙保險消毒：即便 IT 加了 [對外]，仍過一次 AI 去除敏感資訊後才推播
+            redacted = await self._redact_sensitive_info(cleaned_text)
+            if redacted is None:
+                logger.warning(
+                    "AI 消毒失敗 (fail-safe：不推播) Task=%s, Story=%s", task_gid, story_gid,
+                )
+                return
+            if not redacted.strip():
+                logger.info(
+                    "AI 判定整段皆內部資訊，略過推播 Task=%s, Story=%s", task_gid, story_gid,
+                )
+                return
+            comment_text = redacted
 
             # 獲取提單人資訊 (優先從緩存拿，拿不到才解析 notes)
             reporter_info = self._task_to_reporter.get(task_gid)
