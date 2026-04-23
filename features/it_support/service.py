@@ -328,7 +328,7 @@ class ITSupportService:
                     f"建立時間: {created_at}\n\n"
                     f"【需求/問題說明】\n{description}\n"
                     + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
-                    + ("\n─────────────── 📚 知識庫參考（KB-Vector-Service）───────────────\n" + kb_section + "\n─────────────────────────────────────────────────────────────────\n" if kb_section else "")
+                    + ("\n[kb]\n📚 知識庫參考（KB-Vector-Service）\n\n" + kb_section + "\n[/kb]\n" if kb_section else "")
                 )
             else:
                 notes = (
@@ -341,7 +341,7 @@ class ITSupportService:
                     f"建立時間: {created_at}\n\n"
                     f"【需求/問題說明】\n{description}\n"
                     + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
-                    + ("\n─────────────── 📚 知識庫參考（KB-Vector-Service）───────────────\n" + kb_section + "\n─────────────────────────────────────────────────────────────────\n" if kb_section else "")
+                    + ("\n[kb]\n📚 知識庫參考（KB-Vector-Service）\n\n" + kb_section + "\n[/kb]\n" if kb_section else "")
                 )
 
         # 決定 assignee：報到開通指派給指定人員
@@ -736,13 +736,15 @@ class ITSupportService:
                 "- 估計時間：{你產的 time_estimate}\n"
                 "- 相關面向：{你產的 related_areas 用、串接}\n"
                 "\n"
-                "─────────────── 📚 知識庫參考（KB-Vector-Service）───────────────\n"
+                "[kb]\n"
+                "📚 知識庫參考（KB-Vector-Service）\n"
+                "\n"
                 "- AI 建議：{kb_answer 整段（若有）}\n"
                 "- {title}（相似度 {score:.0%}）\n"
                 "  {preview 截前 80 字}\n"
-                "─────────────────────────────────────────────────────────────────\n"
-                "                                                  ↑ 只有 kb_sources 非空才出現整個區塊（含上下框線）；\n"
-                "                                                    若無資料整段省略不要輸出框線\n"
+                "[/kb]\n"
+                "                                                  ↑ 只有 kb_sources 非空才出現整個區塊（含 [kb]/[/kb] 標記）；\n"
+                "                                                    若無資料整段省略不要輸出 [kb] 標記\n"
                 "```\n\n"
                 "規則：\n"
                 "- 每個欄位獨立一行，不要併排\n"
@@ -1062,106 +1064,133 @@ class ITSupportService:
 
         logger.info("✅ 提單信息: issue_id=%s, reporter=%s, task=%s", issue_id, reporter_email, task_name)
 
-        # 0) 從 notes 解析原始提交內容（排除知識庫區塊）
+        # 0) 從 notes 解析原始提交內容（結案 email 用，須排除 AI 分析與知識庫區塊）
         original_description = ""
         task_notes = task.get("notes", "")
         if "【需求/問題說明】" in task_notes:
             desc_start = task_notes.index("【需求/問題說明】") + len("【需求/問題說明】")
             desc_end = len(task_notes)
-            for marker in ["【AI 分析", "【知識庫參考"]:
+            # 各種「後續區塊」的起始標記：遇到任何一個都當作 description 結束
+            for marker in ["【AI 分析", "【知識庫參考", "[kb]", "[KB]", "【現象】", "【重現步驟】"]:
                 if marker in task_notes[desc_start:]:
                     marker_pos = task_notes.index(marker, desc_start)
                     if marker_pos < desc_end:
                         desc_end = marker_pos
             original_description = task_notes[desc_start:desc_end].strip()
+        # 即使沒有 description markers，仍保險剝掉任何遺留的 [kb]...[/kb] 區塊
+        if "[kb]" in original_description.lower():
+            original_description = re.sub(
+                r"\[kb\][\s\S]*?\[/kb\]", "", original_description, flags=re.IGNORECASE
+            ).strip()
 
-        # 1) 抓取對話評論內容（Secure by default：預設不推播、[對外] 才推播、[略] 完全忽略）
-        #    - KB 保存原文（internal + public），作為 IT 知識養分
-        #    - 給使用者的彙整（comments_str）僅含 [對外] 評論，彙整完再過一次 AI 消毒
-        comments_str = ""
-        stories_for_kb: List[Dict[str, Any]] = []
-        try:
-            stories_data = await self.asana.get_task_stories(task_gid)
-            stories = stories_data.get("data", [])
+        # 1) 同步並行抓取評論 + 附件（大幅降低結案通知延遲）
+        import asyncio as _asyncio
 
-            comment_list_public = []
-            for s in stories:
-                if not (s.get("type") == "comment" or s.get("resource_subtype") == "comment_added"):
-                    continue
-                author = s.get("created_by", {}).get("name", "Unknown")
-                text = (s.get("text") or "").strip()
-                if not text:
-                    continue
-                visibility, cleaned = self._classify_comment_visibility(text)
-                if visibility == "skip":
-                    continue
-                # internal + public 都進 KB（前綴已 strip；inline blocks 也保留原貌）
-                s_for_kb = dict(s)
-                s_for_kb["text"] = cleaned
-                stories_for_kb.append(s_for_kb)
-                # 給使用者看的只收 public，且要先抽掉 inline [對內]...[/對內] blocks
-                if visibility == "public":
-                    public_part, _blocks = self._split_inline_internal_blocks(cleaned)
-                    if public_part.strip():
-                        comment_list_public.append(f"**{author}**: {public_part}")
-
-            if comment_list_public:
-                raw_public_str = "\n".join(comment_list_public)
-                # AI 雙保險：整段 public 彙整後再過一次 AI 消毒
-                redacted = await self._redact_sensitive_info(raw_public_str)
-                if redacted and redacted.strip():
-                    comments_str = "\n" + "\n".join(
-                        [f"  - {line}" for line in redacted.splitlines() if line.strip()]
-                    )
-                elif redacted is None:
-                    # AI 失敗 → fail-safe：不附溝通摘要（避免漏密）
-                    logger.warning("結案溝通摘要 AI 消毒失敗，fail-safe：不附對使用者的 comments_str")
-                # AI 回傳空字串：全段都被判為內部資訊，comments_str 保持 ""
-        except Exception as e:
-            logger.warning("抓取任務評論失敗: %s", e)
-
-        # 2) 抓取附件圖片
-        images = []
-        image_urls = []  # for Teams (用原始 URL)
-        try:
-            attachments = await self.asana.get_task_attachments(task_gid)
-            for att in attachments:
-                name = att.get("name", "")
-                dl_url = att.get("download_url", "")
-                if not dl_url:
-                    continue
-                # 只處理圖片類型
-                ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-                if ext not in ("png", "jpg", "jpeg", "gif", "webp", "bmp"):
-                    continue
-                image_urls.append({"name": name, "url": dl_url})
-                # 下載到記憶體給 Email 用
-                img_data = await self.asana.download_attachment(dl_url)
-                if img_data:
-                    ct_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                              "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp"}
-                    images.append({
-                        "filename": name,
-                        "data": img_data,
-                        "content_type": ct_map.get(ext, "image/png"),
-                    })
-        except Exception as e:
-            logger.warning("抓取任務附件失敗: %s", e)
-
-        # 3) Teams 通知
-        await self._send_teams_notification(reporter_email, issue_id, task_name, permalink, comments_str, image_urls)
-        # 4) Email 通知（圖片用 cid 內嵌）
-        await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink, comments_str, original_description, images)
-
-        # 5) 處理 IT 知識庫
-        if self.knowledge_base:
+        async def _prep_comments():
+            """抓 stories → 分類 → AI 消毒對外評論。回傳 (comments_str, stories_for_kb)。"""
+            out_comments_str = ""
+            out_stories_for_kb: List[Dict[str, Any]] = []
             try:
-                # 使用剛才抓取的 stories (如果有的話)
-                entry = self.knowledge_base.create_entry(task, reporter_info, stories_for_kb if 'stories_for_kb' in locals() else None)
-                await self.knowledge_base.save_to_sharepoint(entry)
-                logger.info("IT 知識庫處理完成: %s", issue_id)
-            except Exception as kb_err:
-                logger.error("處理 IT 知識庫失敗: %s", kb_err)
+                stories_data = await self.asana.get_task_stories(task_gid)
+                stories_local = stories_data.get("data", [])
+                comment_list_public = []
+                for s in stories_local:
+                    if not (s.get("type") == "comment" or s.get("resource_subtype") == "comment_added"):
+                        continue
+                    author = s.get("created_by", {}).get("name", "Unknown")
+                    text = (s.get("text") or "").strip()
+                    if not text:
+                        continue
+                    visibility, cleaned = self._classify_comment_visibility(text)
+                    if visibility == "skip":
+                        continue
+                    s_for_kb = dict(s)
+                    s_for_kb["text"] = cleaned
+                    out_stories_for_kb.append(s_for_kb)
+                    if visibility == "public":
+                        public_part, _blocks = self._split_inline_internal_blocks(cleaned)
+                        if public_part.strip():
+                            comment_list_public.append(f"**{author}**: {public_part}")
+                if comment_list_public:
+                    raw_public_str = "\n".join(comment_list_public)
+                    redacted = await self._redact_sensitive_info(raw_public_str)
+                    if redacted and redacted.strip():
+                        out_comments_str = "\n" + "\n".join(
+                            [f"  - {line}" for line in redacted.splitlines() if line.strip()]
+                        )
+                    elif redacted is None:
+                        logger.warning("結案溝通摘要 AI 消毒失敗，fail-safe：不附 comments_str")
+            except Exception as e:
+                logger.warning("抓取任務評論失敗: %s", e)
+            return out_comments_str, out_stories_for_kb
+
+        async def _prep_attachments():
+            """列 attachments → 並行下載每張圖片。回傳 (images, image_urls)。"""
+            out_images = []
+            out_image_urls = []
+            try:
+                attachments = await self.asana.get_task_attachments(task_gid)
+                ct_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                          "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp"}
+                to_download: List[tuple] = []  # (name, dl_url, ext)
+                for att in attachments:
+                    name = att.get("name", "")
+                    dl_url = att.get("download_url", "")
+                    if not dl_url:
+                        continue
+                    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+                    if ext not in ct_map:
+                        continue
+                    out_image_urls.append({"name": name, "url": dl_url})
+                    to_download.append((name, dl_url, ext))
+                if to_download:
+                    # 並行下載全部附件
+                    results = await _asyncio.gather(
+                        *[self.asana.download_attachment(url) for _, url, _ in to_download],
+                        return_exceptions=True,
+                    )
+                    for (name, _url, ext), img_data in zip(to_download, results):
+                        if isinstance(img_data, Exception) or not img_data:
+                            continue
+                        out_images.append({
+                            "filename": name,
+                            "data": img_data,
+                            "content_type": ct_map.get(ext, "image/png"),
+                        })
+            except Exception as e:
+                logger.warning("抓取任務附件失敗: %s", e)
+            return out_images, out_image_urls
+
+        (comments_str, stories_for_kb), (images, image_urls) = await _asyncio.gather(
+            _prep_comments(),
+            _prep_attachments(),
+        )
+
+        # 3) Teams + Email 並行發送（兩邊彼此獨立，可平行）
+        await _asyncio.gather(
+            self._send_teams_notification(
+                reporter_email, issue_id, task_name, permalink, comments_str, image_urls,
+            ),
+            self.email_notifier.send_completion_notification(
+                reporter_email, issue_id, task_name, permalink, comments_str,
+                original_description, images,
+            ),
+            return_exceptions=True,
+        )
+
+        # 4) 處理 IT 知識庫 —— 丟背景跑，不阻塞結案通知（SharePoint 上傳通常慢）
+        if self.knowledge_base:
+            async def _kb_bg():
+                try:
+                    entry = self.knowledge_base.create_entry(
+                        task, reporter_info, stories_for_kb,
+                    )
+                    await self.knowledge_base.save_to_sharepoint(entry)
+                    logger.info("IT 知識庫處理完成: %s", issue_id)
+                except Exception as kb_err:
+                    logger.error("處理 IT 知識庫失敗: %s", kb_err)
+
+            _asyncio.create_task(_kb_bg())
 
     # ── 已通知完成 (task_gid → completed_at) 持久化 ──────────────
     _NOTIFIED_COMPLETIONS_PATH = Path("local_audit_logs") / "notified_completions.json"
