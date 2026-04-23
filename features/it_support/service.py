@@ -830,15 +830,16 @@ class ITSupportService:
         s = _json.dumps(structured, ensure_ascii=False)
         return s
 
-    # ── 評論前綴可見性規則（Secure by default：預設不推播使用者）──────
+    # ── 評論前綴可見性規則（預設推播使用者；AI 雙保險會消毒機敏資訊）─────
     # IT 人員在 Asana 評論前加標籤控制這則評論的傳播：
-    #   [對外] / [reply] / [public]       → 推播使用者 + 進 KB（要再經 AI 消毒）
-    #   [略]   / [skip]                    → 完全忽略（不通知、不進 KB）
-    #   無前綴                             → 只進 SharePoint KB，不通知使用者
-    # 設計意圖：漏加前綴只會「使用者沒看到進度」，不會漏密。
-    # KB 存的是原文（除 [略] 外），以保留內部知識養分；推播給使用者前會再經 AI 消毒。
+    #   [對內] / [內部] / [private] / [internal]  → 只進 SharePoint KB，不推播使用者
+    #   [略]   / [skip]                             → 完全忽略（不通知、不進 KB）
+    #   [對外] / [reply] / [public]                → 明確標為對外（效果同無前綴，但會 strip 前綴）
+    #   無前綴                                      → 推播使用者 + 進 KB（預設行為）
+    # KB 永遠存原文（除 [略] 外）作為知識養分；推播給使用者前一律經 AI 消毒去除敏感資訊。
     _COMMENT_PREFIX_PATTERNS = [
         ("skip", re.compile(r"^\s*\[\s*(略|skip)\s*\]\s*", re.IGNORECASE)),
+        ("internal", re.compile(r"^\s*\[\s*(對內|內部|private|internal)\s*\]\s*", re.IGNORECASE)),
         ("public", re.compile(r"^\s*\[\s*(對外|對外回覆|reply|public)\s*\]\s*", re.IGNORECASE)),
     ]
 
@@ -847,15 +848,16 @@ class ITSupportService:
         """Classify an Asana comment by prefix tag.
         Returns (visibility, cleaned_text).
           visibility ∈ {"public", "internal", "skip"}
-          cleaned_text：已去除前綴的文字。
+          cleaned_text：已去除前綴的文字；無前綴則為原文 strip 後。
+        預設為 "public"（無前綴 → 推播使用者）。
         """
         if not text:
-            return ("internal", "")
+            return ("public", "")
         for label, pattern in cls._COMMENT_PREFIX_PATTERNS:
             m = pattern.match(text)
             if m:
                 return (label, text[m.end():].strip())
-        return ("internal", text.strip())
+        return ("public", text.strip())
 
     async def _redact_sensitive_info(self, text: str) -> Optional[str]:
         """AI 消毒：把對使用者顯示前的文字去除敏感資訊（路徑/密碼/IP/內部系統位址等）。
