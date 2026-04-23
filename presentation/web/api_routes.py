@@ -752,24 +752,33 @@ class APIRoutes:
                 pass
             return resp
 
-        # 正常事件處理
+        # 正常事件處理 —— 立即回 200 並將實際處理丟背景執行，避免 Asana 10 秒 timeout
         try:
             body = await request.get_json()
             events = body.get("events", [])
             if not events:
                 return jsonify({"ok": True})
 
-            logger.info("Asana Webhook 收到 %d 個事件", len(events))
+            logger.info("Asana Webhook 收到 %d 個事件（背景處理）", len(events))
 
             from core.container import get_container
             from features.it_support.service import ITSupportService
             svc: ITSupportService = get_container().get(ITSupportService)
-            result = await svc.handle_webhook_event(events)
 
-            logger.info("Webhook 處理結果: %s", result)
-            return jsonify({"ok": True, **result})
+            async def _bg_process(_events):
+                try:
+                    result = await svc.handle_webhook_event(_events)
+                    logger.info("Webhook 背景處理完成: %s", result)
+                except Exception as bg_err:
+                    logger.error("Webhook 背景處理失敗: %s", bg_err)
+
+            # 不 await，讓它在背景跑；立即 return 200 給 Asana
+            import asyncio as _asyncio
+            _asyncio.create_task(_bg_process(events))
+
+            return jsonify({"ok": True, "queued": len(events)})
         except Exception as e:
-            logger.error("Asana Webhook 處理失敗: %s", e)
+            logger.error("Asana Webhook 接收失敗: %s", e)
             return jsonify({"ok": False, "error": str(e)}), 500
 
     async def asana_webhook_setup(self):
