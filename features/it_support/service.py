@@ -843,12 +843,23 @@ class ITSupportService:
         ("public", re.compile(r"^\s*\[\s*(對外|對外回覆|reply|public)\s*\]\s*", re.IGNORECASE)),
     ]
 
+    # Inline block 支援：[對內]...[/對內] 之間的內容為內部（只進 KB 不推播）
+    _INTERNAL_BLOCK_PATTERN = re.compile(
+        r"\[\s*(?:對內|內部|private|internal)\s*\](.*?)\[\s*/\s*(?:對內|內部|private|internal)\s*\]",
+        re.IGNORECASE | re.DOTALL,
+    )
+    # Fail-safe：未配對的 [對內] 開標記（即只有開沒有收）→ 從這點到結尾全當內部
+    _INTERNAL_OPEN_PATTERN = re.compile(
+        r"\[\s*(?:對內|內部|private|internal)\s*\]",
+        re.IGNORECASE,
+    )
+
     @classmethod
     def _classify_comment_visibility(cls, text: str) -> tuple[str, str]:
-        """Classify an Asana comment by prefix tag.
+        """Classify an Asana comment by whole-comment prefix.
         Returns (visibility, cleaned_text).
           visibility ∈ {"public", "internal", "skip"}
-          cleaned_text：已去除前綴的文字；無前綴則為原文 strip 後。
+          cleaned_text：已去除整則前綴；無前綴則為原文 strip 後。
         預設為 "public"（無前綴 → 推播使用者）。
         """
         if not text:
@@ -858,6 +869,36 @@ class ITSupportService:
             if m:
                 return (label, text[m.end():].strip())
         return ("public", text.strip())
+
+    @classmethod
+    def _split_inline_internal_blocks(cls, text: str) -> tuple[str, list[str]]:
+        """從 public 評論中抽出 inline [對內]...[/對內] blocks。
+        Returns (public_part, internal_parts)。
+        - 配對完整的 block：內容抽到 internal_parts，原位置移除
+        - 未配對的開標記（fail-safe）：從該標記到結尾全視為內部
+        - public_part 會移除多餘空行；內容可能為空字串
+        """
+        if not text:
+            return ("", [])
+        internals: list[str] = []
+
+        def _collect(m: re.Match) -> str:
+            inner = (m.group(1) or "").strip()
+            if inner:
+                internals.append(inner)
+            return ""
+
+        working = cls._INTERNAL_BLOCK_PATTERN.sub(_collect, text)
+        # Fail-safe：剩餘未配對的 [對內] → 整段後半丟到 internal
+        open_match = cls._INTERNAL_OPEN_PATTERN.search(working)
+        if open_match:
+            tail = working[open_match.end():].strip()
+            if tail:
+                internals.append(tail)
+            working = working[:open_match.start()]
+        # 壓掉多餘空行
+        public = re.sub(r"\n\s*\n\s*\n+", "\n\n", working).strip()
+        return (public, internals)
 
     async def _redact_sensitive_info(self, text: str) -> Optional[str]:
         """AI 消毒：把對使用者顯示前的文字去除敏感資訊（路徑/密碼/IP/內部系統位址等）。
@@ -1027,13 +1068,15 @@ class ITSupportService:
                 visibility, cleaned = self._classify_comment_visibility(text)
                 if visibility == "skip":
                     continue
-                # 內部 + 對外都進 KB（前綴已 strip）
+                # internal + public 都進 KB（前綴已 strip；inline blocks 也保留原貌）
                 s_for_kb = dict(s)
                 s_for_kb["text"] = cleaned
                 stories_for_kb.append(s_for_kb)
-                # 只有 [對外] 會給使用者看
-                if visibility == "public" and cleaned:
-                    comment_list_public.append(f"**{author}**: {cleaned}")
+                # 給使用者看的只收 public，且要先抽掉 inline [對內]...[/對內] blocks
+                if visibility == "public":
+                    public_part, _blocks = self._split_inline_internal_blocks(cleaned)
+                    if public_part.strip():
+                        comment_list_public.append(f"**{author}**: {public_part}")
 
             if comment_list_public:
                 raw_public_str = "\n".join(comment_list_public)
@@ -1117,7 +1160,7 @@ class ITSupportService:
             author_name = target_story.get("created_by", {}).get("name", "").strip()
             logger.info("檢測到留言: [%s] %s...", author_name, comment_text[:20])
 
-            # 前綴規則判斷（Secure by default：預設不推播，加 [對外] 才推播）
+            # 整則前綴判斷（預設 public，加 [對內]/[略] 才改變）
             visibility, cleaned_text = self._classify_comment_visibility(comment_text)
             if visibility != "public":
                 logger.info(
@@ -1126,8 +1169,17 @@ class ITSupportService:
                 )
                 return
 
-            # AI 雙保險消毒：即便 IT 加了 [對外]，仍過一次 AI 去除敏感資訊後才推播
-            redacted = await self._redact_sensitive_info(cleaned_text)
+            # 抽出 inline [對內]...[/對內] blocks，剩下的才是真的 public 部分
+            public_text, _inline_internals = self._split_inline_internal_blocks(cleaned_text)
+            if not public_text.strip():
+                logger.info(
+                    "評論無 public 內容（被 inline 內部 block 吃光），跳過推播 Task=%s",
+                    task_gid,
+                )
+                return
+
+            # AI 雙保險消毒：把 public 部分再過一次 AI 去除敏感資訊後才推播
+            redacted = await self._redact_sensitive_info(public_text)
             if redacted is None:
                 logger.warning(
                     "AI 消毒失敗 (fail-safe：不推播) Task=%s, Story=%s", task_gid, story_gid,
