@@ -1270,15 +1270,11 @@ class ITSupportService:
             task_name = reporter_info.get("task_name") or "IT Support Task"
             permalink = reporter_info.get("permalink_url") or ""
             
-            # 發送多管道通知
-            title = f"【IT 通知】單號 {issue_id} 有新回覆"
+            # 評論即時通知：只推 Teams（不發 Email）
+            # 原因：結案通知 email 已彙整所有 [對外] 評論，再發單則評論 email
+            # 會造成 inbox 重複通知。Teams 推播較輕量（即時提示、不塞 inbox），保留。
             link_text = f"\n\n🔗 [查看 Asana 任務]({permalink})" if permalink else ""
             msg_content = f"🔔 **IT 人員已回覆您的提單** (單號: {issue_id})\n\n**{author_name}**: {comment_text}{link_text}"
-            
-            # 1) Email 通知
-            await self.email_notifier.send_custom_notification(reporter_email, title, msg_content)
-            
-            # 2) Teams 推播
             await self._send_teams_push(reporter_email, msg_content)
             
             logger.info("已發送評論通知給提單人 %s (By: %s)", reporter_email, author_name)
