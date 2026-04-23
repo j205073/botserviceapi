@@ -45,6 +45,10 @@ class ITSupportService:
         self._bf_token_cache: dict[str, Any] = {}
         # Webhook handshake secret (stored after Asana sends it)
         self._webhook_secret: Optional[str] = None
+        # 已通知過完成的 task_gid 去重集合（Asana 的 changed 事件會被任何編輯
+        # 觸發，不去重會導致 toggle 打勾/改標籤/改 section 都重複發通知）。
+        # 持久化到 local_audit_logs/notified_tasks.json 避免重啟後失效。
+        self._notified_completed_tasks: set[str] = self._load_notified_tasks()
 
         # 從 config 讀取設定（有傳入時），否則 fallback 到 os.getenv
         if config is not None:
@@ -998,7 +1002,12 @@ class ITSupportService:
         return {"processed": processed, "notified": notified}
 
     async def _handle_task_completed_event(self, task_gid: str):
-        """處理任務完成後的通知與知識庫存檔。"""
+        """處理任務完成後的通知與知識庫存檔。
+        去重策略：同一個 task_gid 只通知一次。Asana 的 changed 事件會被任何
+        編輯觸發（打勾/取消打勾/改標籤/改 section/改 notes），不去重會造成
+        使用者收到大量重複完成通知。
+        """
+        # 早退：任務未完成（取消打勾會進這）
         try:
             logger.info("🔍 開始處理任務完成事件: %s", task_gid)
             task_data = await self.asana.get_task(task_gid)
@@ -1009,6 +1018,11 @@ class ITSupportService:
                 return
         except Exception as e:
             logger.warning("查詢 Asana 任務 %s 失敗: %s", task_gid, e)
+            return
+
+        # 去重：這個 task_gid 已經通知過完成
+        if task_gid in self._notified_completed_tasks:
+            logger.info("⏭️ 任務 %s 已通知過完成，跳過重複通知", task_gid)
             return
 
         # 獲取提單人資訊 TR
@@ -1126,7 +1140,7 @@ class ITSupportService:
         # 4) Email 通知（圖片用 cid 內嵌）
         await self.email_notifier.send_completion_notification(reporter_email, issue_id, task_name, permalink, comments_str, original_description, images)
 
-        # 4) 處理 IT 知識庫
+        # 5) 處理 IT 知識庫
         if self.knowledge_base:
             try:
                 # 使用剛才抓取的 stories (如果有的話)
@@ -1135,6 +1149,42 @@ class ITSupportService:
                 logger.info("IT 知識庫處理完成: %s", issue_id)
             except Exception as kb_err:
                 logger.error("處理 IT 知識庫失敗: %s", kb_err)
+
+        # 6) 標記為已通知，避免 Asana 後續 changed 事件（改標籤/section 等）再次觸發
+        self._notified_completed_tasks.add(task_gid)
+        self._save_notified_tasks()
+
+    # ── 已通知完成 task 持久化（防止重複通知）────────────────────
+    _NOTIFIED_TASKS_PATH = Path("local_audit_logs") / "notified_tasks.json"
+
+    @classmethod
+    def _load_notified_tasks(cls) -> set[str]:
+        """從 local_audit_logs/notified_tasks.json 載入已通知的 task_gid 集合。
+        檔案不存在或解析失敗則回傳空集合。
+        """
+        try:
+            if cls._NOTIFIED_TASKS_PATH.exists():
+                with cls._NOTIFIED_TASKS_PATH.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return set(str(x) for x in data)
+        except Exception as e:
+            logger.warning("載入 notified_tasks.json 失敗，使用空集合: %s", e)
+        return set()
+
+    def _save_notified_tasks(self) -> None:
+        """持久化 _notified_completed_tasks 到 JSON。"""
+        try:
+            self._NOTIFIED_TASKS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            # 限制大小避免無限成長（保留最近 5000 筆即綽綽有餘）
+            data = list(self._notified_completed_tasks)
+            if len(data) > 5000:
+                data = data[-5000:]
+                self._notified_completed_tasks = set(data)
+            with self._NOTIFIED_TASKS_PATH.open("w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception as e:
+            logger.warning("儲存 notified_tasks.json 失敗（不影響功能）: %s", e)
 
     async def _handle_story_added_event(self, task_gid: str, story_gid: str):
         """監聽評論，若是 IT 人員留言則通知提單人。"""
