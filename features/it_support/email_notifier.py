@@ -125,6 +125,8 @@ class EmailNotifier:
         """建立任務完成通知郵件。
         images: list of {"filename": str, "data": bytes, "content_type": str}
         """
+        # permalink_url 保留 signature（caller 仍傳值），但不再放進信件內容
+        # （使用者沒 Asana 帳號，連結會看到登入頁；見 memory: feedback_user_notifications_no_asana_link）
         msg = MIMEMultipart("related")
         msg["From"] = self.smtp_user
         msg["To"] = to_email
@@ -143,8 +145,7 @@ class EmailNotifier:
             text_body += f"\n您當初提交的需求內容：\n{description}\n"
         if comments:
             text_body += f"\n處理評論：\n{comments}\n"
-        if permalink_url:
-            text_body += f"  連結：{permalink_url}\n"
+        # 不放 Asana permalink — 使用者沒 Asana 帳號，連結只會看到登入頁
         text_body += (
             f"\n如有其他問題，請在 Teams 中使用 @it 再次提單。\n\n"
             f"台灣林內-TR GPT"
@@ -415,8 +416,7 @@ class EmailNotifier:
         )
         if description:
             text_body += f"\n您提交的需求內容：\n{description}\n"
-        if permalink_url:
-            text_body += f"  Asana 連結：{permalink_url}\n"
+        # 不放 Asana 連結 — 使用者沒 Asana 帳號（見 memory: feedback_user_notifications_no_asana_link）
         text_body += (
             f"\n如需補充資訊或附件，請在 Teams 中直接傳送檔案給 Bot。\n"
             f"處理完成後，系統會再次通知您。\n\n"
@@ -503,18 +503,8 @@ class EmailNotifier:
     </table>
   </td></tr>""")
 
-        # 按鈕
-        if permalink_url:
-            body_parts.append(f"""
-  <tr><td style="padding: 16px 40px 8px;" align="center">
-    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-      <td style="background-color: {_CLR_NAVY}; border-radius: 10px;">
-        <a href="{permalink_url}" style="display: inline-block; padding: 14px 36px;
-           font-family: {_FONT}; color: #ffffff; font-size: 14px; font-weight: 600;
-           text-decoration: none; letter-spacing: 0.5px;">進入任務中心 &rarr;</a>
-      </td>
-    </tr></table>
-  </td></tr>""")
+        # 「進入任務中心」按鈕已移除：使用者沒 Asana 帳號，連結會看到登入頁
+        # （見 memory: feedback_user_notifications_no_asana_link）
 
         # 提示
         body_parts.append(f"""

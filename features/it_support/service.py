@@ -328,7 +328,7 @@ class ITSupportService:
                     f"建立時間: {created_at}\n\n"
                     f"【需求/問題說明】\n{description}\n"
                     + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
-                    + ("\n【知識庫參考（KB-Vector-Service）】\n\n" + kb_section + "\n" if kb_section else "")
+                    + ("\n─────────────── 📚 知識庫參考（KB-Vector-Service）───────────────\n" + kb_section + "\n─────────────────────────────────────────────────────────────────\n" if kb_section else "")
                 )
             else:
                 notes = (
@@ -341,7 +341,7 @@ class ITSupportService:
                     f"建立時間: {created_at}\n\n"
                     f"【需求/問題說明】\n{description}\n"
                     + ("\n【AI 分析（建議/時間/相關面向）】\n\n" + analysis_text + "\n" if analysis_text else "")
-                    + ("\n【知識庫參考（KB-Vector-Service）】\n\n" + kb_section + "\n" if kb_section else "")
+                    + ("\n─────────────── 📚 知識庫參考（KB-Vector-Service）───────────────\n" + kb_section + "\n─────────────────────────────────────────────────────────────────\n" if kb_section else "")
                 )
 
         # 決定 assignee：報到開通指派給指定人員
@@ -736,10 +736,13 @@ class ITSupportService:
                 "- 估計時間：{你產的 time_estimate}\n"
                 "- 相關面向：{你產的 related_areas 用、串接}\n"
                 "\n"
-                "【相關歷史工單（KB 參考）】                        ← 只有 kb_sources 非空才出現\n"
-                "- {kb_answer 整段（若有）}\n"
+                "─────────────── 📚 知識庫參考（KB-Vector-Service）───────────────\n"
+                "- AI 建議：{kb_answer 整段（若有）}\n"
                 "- {title}（相似度 {score:.0%}）\n"
                 "  {preview 截前 80 字}\n"
+                "─────────────────────────────────────────────────────────────────\n"
+                "                                                  ↑ 只有 kb_sources 非空才出現整個區塊（含上下框線）；\n"
+                "                                                    若無資料整段省略不要輸出框線\n"
                 "```\n\n"
                 "規則：\n"
                 "- 每個欄位獨立一行，不要併排\n"
@@ -1267,14 +1270,10 @@ class ITSupportService:
                 return
 
             issue_id = reporter_info.get("issue_id", "UNKNOWN")
-            task_name = reporter_info.get("task_name") or "IT Support Task"
-            permalink = reporter_info.get("permalink_url") or ""
-            
+
             # 評論即時通知：只推 Teams（不發 Email）
-            # 原因：結案通知 email 已彙整所有 [對外] 評論，再發單則評論 email
-            # 會造成 inbox 重複通知。Teams 推播較輕量（即時提示、不塞 inbox），保留。
-            link_text = f"\n\n🔗 [查看 Asana 任務]({permalink})" if permalink else ""
-            msg_content = f"🔔 **IT 人員已回覆您的提單** (單號: {issue_id})\n\n**{author_name}**: {comment_text}{link_text}"
+            # 不放 Asana 任務連結 — 使用者沒 Asana 帳號，連過去只會看到登入頁
+            msg_content = f"🔔 **IT 人員已回覆您的提單** (單號: {issue_id})\n\n**{author_name}**: {comment_text}"
             await self._send_teams_push(reporter_email, msg_content)
             
             logger.info("已發送評論通知給提單人 %s (By: %s)", reporter_email, author_name)
