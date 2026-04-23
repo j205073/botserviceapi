@@ -110,5 +110,8 @@ secrets.json
 credentials.json
 /local_audit_logs
 
+# 大型/測試用 PDF（UUID 命名，通常是暫存檔不進 git）
+docs/*-*-*-*-*.pdf
+
 # Claude Code settings
 .claude/
